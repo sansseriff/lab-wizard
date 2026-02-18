@@ -15,12 +15,12 @@ import numpy as np
 from typing import TYPE_CHECKING, Dict, Any, Generator, Optional
 from dataclasses import dataclass
 
-from utilities.plotter import Plotter
+from lab_wizard.lib.utilities.plotter import Plotter
 
-from instruments.general.vsource import VSource
-from instruments.general.vsense import VSense
+from lab_wizard.lib.instruments.general.vsource import VSource
+from lab_wizard.lib.instruments.general.vsense import VSense
 
-from measurements.general.genericMeasurement import GenericMeasurement
+from lab_wizard.lib.measurements.general.genericMeasurement import GenericMeasurement
 
 if TYPE_CHECKING:
     from iv_curve_setup_template import IVCurveResources, IVCurveParams

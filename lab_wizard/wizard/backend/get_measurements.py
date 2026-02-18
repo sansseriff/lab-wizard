@@ -2,8 +2,6 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import importlib
 import inspect
-import sys
-import builtins
 
 from lab_wizard.wizard.backend.models import FilledReq, MeasurementInfo, Env, MatchingReq
 
@@ -15,18 +13,11 @@ def _extract_instruments_from_template(env: Env, template_file: Path) -> List[Fi
 
     print("running _extract_instruments_from_template")
 
-    # try:
-    # Convert file path to module name, just like in discover_instruments()
+    # Convert file path to module name relative to lib/, then prefix with lab_wizard.lib.
     rel_path = template_file.relative_to(env.base_dir)
     print("rel path is", rel_path)
-    module_name = str(rel_path.with_suffix(""))
-    module_name = module_name.replace("/", ".")
+    module_name = "lab_wizard.lib." + str(rel_path.with_suffix("")).replace("/", ".")
     print("module name is", module_name)
-
-    # Ensure base_dir is on sys.path for import to succeed
-    base_dir_str = str(env.base_dir)
-    if base_dir_str not in sys.path:
-        sys.path.insert(0, base_dir_str)
 
     # Import the module
     module = importlib.import_module(module_name)
@@ -122,29 +113,8 @@ def discover_matching_instruments(env: Env, base_type: type) -> List[MatchingReq
     """
     matches: List[MatchingReq] = []
 
-    base_dir = env.base_dir
     instruments_dir = env.instruments_dir
 
-    # Ensure import path contains the lib root so imports like 'lib.instruments.*' work
-    base_dir_str = str(base_dir.parent) if base_dir.name == "lib" else str(base_dir)
-    if base_dir_str not in sys.path:
-        sys.path.insert(0, base_dir_str)
-
-    # Normalize base_type so class identity matches instrument modules
-    try:
-        bt_mod = getattr(base_type, "__module__", "")
-        bt_name = getattr(base_type, "__name__", None)
-        if isinstance(bt_mod, str) and bt_name and bt_mod.startswith("instruments."):
-            lib_mod = "lib." + bt_mod
-            try:
-                lib_module = importlib.import_module(lib_mod)
-                lib_bt = getattr(lib_module, bt_name, None)
-                if inspect.isclass(lib_bt):
-                    base_type = lib_bt  # type: ignore[assignment]
-            except Exception:
-                pass
-    except Exception:
-        pass
 
     # Subpackages to search
     subpackages = ["sim900", "dbay"]
@@ -153,7 +123,7 @@ def discover_matching_instruments(env: Env, base_type: type) -> List[MatchingReq
         if not pkg_root.exists():
             continue
 
-        package_name = f"lib.instruments.{sub}"
+        package_name = f"lab_wizard.lib.instruments.{sub}"
         for module_name, file_path in _iter_py_modules_under(pkg_root, package_name):
             print("attempting import of ", module_name)
             try:

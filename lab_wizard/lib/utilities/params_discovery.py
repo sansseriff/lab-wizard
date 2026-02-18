@@ -326,3 +326,4 @@ def list_available_types() -> list[str]:
         Sorted list of type strings (e.g., ["dbay", "dac4D", "sim900", ...])
     """
     return sorted(get_type_to_module_map().keys())
+
