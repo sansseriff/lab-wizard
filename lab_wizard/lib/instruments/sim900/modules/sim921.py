@@ -1,10 +1,10 @@
 from typing import Literal, Any
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams
+from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
 from lab_wizard.lib.instruments.sim900.comm import Sim900ChildDep
 from lab_wizard.lib.instruments.sim900.deps import Sim900Dep
 
 
-class Sim921Params(ChildParams["Sim921"]):
+class Sim921Params(SlotLike, ChildParams["Sim921"]):
     """Parameters for SIM921 resistance bridge module"""
 
     type: Literal["sim921"] = "sim921"
@@ -12,7 +12,7 @@ class Sim921Params(ChildParams["Sim921"]):
     num_channels: int = 1
     offline: bool | None = False
     settling_time: float | None = 0.1
-    attribute: str | None = None
+    attribute_name: str | None = None
 
     @property
     def inst(self):
@@ -49,7 +49,7 @@ class Sim921(Child[Sim900Dep, Sim921Params]):
         """
         self.dep = dep
         self.settling_time = params.settling_time
-        self.attribute = params.attribute
+        self.attribute_name = params.attribute_name
         self.slot = params.slot
 
     @property

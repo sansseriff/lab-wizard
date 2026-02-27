@@ -23,15 +23,15 @@ plotter:
     - 6
     dpi: 100
 instruments:
-  10.7.0.88:
+  10.7.0.88:8345:
     type: dbay
-    server_address: 10.7.0.88
-    port: 8345
+    ip_address: 10.7.0.88
+    ip_port: 8345
     children:
       '1':
         type: dac4D
         name: Dac4D
-        num_children: 4
+        num_channels: 4
         children:
           '1':
             type: dac4D_channel
@@ -48,7 +48,7 @@ instruments:
             type: sim928
             offline: false
             settling_time: 0.4
-            attribute: null
+            attribute_name: null
           '5':
             type: sim970
             slot: 0

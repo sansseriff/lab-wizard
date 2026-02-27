@@ -1,17 +1,17 @@
 from lab_wizard.lib.instruments.general.vsource import VSource
 from typing import Literal, Any
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams
+from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
 from lab_wizard.lib.instruments.sim900.comm import Sim900ChildDep
 from lab_wizard.lib.instruments.sim900.deps import Sim900Dep
 
 
-class Sim928Params(ChildParams["Sim928"]):
+class Sim928Params(SlotLike, ChildParams["Sim928"]):
     """Parameters for SIM928 voltage source module"""
 
     type: Literal["sim928"] = "sim928"
     offline: bool | None = False
     settling_time: float | None = 0.4
-    attribute: str | None = None
+    attribute_name: str | None = None
 
     @property
     def inst(self):
@@ -48,7 +48,7 @@ class Sim928(Child[Sim900Dep, Sim928Params], VSource):
         """
         self.dep = dep
         self.settling_time = params.settling_time
-        self.attribute = params.attribute
+        self.attribute_name = params.attribute_name
         self.connected = True
 
     # Implement abstract VSource interface (single-channel instrument)

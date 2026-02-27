@@ -1,8 +1,0 @@
-type: dbay
-server_address: 10.7.0.88
-port: 8345
-children:
-  '1':
-    kind: dac4D
-    # DO NOT EDIT: managed by wizard; path may be renamed automatically.
-    ref: dbay/modules/dac4D_key_1.yml

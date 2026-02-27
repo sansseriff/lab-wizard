@@ -9,6 +9,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
     Child,
     ChildParams,
     CanInstantiate,
+    IPLike,
 )
 from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4DParams, Dac4D
 from lab_wizard.lib.instruments.dbay.modules.dac16d import Dac16DParams, Dac16D
@@ -26,18 +27,19 @@ TChild = TypeVar("TChild", bound=Child[Comm, Any])
 
 
 class DBayParams(
+    IPLike,
     ParentParams["DBay", Comm, DBayChildParams],
     CanInstantiate["DBay"],
 ):
     """Params for DBay controller.
 
     Instantiate via .create_inst() or calling the params object directly.
-    Provide server_address and port for the DBay HTTP server.
+    Provide ip_address and ip_port for the DBay HTTP server.
     """
 
     type: Literal["dbay"] = "dbay"
-    server_address: str = "10.7.0.4"
-    port: int = 8345
+    ip_address: str = "10.7.0.4"
+    ip_port: int = 8345
     children: dict[str, DBayChildParams] = Field(default_factory=dict)
 
     @property
@@ -58,11 +60,11 @@ class DBay(
     """DBay controller - manages DAC modules via HTTP communication."""
 
     def __init__(
-        self, server_address: str, port: int = 8345, params: DBayParams | None = None
+        self, ip_address: str, ip_port: int = 8345, params: DBayParams | None = None
     ):
-        self.server_address = server_address
-        self.port = port
-        self.comm = Comm(server_address, port)
+        self.ip_address = ip_address
+        self.ip_port = ip_port
+        self.comm = Comm(ip_address, ip_port)
         self.children: dict[str, Child[Comm, DBayChildParams]] = {}
         self._module_snapshot: list[Any] | None = None
         if params is not None:
@@ -90,7 +92,7 @@ class DBay(
     ) -> TChild:
         # Ensure params container exists
         if not hasattr(self, "params"):
-            self.params = DBayParams(server_address=self.server_address, port=self.port)
+            self.params = DBayParams(ip_address=self.ip_address, ip_port=self.ip_port)
         self.params.children[key] = params  # type: ignore[assignment]
         child_cls = params.inst
         child = child_cls.from_params_with_dep(self.dep, key, params)  # type: ignore[arg-type]
@@ -147,6 +149,6 @@ class DBay(
 
     @classmethod
     def from_params(cls, params: "DBayParams") -> "DBay":
-        inst = cls(params.server_address, params.port, params)
+        inst = cls(params.ip_address, params.ip_port, params)
         inst.init_children()
         return inst

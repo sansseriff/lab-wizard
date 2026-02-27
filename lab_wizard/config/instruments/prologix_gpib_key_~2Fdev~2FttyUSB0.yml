@@ -1,9 +1,0 @@
-type: prologix_gpib
-port: /dev/ttyUSB0
-baudrate: 115200
-timeout: 1
-children:
-  '5':
-    kind: sim900
-    # DO NOT EDIT: managed by wizard; path may be renamed automatically.
-    ref: sim900/sim900_key_5.yml

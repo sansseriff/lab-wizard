@@ -7,6 +7,11 @@
 			description: 'Start a guided measurement setup.'
 		},
 		{
+			href: '/manage_instruments',
+			label: 'Manage Instruments',
+			description: 'Add, reset, or remove instrument configs for this workstation.'
+		},
+		{
 			href: '/create_custom_resource',
 			label: 'Create Custom Resource',
 			description: 'Define a reusable instrument or component.'

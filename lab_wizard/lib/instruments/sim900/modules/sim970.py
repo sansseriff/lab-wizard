@@ -1,6 +1,7 @@
 from __future__ import annotations
+from pydantic import BaseModel, Field
 from lab_wizard.lib.instruments.general.vsense import VSense
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider
+from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, SlotLike
 from lab_wizard.lib.instruments.sim900.comm import Sim900ChildDep
 from lab_wizard.lib.instruments.sim900.deps import Sim900Dep
 import time
@@ -10,23 +11,29 @@ from typing import Literal, Any, cast, TypeVar
 TChild = TypeVar("TChild", bound=Child[Sim900Dep, Any])
 
 
-class Sim970Params(ChildParams["Sim970"]):
+class Sim970ChannelParams(BaseModel):
+    """Per-channel configuration for a single SIM970 voltmeter channel."""
+
+    attribute_name: str = ""
+    settling_time: float = 0.1
+    max_retries: int = 3
+
+
+class Sim970Params(SlotLike, ChildParams["Sim970"]):
     """Parameters for SIM970 module.
 
-    Unlike the previous version, individual channel params are no longer
-    represented. Channels are automatically materialized inside the Sim970
-    instance based on ``num_channels``. Users access channels via
-    ``sim970.channels[index]``.
+    Per-channel settings (settling time, max retries, attribute name) live in
+    each entry of ``channels``. The number of channels is derived from the
+    length of that list.
     """
 
     type: Literal["sim970"] = "sim970"
     slot: int = 0
-    num_channels: int = 4
+    attribute_name: str = "Sim970"
     offline: bool | None = False
-    settling_time: float = 0.1
-    max_retries: int = 3
-    export_name: str = "Sim970"
-    channel_export_names: list[str] | None = None
+    channels: list[Sim970ChannelParams] = Field(
+        default_factory=lambda: [Sim970ChannelParams() for _ in range(4)]
+    )
 
     @property
     def inst(self):  # type: ignore[override]
@@ -38,19 +45,16 @@ class Sim970Params(ChildParams["Sim970"]):
 
 
 class Sim970Channel(VSense):
-    """Single SIM970 voltmeter channel implementing the VSense interface.
-
-    Now a lightweight object without its own ChildParams; created internally by
-    the parent ``Sim970`` and exposed via ``Sim970.channels``.
-    """
+    """Single SIM970 voltmeter channel implementing the VSense interface."""
 
     def __init__(
-        self, dep: Sim900ChildDep, channel_index: int, settling: float, retries: int
+        self, dep: Sim900ChildDep, channel_index: int, params: Sim970ChannelParams
     ):
         self._dep = dep
         self.channel_index = channel_index
-        self.settling_time = settling
-        self.max_retries = retries
+        self.settling_time = params.settling_time
+        self.max_retries = params.max_retries
+        self.attribute_name = params.attribute_name
         self.connected = True
 
     def disconnect(self) -> bool:  # type: ignore[override]
@@ -77,11 +81,10 @@ class Sim970Channel(VSense):
 
 
 class Sim970(Child[Sim900Dep, Sim970Params], ChannelProvider[Sim970Channel]):
-    """SIM970 module representing a 4-channel voltmeter.
+    """SIM970 module representing a multi-channel voltmeter.
 
-    Channels are now exposed via the ``channels`` list and are not Pydantic
-    Child objects. The previous API that required ``Sim970ChannelParams`` is
-    deprecated.
+    Channels are exposed via the ``channels`` list and created from per-channel
+    ``Sim970ChannelParams`` entries in ``Sim970Params.channels``.
     """
 
     def __init__(
@@ -93,13 +96,11 @@ class Sim970(Child[Sim900Dep, Sim970Params], ChannelProvider[Sim970Channel]):
         self.connected = True
         self.slot = params.slot
         self.channels: list[Sim970Channel] = []
-        for i in range(params.num_channels):
+        for i, ch_params in enumerate(params.channels):
             ch_dep = Sim900ChildDep(
                 parent_dep.serial, parent_dep.gpibAddr, i, offline=params.offline
             )
-            self.channels.append(
-                Sim970Channel(ch_dep, i, params.settling_time, params.max_retries)
-            )
+            self.channels.append(Sim970Channel(ch_dep, i, ch_params))
 
     @property
     def parent_class(self) -> str:

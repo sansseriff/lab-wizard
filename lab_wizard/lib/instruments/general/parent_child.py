@@ -1,6 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar, Generic, Iterable, Set, Type, Self, Iterator
+from typing import Any, TypeVar, Generic, Iterable, Set, Type, Self, Iterator, ClassVar
 import inspect
 from pydantic import BaseModel, model_validator
 
@@ -16,7 +16,7 @@ class Instrument(ABC):
 
 
 I_co = TypeVar("I_co", bound="Child[Any, Any]", covariant=True)
-P_co = TypeVar("P_co", bound="Parent[Any, Any]", covariant=True)
+P_co = TypeVar("P_co", bound="Instrument", covariant=True)
 E_co = TypeVar("E_co", bound="Instrument", covariant=True)
 
 
@@ -40,6 +40,65 @@ class CanInstantiate(Generic[P_co], ABC):
     @abstractmethod
     def create_inst(self) -> P_co:
         # this typically calls self.inst.from_params(self) or similar, possibly using internal deps
+        pass
+
+
+# ----------------------- KeyLike Params Mixins -----------------------
+
+
+class USBLike(BaseModel):
+    """Params mixin for serial/USB instruments.
+
+    The instrument's unique key is its port string (e.g. /dev/ttyUSB0).
+    Inheriting this tells config_io and the UI how to derive and apply keys.
+    """
+
+    port: str = "/dev/ttyUSB0"
+    key_hint: ClassVar[str] = "USB port (e.g. /dev/ttyUSB0)"
+
+    def key_fields(self) -> str:
+        return self.port
+
+    def apply_key(self, key: str) -> None:
+        self.port = key
+
+
+class IPLike(BaseModel):
+    """Params mixin for TCP/IP instruments.
+
+    The instrument's unique key is ip_address:ip_port (e.g. 10.7.0.4:8345).
+    Inheriting this tells config_io and the UI how to derive and apply keys.
+    """
+
+    ip_address: str = "0.0.0.0"
+    ip_port: int = 0
+    key_hint: ClassVar[str] = "IP:port (e.g. 10.7.0.4:8345)"
+
+    def key_fields(self) -> str:
+        return f"{self.ip_address}:{self.ip_port}"
+
+    def apply_key(self, key: str) -> None:
+        host, _, port_str = key.rpartition(":")
+        self.ip_address = host
+        try:
+            self.ip_port = int(port_str)
+        except ValueError:
+            pass
+
+
+class SlotLike(BaseModel):
+    """Params mixin for slot/GPIB-addressed child instruments.
+
+    The key is the slot or GPIB address supplied externally by the parent
+    at instantiation time; no field needs to be updated.
+    """
+
+    key_hint: ClassVar[str] = "Slot or GPIB address (e.g. 4)"
+
+    def key_fields(self) -> str:
+        return ""
+
+    def apply_key(self, key: str) -> None:
         pass
 
 
@@ -312,4 +371,7 @@ __all__ = [
     "ChannelProvider",
     "assert_params_init_alignment",
     "CanInstantiate",
+    "USBLike",
+    "IPLike",
+    "SlotLike",
 ]

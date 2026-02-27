@@ -539,7 +539,7 @@ def find_dict_by_nested_attribute(instruments: str, attribute_name: str):
     for instrument in instruments:
         if isinstance(instrument, dict):
             for key, value in instrument.items():
-                if key == "attribute" and value == attribute_name:
+                if key == "attribute_name" and value == attribute_name:
                     return instrument
                 elif isinstance(value, (list, dict)):
                     result = find_dict_by_nested_attribute(value, attribute_name)

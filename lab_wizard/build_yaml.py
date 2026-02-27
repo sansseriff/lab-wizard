@@ -37,9 +37,9 @@ def create_example_exp() -> Exp:
         },
         plotter={"default": MplPlotter(figure_size=[8, 6], dpi=100)},
         instruments={
-            "10.7.0.88": DBayParams(
-                server_address="10.7.0.88",
-                port=8345,
+            "10.7.0.88:8345": DBayParams(
+                ip_address="10.7.0.88",
+                ip_port=8345,
                 children={"1": Dac4DParams()},
             ),
             "/dev/ttyUSB0": PrologixGPIBParams(

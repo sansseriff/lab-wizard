@@ -1,157 +1,199 @@
 """
 keysight53220A.py
-Author: SNSPD Library Rewrite
-Date: June 4, 2025
 
-Keysight 53220A Universal Counter class.
+Keysight 53220A Universal Counter.
+
+Structured as:
+  - Keysight53220AChannelParams: per-channel configuration
+  - Keysight53220AParams: standalone top-level params with CanInstantiate
+  - _Keysight53220AChannel: per-channel Counter implementation (internal)
+  - Keysight53220A: instrument with ChannelProvider
 """
+from __future__ import annotations
 
 import random
-from typing import Any
-from pydantic import BaseModel
+from typing import Literal
 
-from lab_wizard.lib.instruments.general.visa_inst import VisaInst
+from pydantic import BaseModel, Field
+
+from lab_wizard.lib.instruments.general.visa import VisaDep, LocalVisaDep
 from lab_wizard.lib.instruments.general.counter import Counter
+from lab_wizard.lib.instruments.general.parent_child import (
+    Instrument,
+    CanInstantiate,
+    ChannelProvider,
+    IPLike,
+)
 
 
-class Keysight53220AConfig(BaseModel):
-    """Configuration parameters specific to Keysight 53220A counter."""
+class Keysight53220AChannelParams(BaseModel):
+    """Per-channel configuration for the Keysight 53220A."""
 
-    # Threshold configuration
-    threshold_type: str = "absolute"  # "absolute", "auto", or "sweep"
-    threshold_absolute: float = -50.0  # mV when threshold_type is "absolute"
-    threshold_relative: float = 0.5  # fraction when threshold_type is "auto"
-    threshold_start: float = -100.0  # mV when threshold_type is "sweep"
-    threshold_end: float = -10.0  # mV when threshold_type is "sweep"
-    threshold_steps: int = 5  # number of steps when threshold_type is "sweep"
-
-    # Gate time settings
-    default_gate_time: float = 1.0  # seconds
-
-    # Trigger settings
-    ext_trigger: bool = False
-    trigger_slope: str = "positive"  # "positive" or "negative"
-
-    # Input settings
-    input_coupling: str = "DC"  # "DC" or "AC"
-    input_impedance: str = "50"  # "50" or "1M"
+    attribute_name: str = ""
+    threshold_type: str = "absolute"
+    threshold_absolute: float = -50.0
+    gate_time: float = 1.0
+    trigger_slope: str = "positive"
+    input_coupling: str = "DC"
+    input_impedance: str = "50"
 
 
-class Keysight53220A(Counter):
-    """Class for Keysight 53220A Universal Counter."""
+class _Keysight53220AChannel(Counter):
+    """Single input channel on the Keysight 53220A (internal, no params).
+
+    Receives a shared VisaDep from the parent instrument and addresses
+    hardware using 1-based SCPI channel syntax (@1, @2).
+    """
 
     def __init__(
         self,
-        ip_address: str,
-        port: int = 5025,
-        config: Keysight53220AConfig | None = None,
-        **kwargs: Any,
+        dep: VisaDep,
+        channel_index: int,
+        offline: bool,
+        params: Keysight53220AChannelParams,
     ):
-        """Initialize Keysight 53220A counter."""
-        # Create communication object (composition instead of inheritance)
-        self.comm = VisaInst(ip_address, port, kwargs.get("offline", False))
+        self._dep = dep
+        self.channel_index = channel_index
+        self._scpi_ch = channel_index + 1  # hardware is 1-based
+        self.offline = offline
+        self._gate_time = params.gate_time
+        self._threshold = params.threshold_absolute
+        self.attribute_name = params.attribute_name
+        self.connected = True
 
-        # Store configuration
-        self.config = config or Keysight53220AConfig()
+    def disconnect(self) -> bool:
+        self.connected = False
+        return True
 
-        # Initialize instrument settings from config
-        self._gate_time = self.config.default_gate_time
-        self._threshold = self.config.threshold_absolute
+    def count(self, gate_time: float = 1.0, channel: int | None = None) -> int:
+        if abs(gate_time - self._gate_time) > 0.001:
+            self.set_gate_time(gate_time)
 
-        # Set connected status based on communication object
-        self.connected = not self.comm.offline
+        frequency = self.read_counts()
+        return int(frequency * gate_time)
 
-        # Apply configuration if connected (RAII principle)
+    def read_counts(self) -> float:
+        """Read a single count/frequency measurement on this channel."""
+        if self.offline:
+            return float(random.randint(1000, 10000))
+
+        values_str = self._dep.query(f"MEAS:FREQ? (@{self._scpi_ch})")
+        if not values_str or values_str == "":
+            return 0.0
+
+        return float(str(values_str).split(",")[0])
+
+    def set_gate_time(self, gate_time: float, channel: int | None = None) -> bool:
+        if self.offline:
+            self._gate_time = gate_time
+            return True
+
+        self._dep.write(f"SENS:FREQ:GATE:TIME {gate_time}")
+        self._gate_time = gate_time
+        return True
+
+    def set_threshold(self, threshold: float) -> bool:
+        """Set trigger threshold in mV for this channel."""
+        if self.offline:
+            self._threshold = threshold
+            return True
+
+        threshold_v = threshold / 1000.0
+        self._dep.write(f"INP{self._scpi_ch}:LEV {threshold_v}")
+        self._threshold = threshold
+        return True
+
+
+class Keysight53220AParams(IPLike, BaseModel, CanInstantiate["Keysight53220A"]):
+    """Parameters for Keysight 53220A universal counter.
+
+    Standalone top-level instrument connected via VISA (TCP/IP).
+    Per-channel settings (threshold, gate time, trigger slope, etc.) live in
+    each entry of ``channels``.
+    """
+
+    type: Literal["keysight53220A"] = "keysight53220A"
+    ip_address: str = "10.7.0.114"
+    ip_port: int = 5025
+    offline: bool = False
+    ext_trigger: bool = False
+    channels: list[Keysight53220AChannelParams] = Field(
+        default_factory=lambda: [
+            Keysight53220AChannelParams(),
+            Keysight53220AChannelParams(),
+        ]
+    )
+
+    @property
+    def inst(self) -> type[Keysight53220A]:
+        return Keysight53220A
+
+    def create_inst(self) -> Keysight53220A:
+        return Keysight53220A.from_params(self)
+
+    def __call__(self) -> Keysight53220A:
+        return self.create_inst()
+
+
+class Keysight53220A(Instrument, ChannelProvider[_Keysight53220AChannel]):
+    """Keysight 53220A Universal Counter.
+
+    Uses LocalVisaDep for VISA communication. Channels are exposed via
+    the ChannelProvider interface (e.g., inst[0].count(), inst[1].read_counts()).
+    """
+
+    def __init__(self, dep: VisaDep, params: Keysight53220AParams):
+        self._dep = dep
+        self.params = params
+        self.connected = not params.offline
+
+        self.channels: list[_Keysight53220AChannel] = [
+            _Keysight53220AChannel(
+                dep=dep,
+                channel_index=i,
+                offline=params.offline,
+                params=ch_params,
+            )
+            for i, ch_params in enumerate(params.channels)
+        ]
+
         if self.connected:
             self._apply_configuration()
 
+    @classmethod
+    def from_params(cls, params: Keysight53220AParams) -> Keysight53220A:
+        resource = f"TCPIP::{params.ip_address}::{params.ip_port}::SOCKET"
+        dep = LocalVisaDep(resource=resource, timeout=5.0)
+        return cls(dep, params)
+
     def _apply_configuration(self) -> bool:
-        """Apply the configuration settings to the instrument."""
-        if self.comm.offline:
+        if self.params.offline:
             return True
 
         success = True
-
-        # Apply threshold settings
-        if self.config.threshold_type == "absolute":
-            success &= self.set_threshold(self.config.threshold_absolute)
-
-        # Apply gate time
-        success &= self.set_gate_time(self.config.default_gate_time)
-
-        # Note: Input coupling and impedance methods would need to be implemented
-        # if needed for this specific instrument
+        for ch, ch_params in zip(self.channels, self.params.channels):
+            if ch_params.threshold_type == "absolute":
+                success &= ch.set_threshold(ch_params.threshold_absolute)
+            success &= ch.set_gate_time(ch_params.gate_time)
 
         return success
 
     def disconnect(self) -> bool:
-        """Disconnect from the instrument."""
-        success = self.comm.disconnect()
+        for ch in self.channels:
+            ch.disconnect()
+        try:
+            self._dep.close()
+        except Exception:
+            pass
         self.connected = False
-        return success
-
-    def measure(self, channel: int | None = None) -> float:
-        """Take a single measurement."""
-        return self.read_counts()
-
-    def count(self, gate_time: float = 1.0, channel: int | None = None) -> int:
-        """Count events for a specified gate time."""
-        # Set gate time if different
-        if abs(gate_time - self._gate_time) > 0.001:
-            self.set_gate_time(gate_time)
-
-        # Read the count
-        frequency = self.read_counts()
-        return int(frequency * gate_time)
-
-    def configure_measurement(self, measurement_type: str, **kwargs: Any) -> bool:
-        """Configure the measurement settings."""
-        if self.comm.offline:
-            return True
         return True
 
-    def read_counts(self) -> float:
-        """Read a single count/frequency measurement."""
-        if self.comm.offline:
-            return float(random.randint(1000, 10000))
-
-        # Read measurement
-        values_str = self.comm.query("READ?")
-        if not values_str or values_str == "":
-            return 0.0
-
-        # Parse the response
-        counts = float(str(values_str).split(",")[0])
-        return counts
-
-    def set_threshold(self, threshold: float) -> bool:
-        """Set trigger threshold in mV."""
-        if self.comm.offline:
-            self._threshold = threshold
-            return True
-
-        # Convert to volts
-        threshold_v = threshold / 1000.0
-        success = bool(self.comm.write(f"INP:LEV {threshold_v}"))
-        if success:
-            self._threshold = threshold
-        return success
-
-    def set_gate_time(self, gate_time: float, channel: int | None = None) -> bool:
-        """Set the gate time for counting."""
-        if self.comm.offline:
-            self._gate_time = gate_time
-            return True
-
-        success = bool(self.comm.write(f"SENS:FREQ:GATE:TIME {gate_time}"))
-        if success:
-            self._gate_time = gate_time
-
-        return success
-
     def reset(self) -> bool:
-        """Reset the instrument to default settings."""
-        if self.comm.offline:
+        if self.params.offline:
             return True
+        self._dep.write("*RST")
+        return True
 
-        return bool(self.comm.write("*RST"))
+    def __del__(self):
+        if hasattr(self, "connected") and self.connected:
+            self.disconnect()

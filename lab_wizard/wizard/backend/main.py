@@ -19,12 +19,21 @@ from lab_wizard.wizard.backend.utils_runtime import has_gui_context, green, get_
 
 
 from lab_wizard.wizard.backend.get_measurements import get_measurements, reqs_from_measurement, discover_matching_instruments
+from lab_wizard.lib.utilities.config_io import (
+    get_configured_tree,
+    add_instrument_chain,
+    reinitialize_instrument,
+    remove_instrument,
+)
+from lab_wizard.lib.utilities.params_discovery import get_instrument_metadata
+from pathlib import Path
 
 
 
 from lab_wizard.wizard.backend.location import WEB_DIR
 
 FRAMELESS = False
+ICON_PATH = str(Path(__file__).parent / "static" / "icon.png")
 
 
 # Define the lifespan context manager
@@ -160,16 +169,86 @@ def get_instruments(
 
 @app.get("/api/resources/meta")
 def get_resources_meta(env: Env = Depends(get_env)):
-    # print("getting create resource meta")
-    """Return placeholder metadata for the create custom resource page.
-    Later this can be replaced with schema-based form definitions.
-    """
+    """Return placeholder metadata for the create custom resource page."""
     return {
         "types": [
             {"id": "instrument", "label": "Instrument"},
             {"id": "component", "label": "Component"},
         ]
     }
+
+
+# -------------------- Manage Instruments --------------------
+
+def _config_dir(env: Env) -> str:
+    return str(env.base_dir.parent / "config")
+
+
+@app.get("/api/manage-instruments")
+def api_manage_instruments(env: Env = Depends(get_env)):
+    """Return the configured tree and metadata for all discoverable types."""
+    config_dir = _config_dir(env)
+    tree = get_configured_tree(config_dir)
+    metadata = get_instrument_metadata()
+    return {"tree": tree, "metadata": metadata}
+
+
+from pydantic import BaseModel as _BM
+from typing import List as _List
+
+
+class _ChainStep(_BM):
+    type: str
+    key: str
+    action: str  # "create_new" | "use_existing"
+
+
+class _AddBody(_BM):
+    chain: _List[_ChainStep]
+
+
+class _ResetBody(_BM):
+    type: str
+    key: str
+
+
+class _RemoveBody(_BM):
+    type: str
+    key: str
+
+
+@app.post("/api/manage-instruments/add")
+def api_add_instrument(body: _AddBody, env: Env = Depends(get_env)):
+    """Add an instrument (with optional parent chain creation)."""
+    config_dir = _config_dir(env)
+    try:
+        chain_dicts = [s.model_dump() for s in body.chain]
+        result = add_instrument_chain(config_dir, chain_dicts)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/manage-instruments/reset")
+def api_reset_instrument(body: _ResetBody, env: Env = Depends(get_env)):
+    """Reset an instrument's config to factory defaults (preserves children)."""
+    config_dir = _config_dir(env)
+    try:
+        result = reinitialize_instrument(config_dir, body.type, body.key)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/manage-instruments/remove")
+def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
+    """Remove an instrument from config."""
+    config_dir = _config_dir(env)
+    try:
+        result = remove_instrument(config_dir, body.type, body.key)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # Serve SvelteKit static build from resolved directory at root (mounted last)
@@ -196,13 +275,14 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
         frameless=FRAMELESS,
         easy_drag=False,
     )
+
     # webview.start(debug=False) # NOTE if this is activated, then you don't get graceful shutdown from hitting the close button. (on osx)
     # https://github.com/r0x0r/pywebview/issues/1496#issuecomment-2410471185
 
     # if FRAMELESS:
     #     win.events.before_load += add_buttons
     _win.events.closed += on_closed  # type: ignore[attr-defined]
-    webview.start(storage_path=tempfile.mkdtemp(), debug=debug)
+    webview.start(storage_path=tempfile.mkdtemp(), debug=debug, icon="../static/icon.png")
     _win.evaluate_js("window.special = 3")  # type: ignore[attr-defined]
 
 

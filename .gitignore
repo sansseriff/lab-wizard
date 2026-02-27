@@ -1,9 +1,17 @@
 dbay-backend/
 pyleco/
 
+# macOS metadata
+.DS_Store
+*/.DS_Store
+
 ref/
 
 !ref/snspd_measure_old/
+
+# Project-specific outputs and configs
+projects/*
+!projects/.gitkeep
 
 # Python bytecode / caches
 **/__pycache__/

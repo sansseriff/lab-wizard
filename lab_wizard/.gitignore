@@ -2,6 +2,11 @@ projects/
 
 !projects/.gitkeep
 
+# User-specific instrument and measurement configurations
+config/instruments/*
+config/measurements/*
+config/plotters/*
+
 
 # ignore all __pycache__ directories
 **/__pycache__/

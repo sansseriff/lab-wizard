@@ -11,6 +11,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
     Child,
     ChildParams,
     CanInstantiate,
+    USBLike,
 )
 from lab_wizard.lib.instruments.general.serial import SerialDep, LocalSerialDep
 
@@ -23,6 +24,7 @@ PrologixChildParams = Annotated[Sim900Params, Field(discriminator="type")]
 
 
 class PrologixGPIBParams(
+    USBLike,
     ParentParams["PrologixGPIB", SerialDep, PrologixChildParams],
     CanInstantiate["PrologixGPIB"],
 ):
@@ -33,7 +35,6 @@ class PrologixGPIBParams(
     """
 
     type: Literal["prologix_gpib"] = "prologix_gpib"
-    port: str = "/dev/ttyUSB0"
     baudrate: int = 9600
     timeout: int = 1
     children: dict[str, PrologixChildParams] = Field(default_factory=dict)

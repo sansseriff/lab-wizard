@@ -1,6 +1,6 @@
 from typing import Any, Literal, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lab_wizard.lib.instruments.dbay.addons.vsense import ChSenseState
 from lab_wizard.lib.instruments.dbay.addons.vsource import (
@@ -11,21 +11,28 @@ from lab_wizard.lib.instruments.dbay.addons.vsource import (
 )
 from lab_wizard.lib.instruments.dbay.comm import Comm
 from lab_wizard.lib.instruments.dbay.state import Core
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider
+from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, SlotLike
 from lab_wizard.lib.instruments.general.vsource import VSource
 
 
 # ---------------------- Params & State Models ----------------------
 
 
-class _Dac16DChannel(VSource):
-    """Internal single channel implementation (no params object)."""
+class Dac16DChannelParams(BaseModel):
+    """Per-channel configuration for a single Dac16D output channel."""
 
-    def __init__(self, comm: Comm, module_slot: int, state: ChSourceState):
+    attribute_name: str = ""
+
+
+class _Dac16DChannel(VSource):
+    """Internal single channel implementation."""
+
+    def __init__(self, comm: Comm, module_slot: int, state: ChSourceState, params: Dac16DChannelParams):
         self.comm = comm
         self.module_slot = module_slot
         self.channel_data = state
         self.channel_index = state.index
+        self.attribute_name = params.attribute_name
         self.connected = True
 
     def disconnect(self) -> bool:  # type: ignore[override]
@@ -95,10 +102,12 @@ class _Dac16DChannel(VSource):
             return False
 
 
-class Dac16DParams(ChildParams["Dac16D"]):
+class Dac16DParams(SlotLike, ChildParams["Dac16D"]):
     type: Literal["dac16D"] = "dac16D"
     name: str = "Dac16D"
-    num_channels: int = 16
+    channels: list[Dac16DChannelParams] = Field(
+        default_factory=lambda: [Dac16DChannelParams() for _ in range(16)]
+    )
 
     @property
     def inst(self):  # type: ignore[override]
@@ -122,22 +131,24 @@ class Dac16DState(BaseModel):
 
 
 class Dac16D(Child[Comm, Dac16DParams], ChannelProvider[_Dac16DChannel]):
-    def __init__(self, data: dict[str, Any], comm: Comm):
+    def __init__(self, data: dict[str, Any], comm: Comm, params: Dac16DParams | None = None):
         self.comm = comm
         self.data = Dac16DState(**data)
         self.core = Core(
             slot=self.data.core.slot, type=self.data.core.type, name=self.data.core.name
         )
-        self.params = Dac16DParams()
+        self.params = params if params is not None else Dac16DParams()
         self.connected = True
+        # Pair hardware channel states with per-channel params (by index).
+        hw_channels = self.data.vsource.channels[: len(self.params.channels)]
         self.channels: list[_Dac16DChannel] = [
-            _Dac16DChannel(self.comm, self.core.slot, st)
-            for st in self.data.vsource.channels[: self.params.num_channels]
+            _Dac16DChannel(self.comm, self.core.slot, st, ch_params)
+            for st, ch_params in zip(hw_channels, self.params.channels)
         ]
 
     @property
     def parent_class(self) -> str:
-        return "lib.instruments.dbay.dbay.DBay"
+        return "lab_wizard.lib.instruments.dbay.dbay.DBay"
 
     @classmethod
     def from_params_with_dep(
@@ -154,7 +165,8 @@ class Dac16D(Child[Comm, Dac16DParams], ChannelProvider[_Dac16DChannel]):
             raise ValueError(
                 f"Slot {slot} is not dac16D (found {module_info['core']['type']})"
             )
-        return cls(module_info, parent_dep)
+        dac16d_params = params if isinstance(params, Dac16DParams) else Dac16DParams()
+        return cls(module_info, parent_dep, dac16d_params)
 
     @property
     def dep(self) -> Comm:  # type: ignore[override]
