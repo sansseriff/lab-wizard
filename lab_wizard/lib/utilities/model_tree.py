@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SerializeAsAny, model_validator
 from typing import Any, List, Annotated, Literal
 
 from lab_wizard.lib.utilities.params_discovery import load_params_class
@@ -95,7 +95,7 @@ class Exp(BaseModel):
     saver: dict[str, SaverUnion]
     plotter: dict[str, PlotterUnion]
     # Instruments are loaded dynamically via params_discovery - no static union needed
-    instruments: dict[str, BaseModel]
+    instruments: dict[str, SerializeAsAny[BaseModel]]
 
     @model_validator(mode="before")
     @classmethod

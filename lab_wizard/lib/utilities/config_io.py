@@ -664,6 +664,14 @@ def remove_instrument(
             except OSError:
                 pass
 
+    # Remove any directories that are now empty (deepest first so nested empties collapse).
+    for d in sorted(inst_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if d.is_dir() and not any(d.iterdir()):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
+
     return {"status": "ok", "type": type_str, "key": key}
 
 

@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
+import asyncio
 import multiprocessing
 from fastapi.staticfiles import StaticFiles
 from fastapi import Depends
 import time
+import urllib.request
 try:
     import webview  # type: ignore
 except Exception:  # ImportError or runtime issues shouldn't block headless mode
@@ -39,20 +41,14 @@ ICON_PATH = str(Path(__file__).parent / "static" / "icon.png")
 # Define the lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Code to run on startup
-    # print("Creating database and tables...")
-
-    # run any startup actions here
-    # such as initializing hardware/services
-    # create_db_and_tables()
-
-    # print("Database and tables created.")
-    # Initialize hardware/services once for the process
-    # Initialize process-wide environment state
     app.state.env = Env()
 
-    #cryo_manager = await asyncio.to_thread(CryoRelayManager, FUNCTION_GEN)
-    #app.state.services = Services(cryo=cryo_manager)
+    # Pre-warm the instrument metadata cache in a thread so the first
+    # /api/manage-instruments request is instant.  We do this BEFORE yielding
+    # so the server only starts accepting connections once the cache is hot —
+    # the health-poll in start_window therefore returns OK at exactly the
+    # right moment.
+    await asyncio.to_thread(get_instrument_metadata)
 
     yield
     # Code to run on shutdown (if any)
@@ -96,6 +92,12 @@ class UvicornServer(multiprocessing.Process):
 
 
 # NOTE: Mount StaticFiles AFTER declaring API routes so it doesn't intercept /api/*
+
+
+@app.get("/api/health")
+def health():
+    """Lightweight liveness probe used by start_window to detect server readiness."""
+    return {"status": "ok"}
 
 
 # --- Placeholder API routes for frontend pages ---
@@ -255,13 +257,25 @@ def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="frontend")
 
 
+def _wait_for_server(url: str, timeout: float = 15.0) -> bool:
+    """Poll a health URL until it returns 200 or the timeout expires."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=1) as r:
+                if r.status == 200:
+                    return True
+        except Exception:
+            time.sleep(0.05)
+    return False
+
+
 def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
     if webview is None:
         raise RuntimeError("pywebview is not available; cannot start UI window")
 
-    # NOTE: you NEED this on some computers. If the fastapi server isn't ready, then the webview hangs with a blank white page. 
-    time.sleep(0.3) 
-    # TODO: figure out how to send a message from fastapi to pywebview that it's ready
+    health_url = url_to_load.rstrip("/") + "/api/health"
+    _wait_for_server(health_url)
     
     def on_closed():
         pipe_send.send("closed")
@@ -347,9 +361,9 @@ if __name__ == "__main__":
 
         instance.stop()
     else:
-        # Headless/SSH/no-UI: print URL and keep server alive until Ctrl+C
-        # Small delay so the server is responsive when user clicks the URL
-        time.sleep(0.3)
+        # Headless/SSH/no-UI: wait until the server is actually ready, then print URLs.
+        health_url = f"http://localhost:{server_port}/api/health"
+        _wait_for_server(health_url)
         print("\nNo UI context detected or --no-ui set.")
         # Enumerate all non-loopback IPv4s and print URLs
         ips = get_ipv4_addresses()

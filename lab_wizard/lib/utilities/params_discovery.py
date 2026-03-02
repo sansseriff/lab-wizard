@@ -45,6 +45,7 @@ CACHE_FILE = CACHE_DIR / "params_cache.json"
 # In-memory caches
 _loaded_params: dict[str, type] = {}
 _type_to_module: dict[str, dict[str, Any]] | None = None
+_instrument_metadata: dict[str, dict[str, Any]] | None = None
 
 
 def _get_instruments_dir() -> Path:
@@ -295,9 +296,10 @@ def get_config_folder(params_cls: type) -> str | None:
 
 def clear_cache() -> None:
     """Clear both in-memory and disk caches."""
-    global _type_to_module, _loaded_params
+    global _type_to_module, _loaded_params, _instrument_metadata
     _type_to_module = None
     _loaded_params = {}
+    _instrument_metadata = None
     if CACHE_FILE.exists():
         try:
             CACHE_FILE.unlink()
@@ -357,7 +359,13 @@ def get_instrument_metadata() -> dict[str, dict[str, Any]]:
     ``defaults`` is the model_dump() of a default-constructed Params instance.
     Types whose Params class requires non-default arguments will have
     defaults={} (construction failure is silently ignored).
+
+    Result is cached in-process; call clear_cache() to invalidate.
     """
+    global _instrument_metadata
+    if _instrument_metadata is not None:
+        return _instrument_metadata
+
     type_map = get_type_to_module_map()
 
     # Build child_types (inverse of parent_type)
@@ -391,5 +399,6 @@ def get_instrument_metadata() -> dict[str, dict[str, Any]]:
             "key_hint": key_hint,
         }
 
+    _instrument_metadata = result
     return result
 

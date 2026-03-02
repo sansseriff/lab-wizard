@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-pydantic-yaml = { git = "https://github.com/NowanIlfideme/pydantic-yaml", rev = "main" }
+pydantic-yaml = { git = "https://github.com/sansseriff/pydantic-yaml", rev = "main" }
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]
