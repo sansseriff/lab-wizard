@@ -4,16 +4,23 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
+import logging
 from textwrap import indent
 from typing import Any, cast
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
 
-from lab_wizard.lib.utilities.config_io import load_instruments
+from lab_wizard.lib.utilities.config_io import (
+    load_instruments,
+    model_to_commented_map,
+    to_commented_yaml_value,
+)
 from lab_wizard.lib.utilities.params_discovery import get_parent_chain, get_type_to_module_map
 from lab_wizard.wizard.backend.get_measurements import get_measurements, reqs_from_measurement
 from lab_wizard.wizard.backend.models import Env, FilledReq
+
+logger = logging.getLogger("lab_wizard.wizard.backend.project_generation")
 
 
 class SelectedNodeRef(BaseModel):
@@ -448,7 +455,8 @@ def _default_project_yaml(measurement_name: str, instruments: dict[str, Any]) ->
         },
         "plotter": {"default": {"type": "mpl_plotter", "figure_size": [8, 6], "dpi": 100}},
         "instruments": {
-            key: value.model_dump(exclude_none=True) for key, value in instruments.items()
+            key: model_to_commented_map(value, exclude_none=True)
+            for key, value in instruments.items()
         },
     }
 
@@ -475,6 +483,7 @@ def generate_measurement_project(
     projects_dir: Path,
     req: GenerateProjectRequest,
 ) -> dict[str, Any]:
+    logger.info("Generating project for measurement '%s'", req.measurement_name)
     instruments = load_instruments(config_dir)
     all_nodes = _walk_tree(instruments)
 
@@ -483,6 +492,11 @@ def generate_measurement_project(
     for sel in req.selected_resources:
         selected_map[sel.variable_name] = _resolve_selection_node(sel, all_nodes)
         selected_channels[sel.variable_name] = sel.channel_index
+    logger.debug(
+        "Resolved %d selected resources for measurement '%s'",
+        len(selected_map),
+        req.measurement_name,
+    )
     requirements = _requirements_for_measurement(config_dir, req.measurement_name)
     template_text = _setup_template_text(config_dir, req.measurement_name)
 
@@ -490,14 +504,15 @@ def generate_measurement_project(
 
     prefix = req.project_prefix or _format_measurement_slug(req.measurement_name)
     project_dir = _create_unique_project_dir(projects_dir, prefix)
+    logger.info("Created project directory %s", project_dir)
 
     yaml_payload = _default_project_yaml(req.measurement_name, subset)
     yaml_path = project_dir / f"{project_dir.name}.yaml"
-    y = YAML(typ="safe")
+    y = YAML(typ="rt")
     y.default_flow_style = False
     y_writer: Any = y
     with yaml_path.open("w", encoding="utf-8") as f:
-        y_writer.dump(yaml_payload, f)
+        y_writer.dump(to_commented_yaml_value(yaml_payload), f)
 
     setup_code = _compose_setup(
         req.measurement_name,
@@ -509,6 +524,7 @@ def generate_measurement_project(
 
     setup_path = project_dir / f"{req.measurement_name}_setup.py"
     setup_path.write_text(setup_code, encoding="utf-8")
+    logger.info("Generated project artifacts yaml=%s setup=%s", yaml_path, setup_path)
 
     return {
         "status": "ok",

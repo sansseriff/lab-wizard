@@ -2,6 +2,10 @@ projects/
 
 !projects/.gitkeep
 
+
+logs/
+!logs/.gitkeep
+
 # User-specific instrument and measurement configurations
 config/instruments/*
 config/measurements/*

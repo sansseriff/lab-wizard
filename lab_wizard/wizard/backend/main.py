@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request
 from contextlib import asynccontextmanager
 import asyncio
 import multiprocessing
+import logging
+import os
 from fastapi.staticfiles import StaticFiles
 from fastapi import Depends
 import time
@@ -16,6 +18,7 @@ from fastapi import HTTPException
 import argparse
 from typing import Any
 from uvicorn import Config, Server
+from uuid import uuid4
 from lab_wizard.wizard.backend.models import Env, OutputReq
 from lab_wizard.wizard.backend.utils_runtime import has_gui_context, green, get_ipv4_addresses, is_ssh_session
 
@@ -33,18 +36,22 @@ from lab_wizard.wizard.backend.project_generation import (
     generate_measurement_project,
 )
 from pathlib import Path
+from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
 
 
 
-from lab_wizard.wizard.backend.location import WEB_DIR
+from lab_wizard.wizard.backend.location import WEB_DIR, LOG_DIR
 
 FRAMELESS = False
 ICON_PATH = str(Path(__file__).parent / "static" / "icon.png")
+logger = logging.getLogger("lab_wizard.wizard.backend.main")
 
 
 # Define the lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_file = configure_wizard_logging(logs_dir=Path(LOG_DIR))
+    logger.info("Wizard logging initialized at %s", log_file)
     app.state.env = Env()
 
     # Pre-warm the instrument metadata cache in a thread so the first
@@ -62,7 +69,7 @@ async def lifespan(app: FastAPI):
         # app.state.services.cryo.cleanup()
         pass
     except Exception as e:
-        print(f"error {e}")
+        logger.exception("Unhandled shutdown error: %s", e)
 
 
 def get_env(request: Request) -> Env:
@@ -77,6 +84,31 @@ def get_env(request: Request) -> Env:
 
 # Pass the lifespan manager to the FastAPI app
 app = FastAPI(lifespan=lifespan)
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    request_id = uuid4().hex[:12]
+    start = time.perf_counter()
+    logger.debug("request.start id=%s %s %s", request_id, request.method, request.url.path)
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "request.error id=%s %s %s", request_id, request.method, request.url.path
+        )
+        raise
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    logger.info(
+        "request.done id=%s status=%s %s %s %.1fms",
+        request_id,
+        response.status_code,
+        request.method,
+        request.url.path,
+        elapsed_ms,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 class UvicornServer(multiprocessing.Process):
     def __init__(self, config: Config):
@@ -109,7 +141,7 @@ def health():
 def get_measurements_meta(env: Env = Depends(get_env), verbose: bool = False):
     res = get_measurements(env)
     if verbose:
-        print(f"got meta {res}")
+        logger.info("Measurements metadata requested: %s", list(res.keys()))
     return res
 
 
@@ -125,7 +157,7 @@ def get_instruments(
     The function will resolve the MeasurementInfo using the same logic as get_measurements.
     """
 
-    print(f"getting instruments for {name}")
+    logger.info("Getting instruments for measurement '%s'", name)
 
 
     # in order to keep pages stateless, we re-aquire all measurements and then select the requested one
@@ -135,7 +167,7 @@ def get_instruments(
 
     choice = all_meas[name]
     if verbose:
-        print("the choice is", choice)
+        logger.debug("Measurement choice for '%s': %s", name, choice)
 
 
     try: 
@@ -148,7 +180,9 @@ def get_instruments(
             try:
                 matches = discover_matching_instruments(env, base_type)
             except Exception as e:
-                print(f"discovery error for {req.variable_name}: {e}")
+                logger.exception(
+                    "Discovery error for requirement '%s': %s", req.variable_name, e
+                )
                 matches = []
 
             req.matching_instruments = matches
@@ -164,12 +198,12 @@ def get_instruments(
 
 
         if verbose:
-            print("final reqs:", reqs)
+            logger.debug("Final instrument requirements for '%s': %s", name, reqs)
 
         return reqs
     
     except Exception as e:
-        print(f"error {e}")
+        logger.exception("Error getting requirements for measurement '%s': %s", name, e)
         # raise HTTPException(status_code=500, detail=f"Error getting requirements: {e}")
         return {"error": str(e)}
     
@@ -242,6 +276,7 @@ def api_add_instrument(body: _AddBody, env: Env = Depends(get_env)):
         result = add_instrument_chain(config_dir, chain_dicts)
         return result
     except Exception as e:
+        logger.exception("Add instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -253,6 +288,7 @@ def api_reset_instrument(body: _ResetBody, env: Env = Depends(get_env)):
         result = reinitialize_instrument(config_dir, body.type, body.key)
         return result
     except Exception as e:
+        logger.exception("Reset instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -264,6 +300,7 @@ def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
         result = remove_instrument(config_dir, body.type, body.key)
         return result
     except Exception as e:
+        logger.exception("Remove instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -280,6 +317,7 @@ def api_create_measurement_project(
             req=body,
         )
     except Exception as e:
+        logger.exception("Create measurement project API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -351,7 +389,9 @@ def parse_arguments():
 
 if __name__ == "__main__":
     args = parse_arguments()
-    log_level = "debug" if args.debug else None
+    os.environ["LAB_WIZARD_LOG_LEVEL"] = "DEBUG" if args.debug else "INFO"
+    configure_wizard_logging(logs_dir=Path(LOG_DIR), debug=args.debug)
+    log_level = "debug" if args.debug else "info"
 
     server_ip = "0.0.0.0"
     webview_ip = "localhost"
@@ -387,7 +427,7 @@ if __name__ == "__main__":
         window_status = ""
         while "closed" not in window_status:
             window_status = conn_recv.recv()
-            print(f"got {window_status}", flush=True)
+            logger.debug("Window status event: %s", window_status)
 
         instance.stop()
     else:

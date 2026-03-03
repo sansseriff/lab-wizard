@@ -15,7 +15,10 @@ class Sim970ChannelParams(BaseModel):
     """Per-channel configuration for a single SIM970 voltmeter channel."""
 
     attribute_name: str = ""
-    settling_time: float = 0.1
+    settling_time: float = Field(
+        default=0.1,
+        description="(seconds)",
+    )
     max_retries: int = 3
 
 
@@ -31,9 +34,7 @@ class Sim970Params(SlotLike, ChildParams["Sim970"]):
     slot: int = 0
     attribute_name: str = "Sim970"
     offline: bool | None = False
-    channels: list[Sim970ChannelParams] = Field(
-        default_factory=lambda: [Sim970ChannelParams() for _ in range(4)]
-    )
+    channels: list[Sim970ChannelParams] = Field(default_factory=lambda: [Sim970ChannelParams() for _ in range(4)])
 
     @property
     def inst(self):  # type: ignore[override]

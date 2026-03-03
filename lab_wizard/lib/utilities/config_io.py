@@ -38,16 +38,20 @@ Provided functions:
 """
 
 from pathlib import Path
-from typing import Any,Dict,Optional,Tuple,List,cast
+from typing import Any, Dict, Optional, Tuple, List, cast, Iterable
+import logging
 
+from pydantic import BaseModel
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 # Auto-discovery of Params classes (replaces manual TYPE_REGISTRY)
 from lab_wizard.lib.utilities.params_discovery import load_params_class
 
 # KeyLike mixins — used for generic key derivation without hardcoding type strings
 from lab_wizard.lib.instruments.general.parent_child import USBLike, IPLike
+
+logger = logging.getLogger("lab_wizard.lib.utilities.config_io")
 
 
 # ---------------------------- YAML helpers ----------------------------
@@ -65,19 +69,77 @@ def _read_yaml(path: Path) -> Dict[str, Any]:
         return cast(Dict[str, Any], loaded or {})
 
 
-def _write_yaml(path: Path, data: Dict[str, Any]) -> None:
+def _write_yaml(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Convert plain dicts into a CommentedMap so we can attach comments such
     # as "managed by wizard" to specific keys (e.g. child refs).
-    if not isinstance(data, CommentedMap):
-        cm = CommentedMap()
-        for k, v in data.items():
-            cm[k] = v
-        data_to_dump: Any = cm
+    if isinstance(data, CommentedMap):
+        data_to_dump: Any = data
+    elif isinstance(data, dict):
+        data_to_dump = to_commented_yaml_value(data)
     else:
         data_to_dump = data
     with path.open("w", encoding="utf-8") as f:
         _yaml.dump(data_to_dump, f)
+
+
+def _field_description(model: BaseModel, field_name: str) -> str | None:
+    field = type(model).model_fields.get(field_name)
+    if field is None:
+        return None
+    desc = field.description
+    if not desc:
+        return None
+    return desc.strip() or None
+
+
+def to_commented_yaml_value(value: Any) -> Any:
+    """Convert nested Python/Pydantic values into ruamel commented containers."""
+    if isinstance(value, (CommentedMap, CommentedSeq)):
+        return value
+    if isinstance(value, BaseModel):
+        return model_to_commented_map(value)
+    if isinstance(value, dict):
+        cm = CommentedMap()
+        dict_value = cast(dict[Any, Any], value)
+        for k, v in dict_value.items():
+            cm[k] = to_commented_yaml_value(v)
+        return cm
+    if isinstance(value, list):
+        seq = CommentedSeq()
+        seq_any: Any = seq
+        list_value = cast(list[Any], value)
+        for item in list_value:
+            seq_any.append(to_commented_yaml_value(item))
+        return seq
+    return value
+
+
+def model_to_commented_map(
+    model: BaseModel,
+    *,
+    exclude_none: bool = False,
+    exclude_fields: Iterable[str] = (),
+    drop_enabled_true: bool = False,
+) -> CommentedMap:
+    """Build a CommentedMap from a Pydantic model, attaching Field descriptions."""
+    excluded = set(exclude_fields)
+    cm = CommentedMap()
+    for field_name in type(model).model_fields:
+        if field_name in excluded:
+            continue
+        field_value = getattr(model, field_name)
+        if exclude_none and field_value is None:
+            continue
+        if drop_enabled_true and field_name == "enabled" and field_value is True:
+            continue
+        cm[field_name] = to_commented_yaml_value(field_value)
+        description = _field_description(model, field_name)
+        if description:
+            cm.yaml_add_eol_comment(  # type: ignore[no-untyped-call]
+                description, key=field_name
+            )
+    return cm
 
 
 # ---------------------------- Key slug helpers ----------------------------
@@ -233,6 +295,7 @@ def load_instruments(
         key = _key_for_loaded_params(params, type_str)
         instruments[key] = params
 
+    logger.debug("Loaded %d top-level instruments from %s", len(instruments), inst_dir)
     return instruments
 
 
@@ -294,15 +357,18 @@ def _node_filename(type_str: str, key: Optional[str]) -> str:
     return f"{type_str}.yml"
 
 
-def _dump_parent_to_dict(params: Any, child_refs: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
-    data: Dict[str, Any] = params.model_dump()
-    # Persist children as refs list, not embedded dict
-    data.pop("children", None)
-    if data.get("enabled") is True:
-        data.pop("enabled")
+def _dump_parent_to_dict(params: Any, child_refs: Dict[str, Dict[str, str]]) -> CommentedMap:
+    if not isinstance(params, BaseModel):
+        raise TypeError(f"Expected BaseModel params, got {type(params).__name__}")
+    cm = model_to_commented_map(
+        params,
+        exclude_none=False,
+        exclude_fields=("children",),
+        drop_enabled_true=True,
+    )
     if child_refs:
-        data["children"] = child_refs
-    return data
+        cm["children"] = to_commented_yaml_value(child_refs)
+    return cm
 
 
 def _collect_written_paths(
@@ -327,7 +393,7 @@ def _save_node_recursive(
     parent_dir: Path,
     params: Any,
     here_key: Optional[str],
-) -> Tuple[Path, Dict[str, Any]]:
+) -> Tuple[Path, CommentedMap]:
     """Recursively write params and its children to YAML files.
 
     inst_dir  — root instruments/ directory, used to compute ref strings.
@@ -348,29 +414,9 @@ def _save_node_recursive(
         ref = c_path.relative_to(inst_dir).as_posix()
         child_refs[str(key)] = {"kind": str(c_type), "ref": ref}
 
-    data = _dump_parent_to_dict(params, child_refs)
-
-    cm = CommentedMap()
-    for k, v in data.items():
-        cm[k] = v
-    # Annotate each child ref so humans know not to edit it.
-    children_raw: Any = cm.get("children", None)  # type: ignore[call-arg]
-    if isinstance(children_raw, dict):
-        for yaml_key, entry in cast(Dict[Any, Any], children_raw).items():
-            if not isinstance(entry, CommentedMap) and isinstance(entry, dict):
-                tmp_cm: CommentedMap = CommentedMap()
-                for ck, cv in cast(dict[Any, Any], entry).items():
-                    tmp_cm[ck] = cv
-                cast(Dict[Any, Any], children_raw)[yaml_key] = tmp_cm
-                entry = tmp_cm
-            if isinstance(entry, CommentedMap):
-                entry.yaml_set_comment_before_after_key(  # type: ignore[no-untyped-call]
-                    "ref",
-                    before=" DO NOT EDIT: managed by wizard; path may be renamed automatically.",
-                )
-
+    cm = _dump_parent_to_dict(params, child_refs)
     _write_yaml(target, cm)
-    return target, data
+    return target, cm
 
 
 def save_instruments_to_config(instruments: Dict[str, Any], config_dir: str | Path) -> None:
@@ -379,6 +425,7 @@ def save_instruments_to_config(instruments: Dict[str, Any], config_dir: str | Pa
     inst_dir = (base_dir / "instruments").resolve()
     for key, params in (instruments or {}).items():
         _save_node_recursive(inst_dir, inst_dir, params, here_key=str(key))
+    logger.info("Saved %d top-level instruments to %s", len(instruments), inst_dir)
 
 
 # ---------------------------- High-level workflows ----------------------------
@@ -524,6 +571,7 @@ def initialize_instrument(
         _apply_key_to_params(type_str, params, key)
     inst_dir = (Path(config_dir) / "instruments").resolve()
     target, _ = _save_node_recursive(inst_dir, inst_dir, params, here_key=key)
+    logger.info("Initialized instrument type=%s key=%s at %s", type_str, key, target)
     return target
 
 
@@ -589,6 +637,7 @@ def add_instrument_chain(
                 current_parent = new_params
 
     save_instruments_to_config(instruments, config_dir)
+    logger.info("Added/updated instrument chain with %d steps", len(chain))
     return {"status": "ok", "tree": get_configured_tree(config_dir)}
 
 
@@ -620,6 +669,7 @@ def reinitialize_instrument(
         target.children = existing_children  # type: ignore[attr-defined]
 
     save_instruments_to_config(instruments, config_dir)
+    logger.info("Reinitialized instrument type=%s key=%s", type_str, key)
     return {"status": "ok", "type": type_str, "key": key}
 
 
@@ -672,6 +722,7 @@ def remove_instrument(
             except OSError:
                 pass
 
+    logger.info("Removed instrument type=%s key=%s", type_str, key)
     return {"status": "ok", "type": type_str, "key": key}
 
 

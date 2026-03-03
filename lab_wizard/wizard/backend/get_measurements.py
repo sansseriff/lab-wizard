@@ -2,8 +2,11 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import importlib
 import inspect
+import logging
 
 from lab_wizard.wizard.backend.models import FilledReq, MeasurementInfo, Env, MatchingReq
+
+logger = logging.getLogger("lab_wizard.wizard.backend.get_measurements")
 
 
 def _extract_instruments_from_template(env: Env, template_file: Path, verbose: bool = False) -> List[FilledReq]:
@@ -11,20 +14,20 @@ def _extract_instruments_from_template(env: Env, template_file: Path, verbose: b
     required_instruments: List[FilledReq] = []
 
     if verbose:
-        print("running _extract_instruments_from_template")
+        logger.debug("Running template instrument extraction for %s", template_file)
 
     # Convert file path to module name relative to lib/, then prefix with lab_wizard.lib.
     rel_path = template_file.relative_to(env.base_dir)
     if verbose:
-        print("rel path is", rel_path)
+        logger.debug("Template relative path: %s", rel_path)
     module_name = "lab_wizard.lib." + str(rel_path.with_suffix("")).replace("/", ".")
     if verbose:
-        print("module name is", module_name)
+        logger.debug("Importing template module: %s", module_name)
 
     # Import the module
     module = importlib.import_module(module_name)
     if verbose:
-        print("module imported:", module)
+        logger.debug("Imported template module object: %s", module)
 
     # Find the Resources dataclass
     resources_class = None
@@ -38,7 +41,7 @@ def _extract_instruments_from_template(env: Env, template_file: Path, verbose: b
             break
 
     if not resources_class:
-        print(f"Warning: No Resources class found in {template_file}")
+        logger.warning("No Resources class found in %s", template_file)
         return required_instruments
 
     # Extract type hints from the dataclass
@@ -48,7 +51,7 @@ def _extract_instruments_from_template(env: Env, template_file: Path, verbose: b
             continue
 
         if verbose:
-            print("field name is ", field_name, "and field type is", field_type)
+            logger.debug("Resource field '%s' has type %s", field_name, field_type)
         required_instruments.append(
             FilledReq(
                 variable_name=field_name,
@@ -57,7 +60,7 @@ def _extract_instruments_from_template(env: Env, template_file: Path, verbose: b
             ))
 
     if verbose:
-        print("required instruments are", required_instruments)
+        logger.debug("Required instruments from template: %s", required_instruments)
 
     return required_instruments
 
@@ -80,15 +83,15 @@ def reqs_from_measurement(measurement: MeasurementInfo, verbose: bool = False) -
     measurement_dir = measurement.measurement_dir
     template_file = _template_file_for(measurement_dir)
     if verbose:
-        print(f"template file is {template_file}")
+        logger.debug("Template file candidate: %s", template_file)
 
     if not template_file.exists():
-        print("template file does not exist")
+        logger.warning("Template file does not exist: %s", template_file)
         return []
 
     lib_base = _find_lib_base(template_file.parent)
     if lib_base is None:
-        print("could not find lib base")
+        logger.warning("Could not find lib base for template: %s", template_file)
         return []
 
     env = Env(base_dir=lib_base)
@@ -125,11 +128,11 @@ def discover_matching_instruments(env: Env, base_type: type, verbose: bool = Fal
     package_name = "lab_wizard.lib.instruments"
     for module_name, file_path in _iter_py_modules_under(instruments_dir, package_name):
         if verbose:
-            print("attempting import of ", module_name)
+            logger.debug("Attempting instrument module import: %s", module_name)
         try:
             module = importlib.import_module(module_name)
         except Exception as e:
-            print(f"Warning: failed to import {module_name}: {e}")
+            logger.warning("Failed to import %s: %s", module_name, e)
             continue
 
         # Scan classes defined in this module
@@ -164,9 +167,9 @@ def discover_matching_instruments(env: Env, base_type: type, verbose: bool = Fal
                 # obj is not a new-style class that can be used with issubclass
                 continue
 
-    print(f"discovered {len(matches)} matches for base type {base_type}")
+    logger.info("Discovered %d matches for base type %s", len(matches), base_type)
     if verbose:
-        print("matches are", matches)
+        logger.debug("Matches for base type %s: %s", base_type, matches)
     return matches
 
 
@@ -211,7 +214,7 @@ def get_measurements(env: Env) -> Dict[str, MeasurementInfo]:
             )
 
         except Exception as e:
-            print(f"Warning: Could not parse {measurement_dir.name}: {e}")
+            logger.warning("Could not parse measurement %s: %s", measurement_dir.name, e)
             continue
 
     return measurements

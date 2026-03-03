@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib
 import json
 import re
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,7 @@ CACHE_FILE = CACHE_DIR / "params_cache.json"
 _loaded_params: dict[str, type] = {}
 _type_to_module: dict[str, dict[str, Any]] | None = None
 _instrument_metadata: dict[str, dict[str, Any]] | None = None
+logger = logging.getLogger("lab_wizard.lib.utilities.params_discovery")
 
 
 def _get_instruments_dir() -> Path:
@@ -249,7 +251,11 @@ def load_params_class(type_str: str, verbose: bool = False) -> type:
     """Lazily load and cache a Params class by its type string."""
     if type_str in _loaded_params:
         if verbose:
-            print(f"  [cache hit] '{type_str}' -> {_loaded_params[type_str].__name__}")
+            logger.debug(
+                "[cache hit] '%s' -> %s",
+                type_str,
+                _loaded_params[type_str].__name__,
+            )
         return _loaded_params[type_str]
 
     type_map = get_type_to_module_map()
@@ -263,7 +269,12 @@ def load_params_class(type_str: str, verbose: bool = False) -> type:
     info = type_map[type_str]
 
     if verbose:
-        print(f"  [importing] '{type_str}' from {info['module']}.{info['class_name']}")
+        logger.debug(
+            "[importing] '%s' from %s.%s",
+            type_str,
+            info["module"],
+            info["class_name"],
+        )
 
     module = importlib.import_module(info["module"])
     cls = getattr(module, info["class_name"])

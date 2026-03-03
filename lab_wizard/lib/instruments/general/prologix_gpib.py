@@ -36,8 +36,13 @@ class PrologixGPIBParams(
 
     type: Literal["prologix_gpib"] = "prologix_gpib"
     baudrate: int = 9600
-    timeout: int = 1
-    children: dict[str, PrologixChildParams] = Field(default_factory=dict)
+    timeout: int = Field(
+        default=1,
+        description="(seconds)",
+    )
+    children: dict[str, PrologixChildParams] = Field(
+        default_factory=dict,
+    )
 
     @model_validator(mode="after")
     def _validate(self):

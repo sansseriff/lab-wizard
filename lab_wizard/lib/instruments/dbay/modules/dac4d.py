@@ -13,8 +13,9 @@ TChild = TypeVar("TChild", bound=Child[Comm, Any])
 
 class Dac4DChannelParams(BaseModel):
     """Per-channel configuration for a single Dac4D output channel."""
-
-    attribute_name: str = ""
+    attribute_name: str = Field(
+        default="",
+    )
 
 
 class Dac4DChannel(VSource):
@@ -108,9 +109,7 @@ in the children dict, and the Dac4DChannelParams class will be given a resource 
 class Dac4DParams(SlotLike, ChildParams["Dac4D"]):
     type: Literal["dac4D"] = "dac4D"
     name: str = "Dac4D"
-    channels: list[Dac4DChannelParams] = Field(
-        default_factory=lambda: [Dac4DChannelParams() for _ in range(4)]
-    )
+    channels: list[Dac4DChannelParams] = Field(default_factory=lambda: [Dac4DChannelParams() for _ in range(4)])
 
     @property
     def inst(self):  # type: ignore[override]

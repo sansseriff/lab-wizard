@@ -9,7 +9,10 @@ from __future__ import annotations
 import os
 import sys
 import socket
+import logging
 from typing import List, Tuple
+
+logger = logging.getLogger("lab_wizard.wizard.backend.utils_runtime")
 
 
 def is_ssh_session() -> bool:
@@ -82,9 +85,9 @@ def get_ipv4_addresses_detailed() -> List[Tuple[str, str]]:
                     ip = a.address
                     if ip and not _is_loopback(ip):
                         detailed.append((ifname, ip))
-    except Exception:
+    except Exception as e:
         # Fallbacks: produce at least one candidate with a generic name
-        pass
+        logger.debug("psutil interface scan unavailable; using fallback discovery: %s", e)
 
     # If psutil path produced nothing, try hostname and UDP probes
     if not detailed:
@@ -94,8 +97,8 @@ def get_ipv4_addresses_detailed() -> List[Tuple[str, str]]:
             for ip in host_ips:
                 if ip and not _is_loopback(ip):
                     detailed.append(("hostdns", ip))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Hostname IPv4 discovery failed: %s", e)
 
         for probe in ("8.8.8.8", "1.1.1.1"):
             try:
@@ -105,8 +108,8 @@ def get_ipv4_addresses_detailed() -> List[Tuple[str, str]]:
                 s.close()
                 if ip and not _is_loopback(ip):
                     detailed.append(("egress", ip))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Egress IPv4 probe %s failed: %s", probe, e)
 
     # Deduplicate while preserving order
     seen: set[str] = set()

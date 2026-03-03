@@ -30,12 +30,21 @@ class Keysight53220AChannelParams(BaseModel):
     """Per-channel configuration for the Keysight 53220A."""
 
     attribute_name: str = ""
-    threshold_type: str = "absolute"
-    threshold_absolute: float = -50.0
-    gate_time: float = 1.0
-    trigger_slope: str = "positive"
-    input_coupling: str = "DC"
-    input_impedance: str = "50"
+    threshold_type: str = Field(
+        default="absolute",
+        description="absolute/relative",
+    )
+    threshold_absolute: float = Field(
+        default=-50.0,
+        description="(mV)",
+    )
+    gate_time: float = Field(
+        default=1.0,
+        description="(seconds)",
+    )
+    trigger_slope: str = Field(default="positive", description="positive/negative")
+    input_coupling: str = Field(default="DC", description="DC/AC")
+    input_impedance: str = Field(default="50", description="(Ohms)")
 
 
 class Keysight53220AChannel(Counter):

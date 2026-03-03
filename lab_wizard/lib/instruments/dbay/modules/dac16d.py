@@ -21,7 +21,9 @@ from lab_wizard.lib.instruments.general.vsource import VSource
 class Dac16DChannelParams(BaseModel):
     """Per-channel configuration for a single Dac16D output channel."""
 
-    attribute_name: str = ""
+    attribute_name: str = Field(
+        default="",
+    )
 
 
 class Dac16DChannel(VSource):
@@ -105,9 +107,7 @@ class Dac16DChannel(VSource):
 class Dac16DParams(SlotLike, ChildParams["Dac16D"]):
     type: Literal["dac16D"] = "dac16D"
     name: str = "Dac16D"
-    channels: list[Dac16DChannelParams] = Field(
-        default_factory=lambda: [Dac16DChannelParams() for _ in range(16)]
-    )
+    channels: list[Dac16DChannelParams] = Field(default_factory=lambda: [Dac16DChannelParams() for _ in range(16)])
 
     @property
     def inst(self):  # type: ignore[override]

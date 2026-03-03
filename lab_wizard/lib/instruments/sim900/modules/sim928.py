@@ -1,5 +1,6 @@
 from lab_wizard.lib.instruments.general.vsource import VSource
 from typing import Literal, Any
+from pydantic import Field
 from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
 from lab_wizard.lib.instruments.sim900.comm import Sim900ChildDep
 from lab_wizard.lib.instruments.sim900.deps import Sim900Dep
@@ -10,8 +11,11 @@ class Sim928Params(SlotLike, ChildParams["Sim928"]):
 
     type: Literal["sim928"] = "sim928"
     offline: bool | None = False
-    settling_time: float | None = 0.4
-    attribute_name: str | None = None
+    settling_time: float | None = Field(
+        default=0.4,
+        description="(seconds)",
+    )
+    attribute_name: str | None = ""
 
     @property
     def inst(self):

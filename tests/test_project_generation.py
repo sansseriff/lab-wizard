@@ -96,6 +96,8 @@ def test_generate_project_creates_subset_yaml_and_setup(tmp_path: Path) -> None:
     assert "2" in sim900["children"]
     assert sim900["children"]["1"]["type"] == "sim928"
     assert sim900["children"]["2"]["type"] == "sim970"
+    yaml_text = yaml_path.read_text(encoding="utf-8")
+    assert "# (seconds)" in yaml_text
 
     setup_text = setup_path.read_text(encoding="utf-8")
     ast.parse(setup_text)
@@ -111,6 +113,18 @@ def test_generate_project_creates_subset_yaml_and_setup(tmp_path: Path) -> None:
     assert "voltage_source_1 = " in setup_text
     assert "voltage_sense_1 = " in setup_text
     assert ".channels[0]" in setup_text
+
+
+def test_save_instruments_writes_field_description_comments(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    _write_test_config(config_dir)
+
+    inst_dir = config_dir / "instruments"
+    sim928_files = list(inst_dir.rglob("sim928_key_*.yml"))
+    assert sim928_files, "Expected a saved sim928 YAML file"
+    sim928_text = sim928_files[0].read_text(encoding="utf-8")
+    assert "settling_time:" in sim928_text
+    assert "#" in sim928_text
 
 
 def test_generate_project_rejects_wrong_parent_chain(tmp_path: Path) -> None:

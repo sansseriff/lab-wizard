@@ -18,3 +18,4 @@ else:
 
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
 WEB_DIR = os.path.join(BASE_DIR, "static")
+LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(BASE_DIR)), "logs")

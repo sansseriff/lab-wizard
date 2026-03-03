@@ -40,7 +40,8 @@ class DBayParams(
     type: Literal["dbay"] = "dbay"
     ip_address: str = "10.7.0.4"
     ip_port: int = 8345
-    children: dict[str, DBayChildParams] = Field(default_factory=dict)
+    children: dict[str, DBayChildParams] = Field(
+        default_factory=dict)
 
     @property
     def inst(self):  # type: ignore[override]
