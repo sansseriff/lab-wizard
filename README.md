@@ -2,12 +2,23 @@
 
 <img src="icon.png" alt="Lab Wizard icon" width="72" />
 
-Lab Wizard is an experiment setup toolkit for SNSPD measurement workflows.  
-It combines typed instrument models, a YAML-backed instrument configuration tree, and a web wizard that creates timestamped measurement project folders with generated setup code.
+Lab Wizard is an experiment setup toolkit for SNSPD measurement workflows.
+It combines:
+- typed Python instrument models (including parent/child and channel-based instruments),
+- a YAML-backed instrument configuration tree under `lab_wizard/config/instruments`,
+- and a GUI workflow for generating runnable measurement project folders from templates.
 
-The main flow is:
-1. Configure available lab instruments in `lab_wizard/config/instruments`.
-2. Use the wizard UI to choose a measurement type and compatible resources.
-3. Generate a project folder containing a subset YAML and a measurement setup file.
+After installing the library and setting up your Python environment, start the GUI from a terminal:
 
-This repository is designed for local lab automation and iterative experiment development, with strong typing around parent/child instrument relationships and channel-based resource selection.
+`wizard`
+
+The wizard guides the normal lab workflow:
+1. Add (initialize) instruments into the config tree.
+2. Edit instrument parameters so they match your local hardware setup.
+3. Create a new measurement by selecting a template and assigning compatible instrument resources.
+
+Each created measurement gets its own timestamped project folder in `projects/`, including:
+- a YAML file with the selected subset of instrument configuration,
+- a generated `*_setup.py` file that initializes and wires resources for the measurement template.
+
+The goal is to make experiment setup repeatable and explicit while keeping configuration and generated code easy to inspect and modify.
