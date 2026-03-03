@@ -24,7 +24,7 @@ class Dac16DChannelParams(BaseModel):
     attribute_name: str = ""
 
 
-class _Dac16DChannel(VSource):
+class Dac16DChannel(VSource):
     """Internal single channel implementation."""
 
     def __init__(self, comm: Comm, module_slot: int, state: ChSourceState, params: Dac16DChannelParams):
@@ -130,7 +130,7 @@ class Dac16DState(BaseModel):
 # ---------------------------- Channel -----------------------------
 
 
-class Dac16D(Child[Comm, Dac16DParams], ChannelProvider[_Dac16DChannel]):
+class Dac16D(Child[Comm, Dac16DParams], ChannelProvider[Dac16DChannel]):
     def __init__(self, data: dict[str, Any], comm: Comm, params: Dac16DParams | None = None):
         self.comm = comm
         self.data = Dac16DState(**data)
@@ -141,8 +141,8 @@ class Dac16D(Child[Comm, Dac16DParams], ChannelProvider[_Dac16DChannel]):
         self.connected = True
         # Pair hardware channel states with per-channel params (by index).
         hw_channels = self.data.vsource.channels[: len(self.params.channels)]
-        self.channels: list[_Dac16DChannel] = [
-            _Dac16DChannel(self.comm, self.core.slot, st, ch_params)
+        self.channels: list[Dac16DChannel] = [
+            Dac16DChannel(self.comm, self.core.slot, st, ch_params)
             for st, ch_params in zip(hw_channels, self.params.channels)
         ]
 

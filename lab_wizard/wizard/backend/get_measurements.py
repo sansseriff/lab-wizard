@@ -6,22 +6,25 @@ import inspect
 from lab_wizard.wizard.backend.models import FilledReq, MeasurementInfo, Env, MatchingReq
 
 
-def _extract_instruments_from_template(env: Env, template_file: Path) -> List[FilledReq]:
+def _extract_instruments_from_template(env: Env, template_file: Path, verbose: bool = False) -> List[FilledReq]:
     """Extract required instrument types from template file by importing it as a module."""
     required_instruments: List[FilledReq] = []
 
-
-    print("running _extract_instruments_from_template")
+    if verbose:
+        print("running _extract_instruments_from_template")
 
     # Convert file path to module name relative to lib/, then prefix with lab_wizard.lib.
     rel_path = template_file.relative_to(env.base_dir)
-    print("rel path is", rel_path)
+    if verbose:
+        print("rel path is", rel_path)
     module_name = "lab_wizard.lib." + str(rel_path.with_suffix("")).replace("/", ".")
-    print("module name is", module_name)
+    if verbose:
+        print("module name is", module_name)
 
     # Import the module
     module = importlib.import_module(module_name)
-    print("module imported:", module)
+    if verbose:
+        print("module imported:", module)
 
     # Find the Resources dataclass
     resources_class = None
@@ -44,7 +47,8 @@ def _extract_instruments_from_template(env: Env, template_file: Path) -> List[Fi
         if field_name in ["saver", "plotter", "params"]:
             continue
 
-        print("field name is ", field_name, "and field type is", field_type)
+        if verbose:
+            print("field name is ", field_name, "and field type is", field_type)
         required_instruments.append(
             FilledReq(
                 variable_name=field_name,
@@ -52,7 +56,8 @@ def _extract_instruments_from_template(env: Env, template_file: Path) -> List[Fi
                 matching_instruments=[],
             ))
 
-    print("required instruments are", required_instruments)
+    if verbose:
+        print("required instruments are", required_instruments)
 
     return required_instruments
 
@@ -70,11 +75,12 @@ def _find_lib_base(start: Path) -> Optional[Path]:
     return None
 
 
-def reqs_from_measurement(measurement: MeasurementInfo) -> List[FilledReq]:
+def reqs_from_measurement(measurement: MeasurementInfo, verbose: bool = False) -> List[FilledReq]:
     """Return a list of required instrument role names for a measurement."""
     measurement_dir = measurement.measurement_dir
     template_file = _template_file_for(measurement_dir)
-    print(f"template file is {template_file}")
+    if verbose:
+        print(f"template file is {template_file}")
 
     if not template_file.exists():
         print("template file does not exist")
@@ -106,63 +112,61 @@ def _iter_py_modules_under(package_root: Path, package_name: str) -> List[Tuple[
     return modules
 
 
-def discover_matching_instruments(env: Env, base_type: type) -> List[MatchingReq]:
+def discover_matching_instruments(env: Env, base_type: type, verbose: bool = False) -> List[MatchingReq]:
     """Discover instrument classes in lib/instruments that inherit from base_type.
 
-    Currently limited to subpackages: sim900 and dbay per request.
+    Scans the full instruments package tree so top-level instruments
+    (for example keysight53220A) and nested channel classes can participate.
     """
     matches: List[MatchingReq] = []
 
     instruments_dir = env.instruments_dir
 
-
-    # Subpackages to search
-    subpackages = ["sim900", "dbay"]
-    for sub in subpackages:
-        pkg_root = instruments_dir / sub
-        if not pkg_root.exists():
+    package_name = "lab_wizard.lib.instruments"
+    for module_name, file_path in _iter_py_modules_under(instruments_dir, package_name):
+        if verbose:
+            print("attempting import of ", module_name)
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as e:
+            print(f"Warning: failed to import {module_name}: {e}")
             continue
 
-        package_name = f"lab_wizard.lib.instruments.{sub}"
-        for module_name, file_path in _iter_py_modules_under(pkg_root, package_name):
-            print("attempting import of ", module_name)
-            try:
-
-                module = importlib.import_module(module_name)
-            except Exception as e:
-                print(f"Warning: failed to import {module_name}: {e}")
+        # Scan classes defined in this module
+        for name, obj in inspect.getmembers(module, inspect.isclass):
+            # Only consider classes defined in this module
+            if obj.__module__ != module.__name__:
                 continue
 
-            # Scan classes defined in this module
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                # Only consider classes defined in this module
-                if obj.__module__ != module.__name__:
-                    continue
+            # Skip private/internal classes
+            if name.startswith("_"):
+                continue
 
-                # Skip obvious non-instrument bases to reduce noise
-                if name.startswith("_"):
-                    continue
+            # Skip explicit stand-ins/placeholders
+            if getattr(obj, "ignore_in_cli", False):
+                continue
 
-                # Some files have parameter models etc.; we only care about subclasses
-                try:
-                    if issubclass(obj, base_type) and obj is not base_type:
-                        qual = f"{obj.__module__}.{obj.__qualname__}"
-                        friendly = getattr(obj, "friendly_name", name)
-                        matches.append(
-                            MatchingReq(
-                                module=module.__name__,
-                                class_name=name,
-                                qualname=qual,
-                                file_path=file_path,
-                                friendly_name=str(friendly),
-                            )
+            # Some files have parameter models etc.; we only care about subclasses
+            try:
+                if issubclass(obj, base_type) and obj is not base_type:
+                    qual = f"{obj.__module__}.{obj.__qualname__}"
+                    friendly = getattr(obj, "friendly_name", name)
+                    matches.append(
+                        MatchingReq(
+                            module=module.__name__,
+                            class_name=name,
+                            qualname=qual,
+                            file_path=file_path,
+                            friendly_name=str(friendly),
                         )
-                except TypeError:
-                    # obj is not a new-style class that can be used with issubclass
-                    continue
+                    )
+            except TypeError:
+                # obj is not a new-style class that can be used with issubclass
+                continue
 
     print(f"discovered {len(matches)} matches for base type {base_type}")
-    print("matches are", matches)
+    if verbose:
+        print("matches are", matches)
     return matches
 
 

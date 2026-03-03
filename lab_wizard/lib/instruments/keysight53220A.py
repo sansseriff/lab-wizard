@@ -6,7 +6,7 @@ Keysight 53220A Universal Counter.
 Structured as:
   - Keysight53220AChannelParams: per-channel configuration
   - Keysight53220AParams: standalone top-level params with CanInstantiate
-  - _Keysight53220AChannel: per-channel Counter implementation (internal)
+  - Keysight53220AChannel: per-channel Counter implementation
   - Keysight53220A: instrument with ChannelProvider
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ class Keysight53220AChannelParams(BaseModel):
     input_impedance: str = "50"
 
 
-class _Keysight53220AChannel(Counter):
+class Keysight53220AChannel(Counter):
     """Single input channel on the Keysight 53220A (internal, no params).
 
     Receives a shared VisaDep from the parent instrument and addresses
@@ -135,7 +135,7 @@ class Keysight53220AParams(IPLike, BaseModel, CanInstantiate["Keysight53220A"]):
         return self.create_inst()
 
 
-class Keysight53220A(Instrument, ChannelProvider[_Keysight53220AChannel]):
+class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
     """Keysight 53220A Universal Counter.
 
     Uses LocalVisaDep for VISA communication. Channels are exposed via
@@ -147,8 +147,8 @@ class Keysight53220A(Instrument, ChannelProvider[_Keysight53220AChannel]):
         self.params = params
         self.connected = not params.offline
 
-        self.channels: list[_Keysight53220AChannel] = [
-            _Keysight53220AChannel(
+        self.channels: list[Keysight53220AChannel] = [
+            Keysight53220AChannel(
                 dep=dep,
                 channel_index=i,
                 offline=params.offline,

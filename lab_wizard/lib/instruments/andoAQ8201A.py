@@ -12,7 +12,7 @@ from typing import Dict, Any, Tuple
 from pydantic import BaseModel
 
 
-from lib.instruments.general.serial_inst import GPIBmodule
+from lab_wizard.lib.instruments.general.serial_inst import GPIBmodule
 
 
 class AndoAQ8201AParams(BaseModel):

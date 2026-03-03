@@ -17,7 +17,7 @@ class Dac4DChannelParams(BaseModel):
     attribute_name: str = ""
 
 
-class _Dac4DChannel(VSource):
+class Dac4DChannel(VSource):
     """Single output channel for Dac4D (internal helper)."""
 
     def __init__(self, comm: Comm, module_slot: int, state: ChSourceState, params: Dac4DChannelParams):
@@ -131,7 +131,7 @@ class Dac4DState(BaseModel):
 TChild = TypeVar("TChild", bound=Child[Comm, Any])
 
 
-class Dac4D(Child[Comm, Dac4DParams], ChannelProvider[_Dac4DChannel]):
+class Dac4D(Child[Comm, Dac4DParams], ChannelProvider[Dac4DChannel]):
     def __init__(self, data: dict[str, Any], comm: Comm, params: Dac4DParams | None = None):
         self.comm = comm
         self.data = Dac4DState(**data)
@@ -143,8 +143,8 @@ class Dac4D(Child[Comm, Dac4DParams], ChannelProvider[_Dac4DChannel]):
         # Pair hardware channel states with per-channel params (by index).
         # The shorter of the two sequences determines the channel count.
         hw_channels = self.data.vsource.channels[: len(self.params.channels)]
-        self.channels: list[_Dac4DChannel] = [
-            _Dac4DChannel(self.comm, self.core.slot, ch_state, ch_params)
+        self.channels: list[Dac4DChannel] = [
+            Dac4DChannel(self.comm, self.core.slot, ch_state, ch_params)
             for ch_state, ch_params in zip(hw_channels, self.params.channels)
         ]
 

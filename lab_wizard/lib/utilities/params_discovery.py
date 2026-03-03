@@ -245,7 +245,7 @@ def get_type_to_module_map() -> dict[str, dict[str, Any]]:
     return _type_to_module
 
 
-def load_params_class(type_str: str, verbose: bool = True) -> type:
+def load_params_class(type_str: str, verbose: bool = False) -> type:
     """Lazily load and cache a Params class by its type string."""
     if type_str in _loaded_params:
         if verbose:

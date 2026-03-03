@@ -28,6 +28,10 @@ from lab_wizard.lib.utilities.config_io import (
     remove_instrument,
 )
 from lab_wizard.lib.utilities.params_discovery import get_instrument_metadata
+from lab_wizard.wizard.backend.project_generation import (
+    GenerateProjectRequest,
+    generate_measurement_project,
+)
 from pathlib import Path
 
 
@@ -102,9 +106,10 @@ def health():
 
 # --- Placeholder API routes for frontend pages ---
 @app.get("/api/get-measurements")
-def get_measurements_meta(env: Env = Depends(get_env)):
+def get_measurements_meta(env: Env = Depends(get_env), verbose: bool = False):
     res = get_measurements(env)
-    print(f"got meta {res}")
+    if verbose:
+        print(f"got meta {res}")
     return res
 
 
@@ -112,6 +117,7 @@ def get_measurements_meta(env: Env = Depends(get_env)):
 def get_instruments(
     name: str,
     env: Env = Depends(get_env),
+    verbose: bool = False,
 ):
     """Return required instrument role names for a given measurement name.
 
@@ -128,8 +134,9 @@ def get_instruments(
         raise HTTPException(status_code=404, detail=f"Unknown measurement: {name}")
 
     choice = all_meas[name]
+    if verbose:
+        print("the choice is", choice)
 
-    print("the choice is", choice)
 
     try: 
         reqs = reqs_from_measurement(choice)
@@ -155,7 +162,9 @@ def get_instruments(
             matching_instruments=req.matching_instruments
         ) for req in reqs]
 
-        print("final reqs:", reqs)
+
+        if verbose:
+            print("final reqs:", reqs)
 
         return reqs
     
@@ -184,6 +193,11 @@ def get_resources_meta(env: Env = Depends(get_env)):
 
 def _config_dir(env: Env) -> str:
     return str(env.base_dir.parent / "config")
+
+
+def _projects_dir(env: Env) -> Path:
+    # base_dir -> <repo>/lab_wizard/lib ; projects live at <repo>/projects
+    return env.base_dir.parent.parent / "projects"
 
 
 @app.get("/api/manage-instruments")
@@ -249,6 +263,22 @@ def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
     try:
         result = remove_instrument(config_dir, body.type, body.key)
         return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/create-measurement-project")
+def api_create_measurement_project(
+    body: GenerateProjectRequest,
+    env: Env = Depends(get_env),
+):
+    """Create a new timestamped project folder with subset YAML + setup code."""
+    try:
+        return generate_measurement_project(
+            config_dir=Path(_config_dir(env)),
+            projects_dir=_projects_dir(env),
+            req=body,
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

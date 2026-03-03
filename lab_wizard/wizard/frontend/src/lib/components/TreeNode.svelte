@@ -5,6 +5,11 @@
 		fields: Record<string, any>;
 		children: Record<string, TreeItem>;
 	};
+
+	export type TreePathRef = {
+		type: string;
+		key: string;
+	};
 </script>
 
 <script lang="ts">
@@ -16,13 +21,43 @@
 		depth?: number;
 		onReset?: (node: TreeItem) => void;
 		onRemove?: (node: TreeItem) => void;
+		onSelect?: (node: TreeItem, path: TreePathRef[]) => void;
+		isSelectable?: boolean;
+		isCompatible?: (node: TreeItem, path: TreePathRef[]) => boolean;
+		isSelected?: (node: TreeItem, path: TreePathRef[]) => boolean;
+		selectionLabel?: (node: TreeItem, path: TreePathRef[]) => string | null;
+		path?: TreePathRef[];
 	};
 
-	let { node, depth = 0, onReset, onRemove }: Props = $props();
+	let {
+		node,
+		depth = 0,
+		onReset,
+		onRemove,
+		onSelect,
+		isSelectable = false,
+		isCompatible,
+		isSelected,
+		selectionLabel,
+		path = []
+	}: Props = $props();
 
 	let expanded = $state(true);
 	const childEntries = $derived(Object.entries(node.children ?? {}));
 	const hasChildren = $derived(childEntries.length > 0);
+	const currentPath = $derived([...path, { type: node.type, key: node.key }]);
+	const compatible = $derived(
+		isSelectable ? (isCompatible ? isCompatible(node, currentPath) : true) : true
+	);
+	const selected = $derived(
+		isSelectable ? (isSelected ? isSelected(node, currentPath) : false) : false
+	);
+	const selectBadge = $derived(selectionLabel ? selectionLabel(node, currentPath) : null);
+
+	function handleSelect() {
+		if (!isSelectable || !compatible || !onSelect) return;
+		onSelect(node, currentPath);
+	}
 </script>
 
 <div class="relative" style="padding-left: {depth > 0 ? 1.25 : 0}rem;">
@@ -34,7 +69,16 @@
 	{/if}
 
 	<div
-		class="group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition hover:bg-gray-100 dark:hover:bg-gray-800"
+		class="group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition hover:bg-gray-100 dark:hover:bg-gray-800 {isSelectable && !compatible ? 'opacity-45' : ''} {selected ? 'bg-gray-200 dark:bg-gray-700' : ''} {isSelectable && compatible ? 'cursor-pointer' : ''}"
+		role={isSelectable ? 'button' : undefined}
+		aria-disabled={isSelectable && !compatible}
+		onclick={handleSelect}
+		onkeydown={(e) => {
+			if ((e.key === 'Enter' || e.key === ' ') && isSelectable && compatible) {
+				e.preventDefault();
+				handleSelect();
+			}
+		}}
 	>
 		{#if hasChildren}
 			<button
@@ -53,6 +97,13 @@
 
 		<span class="font-medium text-gray-900 dark:text-gray-100">{node.type}</span>
 		<span class="text-xs text-gray-500 dark:text-gray-400">({node.key})</span>
+		{#if selectBadge}
+			<span
+				class="rounded px-1.5 py-0.5 text-[10px] bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300"
+			>
+				{selectBadge}
+			</span>
+		{/if}
 
 		<div class="ml-auto flex gap-1 opacity-0 transition group-hover:opacity-100">
 			{#if onReset}
@@ -79,7 +130,18 @@
 	{#if expanded && hasChildren}
 		<div>
 			{#each childEntries as [_childKey, child]}
-				<Self node={child} depth={depth + 1} {onReset} {onRemove} />
+				<Self
+					node={child}
+					depth={depth + 1}
+					{onReset}
+					{onRemove}
+					{onSelect}
+					{isSelectable}
+					{isCompatible}
+					{isSelected}
+					{selectionLabel}
+					path={currentPath}
+				/>
 			{/each}
 		</div>
 	{/if}
