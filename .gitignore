@@ -21,3 +21,6 @@ projects/*
 .pytest_cache/
 
 
+old/
+
+
