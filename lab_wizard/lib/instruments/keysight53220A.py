@@ -24,6 +24,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
     ChannelProvider,
     IPLike,
 )
+from lab_wizard.lib.utilities.model_tree import Exp
 
 
 class Keysight53220AChannelParams(BaseModel):
@@ -174,6 +175,16 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
         resource = f"TCPIP::{params.ip_address}::{params.ip_port}::SOCKET"
         dep = LocalVisaDep(resource=resource, timeout=5.0)
         return cls(dep, params)
+
+    @classmethod
+    def from_config(cls, exp: Exp, key: str | int) -> "Keysight53220A":
+        norm_key = str(key)
+        raw = exp.instruments[norm_key]
+        if not isinstance(raw, Keysight53220AParams):
+            raise TypeError(
+                f"Expected Keysight53220AParams at exp.instruments[{norm_key!r}]"
+            )
+        return cls.from_params(raw)
 
     def _apply_configuration(self) -> bool:
         if self.params.offline:

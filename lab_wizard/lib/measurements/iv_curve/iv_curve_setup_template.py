@@ -54,7 +54,7 @@ def create_instrument_resources(exp: Exp) -> IVCurveResources:
     voltage_sense_1 = StandInVSense()
 
     # wizard:instantiation:start
-    # wizard inserts instrument unpacking + initialization here
+    # wizard inserts config-backed instrument construction here
     # wizard:instantiation:end
 
     return IVCurveResources(

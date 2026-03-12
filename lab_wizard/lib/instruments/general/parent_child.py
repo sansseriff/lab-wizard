@@ -297,9 +297,10 @@ class Child(Instrument, ABC, Generic[R, P_child]):
 
     P_child: concrete ChildParams subtype describing configuration for this child
 
-    Subclasses implement from_params with their concrete (R, P) and return their
-    own class type. The generic signature with the "cls: type[C]" pattern allows
-    precise return typing while remaining friendly to static type checkers.
+    Older instrument implementations may still use ``from_params_with_dep`` to
+    build a child from a parent dependency plus key. Newer implementations can
+    bypass that pattern and have parents inject more specific comm objects
+    directly during child construction.
     """
 
     @property
@@ -309,18 +310,17 @@ class Child(Instrument, ABC, Generic[R, P_child]):
         pass
 
     @classmethod
-    @abstractmethod
     def from_params_with_dep(
         cls: type[C],
         parent_dep: R,
         key: str,
         params: P_child,
     ) -> C:
-        """Factory constructing the child from dependency + params.
-
-        It's the job of the child in this function to create its own form of the dependency,
-        using the dependency object provided by the parent.
-        """
+        """Compatibility factory for older child construction patterns."""
+        raise NotImplementedError(
+            f"{cls.__name__} no longer uses from_params_with_dep; construct it via "
+            "the parent or via from_config instead."
+        )
 
 
 # ----------------------- ChannelProvider Mixin -----------------------

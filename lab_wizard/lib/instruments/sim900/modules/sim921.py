@@ -1,7 +1,6 @@
-from typing import Literal, Any
+from typing import Literal, Any, cast
 from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
-from lab_wizard.lib.instruments.sim900.comm import Sim900ChildDep
-from lab_wizard.lib.instruments.sim900.deps import Sim900Dep
+from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 
 
 class Sim921Params(SlotLike, ChildParams["Sim921"]):
@@ -19,7 +18,7 @@ class Sim921Params(SlotLike, ChildParams["Sim921"]):
         return Sim921
 
 
-class Sim921(Child[Sim900Dep, Sim921Params]):
+class Sim921(Child[Any, Sim921Params]):
     """
     SIM921 module in the SIM900 mainframe
     Resistance bridge
@@ -30,19 +29,24 @@ class Sim921(Child[Sim900Dep, Sim921Params]):
         return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
     @classmethod
-    def from_params_with_dep(
-        cls, parent_dep: Sim900Dep, key: str, params: ChildParams[Any]
-    ) -> "Sim921":
-        if not isinstance(params, Sim921Params):
-            raise TypeError(
-                f"Sim921.from_params_with_dep expected Sim921Params, got {type(params).__name__}"
-            )
-        dep = Sim900ChildDep(
-            parent_dep.serial, parent_dep.gpibAddr, int(key), offline=params.offline
-        )
-        return cls(dep, params)
+    def from_config(cls, parent: Any, key: str | int) -> "Sim921":
+        norm_key = str(key)
+        existing = getattr(parent, "children", {}).get(norm_key)
+        if existing is not None:
+            if not isinstance(existing, cls):
+                raise TypeError(
+                    f"Expected Sim921 child at {norm_key!r}, got {type(existing).__name__}"
+                )
+            return existing
 
-    def __init__(self, dep: Sim900ChildDep, params: Sim921Params):
+        child_params = parent.params.children[norm_key]
+        if not isinstance(child_params, Sim921Params):
+            raise TypeError(
+                f"Expected Sim921Params at {norm_key!r}, got {type(child_params).__name__}"
+            )
+        return cast("Sim921", parent.init_child_by_key(norm_key))
+
+    def __init__(self, dep: Sim900SlotDep, params: Sim921Params):
         """
         :param comm: Communication object for this module
         :param params: Parameters for the module

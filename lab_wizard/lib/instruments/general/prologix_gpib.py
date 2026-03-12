@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, TypeVar, cast, Any, Literal
 from pydantic import Field, model_validator
 
-from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
+from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params, Sim900
 from lab_wizard.lib.instruments.general.parent_child import (
     Parent,
     ParentParams,
@@ -13,10 +13,13 @@ from lab_wizard.lib.instruments.general.parent_child import (
     CanInstantiate,
     USBLike,
 )
+from lab_wizard.lib.instruments.general.prologix_comm import PrologixControllerDep
 from lab_wizard.lib.instruments.general.serial import SerialDep, LocalSerialDep
+from lab_wizard.lib.instruments.sim900.comm import Sim900MainframeDep
+from lab_wizard.lib.utilities.model_tree import Exp
 
 # TypeVar for method-level inference
-TChild = TypeVar("TChild", bound=Child[SerialDep, Any])
+TChild = TypeVar("TChild", bound=Child[Any, Any])
 
 
 # Union of possible child param types on a serial bus (extend as needed)
@@ -60,41 +63,61 @@ class PrologixGPIBParams(
 
 
 class PrologixGPIB(
-    Parent[SerialDep, PrologixChildParams],
+    Parent[PrologixControllerDep, PrologixChildParams],
     ParentFactory[PrologixGPIBParams, "PrologixGPIB"],
 ):
     """
     PrologixGPIB implements the Parent + ParentFactory interfaces.
-    Children (e.g., Sim900) receive the shared SerialDep serial connection.
+    Children receive progressively more specific comm objects built from the
+    Prologix controller transport.
     """
 
-    def __init__(self, serial_dep: SerialDep, params: PrologixGPIBParams):
+    def __init__(self, controller: PrologixControllerDep, params: PrologixGPIBParams):
         self.params = params
-        self._dep = serial_dep
-        self.children: dict[str, Child[SerialDep, Any]] = {}
+        self._dep = controller
+        self.children: dict[str, Child[Any, Any]] = {}
 
     @property
-    def dep(self) -> SerialDep:
+    def dep(self) -> PrologixControllerDep:
         return self._dep
 
     @classmethod
     def from_params(cls, params: PrologixGPIBParams) -> "PrologixGPIB":
         serial_dep = LocalSerialDep(params.port, params.baudrate, float(params.timeout))
-        inst = cls(serial_dep, params)
-        inst.init_children()
-        return inst
+        controller = PrologixControllerDep(serial_dep)
+        return cls(controller, params)
+
+    @classmethod
+    def from_config(cls, exp: Exp, key: str | int) -> "PrologixGPIB":
+        norm_key = str(key)
+        raw = exp.instruments[norm_key]
+        if not isinstance(raw, PrologixGPIBParams):
+            raise TypeError(
+                f"Expected PrologixGPIBParams at exp.instruments[{norm_key!r}]"
+            )
+        return cls.from_params(raw)
 
     def disconnect(self):
         try:
-            self._dep.close()
+            self.dep.close()
         except Exception:
             pass
 
-    def init_child_by_key(self, key: str) -> Child[SerialDep, Any]:
-        child_params = self.params.children[key]
-        child_cls = child_params.inst
-        child = child_cls.from_params_with_dep(self.dep, key, child_params)
-        self.children[key] = child
+    def _sim900_dep(self, key: str | int):
+        return Sim900MainframeDep(self.dep.addressed(int(key)))
+
+    def init_child_by_key(self, key: str) -> Child[Any, Any]:
+        norm_key = str(key)
+        if norm_key in self.children:
+            return self.children[norm_key]
+
+        child_params = self.params.children[norm_key]
+        if not isinstance(child_params, Sim900Params):
+            raise TypeError(
+                f"Expected Sim900Params at Prologix child {norm_key!r}, got {type(child_params).__name__}"
+            )
+        child = Sim900(self._sim900_dep(norm_key), child_params)
+        self.children[norm_key] = child
         return child
 
     def init_children(self) -> None:
@@ -102,14 +125,13 @@ class PrologixGPIB(
             self.init_child_by_key(key)
 
     def add_child(self, params: ChildParams[TChild], key: str) -> TChild:
-        self.params.children[key] = params  # type: ignore[assignment]
-        child_cls = params.inst
-        child = child_cls.from_params_with_dep(self.dep, key, params)
-        self.children[key] = cast(Child[SerialDep, Any], child)
-        return child
+        norm_key = str(key)
+        self.params.children[norm_key] = params  # type: ignore[assignment]
+        child = self.init_child_by_key(norm_key)
+        return cast(TChild, child)
 
-    def get_child(self, key: str) -> Child[SerialDep, Any] | None:
-        return self.children.get(key)
+    def get_child(self, key: str | int) -> Child[Any, Any] | None:
+        return self.children.get(str(key))
 
     def list_children(self):
         print(f"Prologix Connection ({self.params.port}) Children:")

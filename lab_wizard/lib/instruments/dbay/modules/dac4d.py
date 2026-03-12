@@ -5,7 +5,7 @@ from typing import Literal
 from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, SlotLike
 from lab_wizard.lib.instruments.general.vsource import VSource
 from pydantic import BaseModel, Field
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 # TypeVar for method-level inference
 TChild = TypeVar("TChild", bound=Child[Comm, Any])
@@ -152,16 +152,13 @@ class Dac4D(Child[Comm, Dac4DParams], ChannelProvider[Dac4DChannel]):
         return "lab_wizard.lib.instruments.dbay.dbay.DBay"
 
     @classmethod
-    def from_params_with_dep(
-        cls, parent_dep: Comm, key: str, params: ChildParams[Any]
+    def from_module_info(
+        cls,
+        parent_dep: Comm,
+        slot: int,
+        module_info: dict[str, Any],
+        params: Dac4DParams,
     ) -> "Dac4D":
-        try:
-            slot = int(key)
-        except ValueError:
-            raise TypeError(f"Dac4D requires numeric key for slot, got {key!r}")
-        full = parent_dep.get("full-state")
-        data_list = full.get("data", [])
-        module_info = data_list[slot]
         if module_info["core"]["type"] != "dac4D":
             raise ValueError(
                 f"Slot {slot} is not dac4D (found {module_info['core']['type']})"
@@ -188,8 +185,39 @@ class Dac4D(Child[Comm, Dac4DParams], ChannelProvider[Dac4DChannel]):
                     }
                 )
         module_info["vsource"]["channels"] = vs_channels
+        return cls(module_info, parent_dep, params)
+
+    @classmethod
+    def from_config(cls, parent: Any, key: str | int) -> "Dac4D":
+        norm_key = str(key)
+        existing = getattr(parent, "children", {}).get(norm_key)
+        if existing is not None:
+            if not isinstance(existing, cls):
+                raise TypeError(
+                    f"Expected Dac4D child at {norm_key!r}, got {type(existing).__name__}"
+                )
+            return existing
+
+        child_params = parent.params.children[norm_key]
+        if not isinstance(child_params, Dac4DParams):
+            raise TypeError(
+                f"Expected Dac4DParams at {norm_key!r}, got {type(child_params).__name__}"
+            )
+        return cast("Dac4D", parent.init_child_by_key(norm_key))
+
+    @classmethod
+    def from_params_with_dep(
+        cls, parent_dep: Comm, key: str, params: ChildParams[Any]
+    ) -> "Dac4D":
+        try:
+            slot = int(key)
+        except ValueError:
+            raise TypeError(f"Dac4D requires numeric key for slot, got {key!r}")
+        full = parent_dep.get("full-state")
+        data_list = full.get("data", [])
+        module_info = data_list[slot]
         dac4d_params = params if isinstance(params, Dac4DParams) else Dac4DParams()
-        return cls(module_info, parent_dep, dac4d_params)
+        return cls.from_module_info(parent_dep, slot, module_info, dac4d_params)
 
     @property
     def dep(self) -> Comm:  # type: ignore[override]

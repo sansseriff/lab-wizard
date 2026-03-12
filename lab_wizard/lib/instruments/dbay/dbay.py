@@ -14,6 +14,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
 from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4DParams, Dac4D
 from lab_wizard.lib.instruments.dbay.modules.dac16d import Dac16DParams, Dac16D
 from lab_wizard.lib.instruments.dbay.modules.empty import EmptyParams, Empty
+from lab_wizard.lib.utilities.model_tree import Exp
 
 
 # For now, restrict to Dac4D until other modules are migrated to the new generics.
@@ -68,6 +69,7 @@ class DBay(
         self.comm = Comm(ip_address, ip_port)
         self.children: dict[str, Child[Comm, DBayChildParams]] = {}
         self._module_snapshot: list[Any] | None = None
+        self._full_state_cache: dict[str, Any] | None = None
         if params is not None:
             self.params = params
 
@@ -75,11 +77,38 @@ class DBay(
     def dep(self) -> Comm:
         return self.comm
 
+    @classmethod
+    def from_config(cls, exp: Exp, key: str | int) -> "DBay":
+        norm_key = str(key)
+        raw = exp.instruments[norm_key]
+        if not isinstance(raw, DBayParams):
+            raise TypeError(f"Expected DBayParams at exp.instruments[{norm_key!r}]")
+        return cls.from_params(raw)
+
+    def _full_state(self) -> dict[str, Any]:
+        if self._full_state_cache is None:
+            self._full_state_cache = self.comm.get("full-state")
+        return self._full_state_cache
+
+    def _module_info(self, slot: int) -> dict[str, Any]:
+        data_list = self._full_state().get("data", [])
+        return cast(dict[str, Any], data_list[slot])
+
     def init_child_by_key(self, key: str) -> Child[Comm, Any]:
-        params = self.params.children[key]
-        child_cls = params.inst
-        child = child_cls.from_params_with_dep(self.dep, key, params)  # type: ignore[arg-type]
-        self.children[key] = cast(Child[Comm, Any], child)
+        norm_key = str(key)
+        if norm_key in self.children:
+            return self.children[norm_key]
+
+        params = self.params.children[norm_key]
+        slot = int(norm_key)
+        module_info = self._module_info(slot)
+        if isinstance(params, Dac4DParams):
+            child = Dac4D.from_module_info(self.dep, slot, module_info, params)
+        elif isinstance(params, Dac16DParams):
+            child = Dac16D.from_module_info(self.dep, slot, module_info, params)
+        else:
+            child = Empty()
+        self.children[norm_key] = cast(Child[Comm, Any], child)
         return child
 
     def init_children(self) -> None:
@@ -94,15 +123,14 @@ class DBay(
         # Ensure params container exists
         if not hasattr(self, "params"):
             self.params = DBayParams(ip_address=self.ip_address, ip_port=self.ip_port)
-        self.params.children[key] = params  # type: ignore[assignment]
-        child_cls = params.inst
-        child = child_cls.from_params_with_dep(self.dep, key, params)  # type: ignore[arg-type]
-        self.children[key] = cast(Child[Comm, Any], child)
-        return child
+        norm_key = str(key)
+        self.params.children[norm_key] = params  # type: ignore[assignment]
+        child = self.init_child_by_key(norm_key)
+        return cast(TChild, child)
 
     # Back-compat helpers
     def load_full_state(self) -> None:
-        response = self.comm.get("full-state")
+        response = self._full_state()
         data: list[dict[str, dict[str, Any]]] = response.get("data", [])
         # Make a simple snapshot list so previous callers can list modules
         snapshot: list[Any] = []
@@ -150,6 +178,4 @@ class DBay(
 
     @classmethod
     def from_params(cls, params: "DBayParams") -> "DBay":
-        inst = cls(params.ip_address, params.ip_port, params)
-        inst.init_children()
-        return inst
+        return cls(params.ip_address, params.ip_port, params)

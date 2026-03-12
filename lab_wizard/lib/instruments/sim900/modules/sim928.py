@@ -1,9 +1,8 @@
 from lab_wizard.lib.instruments.general.vsource import VSource
-from typing import Literal, Any
+from typing import Literal, Any, cast
 from pydantic import Field
 from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
-from lab_wizard.lib.instruments.sim900.comm import Sim900ChildDep
-from lab_wizard.lib.instruments.sim900.deps import Sim900Dep
+from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 
 
 class Sim928Params(SlotLike, ChildParams["Sim928"]):
@@ -22,7 +21,7 @@ class Sim928Params(SlotLike, ChildParams["Sim928"]):
         return Sim928
 
 
-class Sim928(Child[Sim900Dep, Sim928Params], VSource):
+class Sim928(Child[Any, Sim928Params], VSource):
     """
     SIM928 module in the SIM900 mainframe
     Voltage source
@@ -33,19 +32,24 @@ class Sim928(Child[Sim900Dep, Sim928Params], VSource):
         return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
     @classmethod
-    def from_params_with_dep(
-        cls, parent_dep: Sim900Dep, key: str, params: ChildParams[Any]
-    ) -> "Sim928":
-        if not isinstance(params, Sim928Params):
-            raise TypeError(
-                f"Sim928.from_params_with_dep expected Sim928Params, got {type(params).__name__}"
-            )
-        dep = Sim900ChildDep(
-            parent_dep.serial, parent_dep.gpibAddr, int(key), offline=params.offline
-        )
-        return cls(dep, params)
+    def from_config(cls, parent: Any, key: str | int) -> "Sim928":
+        norm_key = str(key)
+        existing = getattr(parent, "children", {}).get(norm_key)
+        if existing is not None:
+            if not isinstance(existing, cls):
+                raise TypeError(
+                    f"Expected Sim928 child at {norm_key!r}, got {type(existing).__name__}"
+                )
+            return existing
 
-    def __init__(self, dep: Sim900ChildDep, params: Sim928Params):
+        child_params = parent.params.children[norm_key]
+        if not isinstance(child_params, Sim928Params):
+            raise TypeError(
+                f"Expected Sim928Params at {norm_key!r}, got {type(child_params).__name__}"
+            )
+        return cast("Sim928", parent.init_child_by_key(norm_key))
+
+    def __init__(self, dep: Sim900SlotDep, params: Sim928Params):
         """
         :param comm: Communication object for this module
         :param params: Parameters for the module
@@ -59,15 +63,15 @@ class Sim928(Child[Sim900Dep, Sim928Params], VSource):
     def set_voltage(self, voltage: float) -> bool:  # type: ignore[override]
         apply_voltage = f"{voltage:0.3f}"
         result = self.dep.write(f"VOLT {apply_voltage}")
-        return result is not None and result is not False
+        return result is not False
 
     def turn_on(self) -> bool:  # type: ignore[override]
         result = self.dep.write("OPON")
-        return result is not None and result is not False
+        return result is not False
 
     def turn_off(self) -> bool:  # type: ignore[override]
         result = self.dep.write("OPOF")
-        return result is not None and result is not False
+        return result is not False
 
     def disconnect(self) -> bool:  # type: ignore[override]
         self.connected = False

@@ -1,14 +1,3 @@
-from lab_wizard.lib.instruments.general.parent_child import Dependency
-from lab_wizard.lib.instruments.general.serial import SerialDep
+from lab_wizard.lib.instruments.sim900.comm import Sim900MainframeDep as Sim900Dep
 
-
-class Sim900Dep(Dependency):
-    """Lightweight dependency object passed to SIM900 modules.
-
-    Holds shared SerialDep and the mainframe GPIB address.
-    Safe to import at runtime (no circular deps).
-    """
-
-    def __init__(self, parent_dep: SerialDep, gpibAddr: int):
-        self.serial = parent_dep
-        self.gpibAddr = gpibAddr
+__all__ = ["Sim900Dep"]

@@ -2,13 +2,12 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, SlotLike
-from lab_wizard.lib.instruments.sim900.comm import Sim900ChildDep
-from lab_wizard.lib.instruments.sim900.deps import Sim900Dep
+from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 import time
 import numpy as np
 from typing import Literal, Any, cast, TypeVar
 
-TChild = TypeVar("TChild", bound=Child[Sim900Dep, Any])
+TChild = TypeVar("TChild", bound=Child[Any, Any])
 
 
 class Sim970ChannelParams(BaseModel):
@@ -49,9 +48,10 @@ class Sim970Channel(VSense):
     """Single SIM970 voltmeter channel implementing the VSense interface."""
 
     def __init__(
-        self, dep: Sim900ChildDep, channel_index: int, params: Sim970ChannelParams
+        self, dep: Sim900SlotDep, channel_index: int, params: Sim970ChannelParams
     ):
         self._dep = dep
+        self.slot = dep.slot
         self.channel_index = channel_index
         self.settling_time = params.settling_time
         self.max_retries = params.max_retries
@@ -81,7 +81,7 @@ class Sim970Channel(VSense):
             raise ValueError(f"Could not parse voltage reading: {volts}")
 
 
-class Sim970(Child[Sim900Dep, Sim970Params], ChannelProvider[Sim970Channel]):
+class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
     """SIM970 module representing a multi-channel voltmeter.
 
     Channels are exposed via the ``channels`` list and created from per-channel
@@ -89,43 +89,42 @@ class Sim970(Child[Sim900Dep, Sim970Params], ChannelProvider[Sim970Channel]):
     """
 
     def __init__(
-        self, dep: Sim900ChildDep, parent_dep: Sim900Dep, params: Sim970Params
+        self, dep: Sim900SlotDep, params: Sim970Params
     ):
         self._dep = dep
-        self._parent_dep = parent_dep
         self.params = params
         self.connected = True
-        self.slot = params.slot
+        self.slot = dep.slot
         self.channels: list[Sim970Channel] = []
         for i, ch_params in enumerate(params.channels):
-            ch_dep = Sim900ChildDep(
-                parent_dep.serial, parent_dep.gpibAddr, i, offline=params.offline
-            )
-            self.channels.append(Sim970Channel(ch_dep, i, ch_params))
+            self.channels.append(Sim970Channel(dep, i, ch_params))
 
     @property
     def parent_class(self) -> str:
         return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
     @classmethod
-    def from_params_with_dep(
-        cls, parent_dep: Sim900Dep, key: str, params: ChildParams[Any]
-    ) -> "Sim970":
-        if not isinstance(params, Sim970Params):
+    def from_config(cls, parent: Any, key: str | int) -> "Sim970":
+        norm_key = str(key)
+        existing = getattr(parent, "children", {}).get(norm_key)
+        if existing is not None:
+            if not isinstance(existing, cls):
+                raise TypeError(
+                    f"Expected Sim970 child at {norm_key!r}, got {type(existing).__name__}"
+                )
+            return existing
+
+        child_params = parent.params.children[norm_key]
+        if not isinstance(child_params, Sim970Params):
             raise TypeError(
-                f"Sim970.from_params_with_dep expected Sim970Params, got {type(params).__name__}"
+                f"Expected Sim970Params at {norm_key!r}, got {type(child_params).__name__}"
             )
-        comm = Sim900ChildDep(
-            parent_dep.serial, parent_dep.gpibAddr, int(key), offline=params.offline
-        )
-        # Align slot number with key if not explicitly set
-        params.slot = int(key)
-        return cls(comm, parent_dep, params)
+        return cast("Sim970", parent.init_child_by_key(norm_key))
 
     # ---- Parent API ----
     @property
-    def dep(self) -> Sim900Dep:  # type: ignore[override]
-        return cast(Sim900Dep, self._dep)
+    def dep(self) -> Sim900SlotDep:  # type: ignore[override]
+        return self._dep
 
     def disconnect(self) -> bool:
         if not self.connected:

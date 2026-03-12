@@ -291,7 +291,6 @@ def _compose_setup(
 
     # Build unique creation steps per node path.
     created_inst: dict[tuple[tuple[str, str], ...], str] = {}
-    created_params: dict[tuple[tuple[str, str], ...], str] = {}
     lines: list[str] = []
     import_pairs: set[tuple[str, str]] = set()
     used_names: dict[str, int] = {}
@@ -312,35 +311,25 @@ def _compose_setup(
 
             module, params_cls = _type_info(node.type)
             inst_cls = params_cls[:-6] if params_cls.endswith("Params") else params_cls
-            import_pairs.add((module, params_cls))
             import_pairs.add((module, inst_cls))
 
             token = _short_type_token(node.type)
             var_inst = _alloc(f"{token}_i")
-            var_params = _alloc(f"{token}_p")
             created_inst[key_t] = var_inst
-            created_params[key_t] = var_params
 
             if idx == 0:
-                var_raw = _alloc(f"{token}_raw")
                 lines.extend(
                     [
-                        f"{var_raw} = exp.instruments[{node.key!r}]",
-                        f"if not isinstance({var_raw}, {params_cls}):",
-                        f'    raise TypeError("Expected {params_cls} at exp.instruments[{node.key!r}]")',
-                        f"{var_params} = {var_raw}",
-                        f"{var_inst} = {var_params}.create_inst()",
+                        f"{var_inst} = {inst_cls}.from_config(exp, {node.key!r})",
                         "",
                     ]
                 )
             else:
                 parent_id = tuple(lineage_id[:-1])
                 parent_inst = created_inst[parent_id]
-                parent_params = created_params[parent_id]
                 lines.extend(
                     [
-                        f"{var_params} = cast({params_cls}, {parent_params}.children[{node.key!r}])",
-                        f"{var_inst} = {parent_inst}.add_child({var_params}, {node.key!r})",
+                        f"{var_inst} = {inst_cls}.from_config({parent_inst}, {node.key!r})",
                         "",
                     ]
                 )
@@ -396,10 +385,7 @@ def _compose_setup(
         seen_lines.add(line)
         filtered_imports.append(line)
 
-    uses_cast = any("cast(" in ln for ln in lines)
     imports_lines: list[str] = []
-    if uses_cast and "cast" not in existing_symbols:
-        imports_lines.append("from typing import cast")
     imports_lines.extend(filtered_imports)
     imports_block = "\n".join(imports_lines)
     instantiation_block = "\n".join(lines + assignment_lines).rstrip()

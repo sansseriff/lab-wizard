@@ -6,6 +6,7 @@ import pytest
 from ruamel.yaml import YAML
 
 from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
+from lab_wizard.lib.instruments.keysight53220A import Keysight53220AParams
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
 from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
@@ -30,7 +31,8 @@ def _write_test_config(config_dir: Path) -> None:
                     }
                 )
             },
-        )
+        ),
+        "10.0.0.5:5025": Keysight53220AParams(ip_address="10.0.0.5", ip_port=5025),
     }
     save_instruments_to_config(instruments, config_dir)
 
@@ -102,14 +104,15 @@ def test_generate_project_creates_subset_yaml_and_setup(tmp_path: Path) -> None:
     setup_text = setup_path.read_text(encoding="utf-8")
     ast.parse(setup_text)
     assert "from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928" in setup_text
-    assert "from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params" in setup_text
     assert "from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970" in setup_text
-    assert "from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params" in setup_text
-    assert "from typing import cast" in setup_text
-    assert ".add_child(" in setup_text
+    assert "PrologixGPIB.from_config(exp, '/dev/ttyUSB0')" in setup_text
+    assert "Sim900.from_config(" in setup_text
+    assert "Sim928.from_config(" in setup_text
+    assert "Sim970.from_config(" in setup_text
+    assert ".add_child(" not in setup_text
+    assert ".children[" not in setup_text
+    assert "cast(" not in setup_text
     assert ".model_dump()" not in setup_text
-    assert ": Sim900Params =" not in setup_text
-    assert ": Sim970Params =" not in setup_text
     assert "voltage_source_1 = " in setup_text
     assert "voltage_sense_1 = " in setup_text
     assert ".channels[0]" in setup_text
@@ -165,4 +168,51 @@ def test_generate_project_rejects_wrong_parent_chain(tmp_path: Path) -> None:
             projects_dir=projects_dir,
             req=req,
         )
+
+
+def test_generate_pcr_project_uses_from_config_style(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    projects_dir = tmp_path / "projects"
+    _write_test_config(config_dir)
+
+    req = GenerateProjectRequest(
+        measurement_name="pcr_curve",
+        selected_resources=[
+            SelectedResource(
+                variable_name="voltage_source",
+                type="sim928",
+                key="1",
+                path=[
+                    SelectedNodeRef(type="sim928", key="1"),
+                    SelectedNodeRef(type="sim900", key="5"),
+                    SelectedNodeRef(type="prologix_gpib", key="/dev/ttyUSB0"),
+                ],
+            ),
+            SelectedResource(
+                variable_name="counter",
+                type="keysight53220A",
+                key="10.0.0.5:5025",
+                channel_index=1,
+                path=[SelectedNodeRef(type="keysight53220A", key="10.0.0.5:5025")],
+            ),
+        ],
+        project_prefix="pcr_test",
+    )
+
+    out = generate_measurement_project(
+        config_dir=config_dir,
+        projects_dir=projects_dir,
+        req=req,
+    )
+
+    setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
+    ast.parse(setup_text)
+    assert "PrologixGPIB.from_config(exp, '/dev/ttyUSB0')" in setup_text
+    assert "Sim900.from_config(" in setup_text
+    assert "Sim928.from_config(" in setup_text
+    assert "Keysight53220A.from_config(exp, '10.0.0.5:5025')" in setup_text
+    assert ".add_child(" not in setup_text
+    assert ".children[" not in setup_text
+    assert "cast(" not in setup_text
+    assert ".channels[1]" in setup_text
 
