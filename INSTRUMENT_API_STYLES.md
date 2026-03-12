@@ -6,6 +6,54 @@ novices, keeps YAML as the single source of truth for settings, and is simple to
 
 ---
 
+## Background: how the config is loaded
+
+Each project is generated as a folder containing a YAML file and a Python setup file.
+The YAML holds all instrument settings and experiment parameters. In the styles below
+that use an `exp` object, the setup file loads it like this:
+
+```python
+from lab_wizard.lib.utilities.model_tree import Exp
+import yaml
+
+with open('my_experiment.yaml') as f:
+    exp = Exp.model_validate(yaml.safe_load(f))
+```
+
+The YAML for a typical setup looks like this:
+
+```yaml
+instruments:
+  /dev/ttyUSB0:
+    type: prologix_gpib
+    baudrate: 9600
+    children:
+      '4':
+        type: sim900
+        children:
+          '1':
+            type: sim928
+            settling_time: 0.4
+  10.7.0.3:8888:
+    type: keysight53220A
+    channels:
+      - gate_time: 0.1
+
+exp:
+  type: pcr_curve
+  bias_start_V: 0.0
+  bias_end_V: 1.0
+  bias_step_V: 0.01
+  photon_rate: 100000.0
+```
+
+### What `exp.instruments` actually is
+
+`exp.instruments` is a tree of Pydantic models — think of them as type-constrained
+dictionaries with some extra handy features, similar to dataclasses. The nature of this datastructure is purposefully 'hidden' to some degree in the following usage patterns below, as it's based on advanced python tools that users shouldn't need to worry about. 
+
+---
+
 ## Style A — `from_config` everywhere
 
 ```python
