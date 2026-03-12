@@ -6,40 +6,6 @@ novices, keeps YAML as the single source of truth for settings, and is simple to
 
 ---
 
-## Current generated code (for reference)
-
-```python
-from typing import cast
-
-prologix_raw = exp.instruments['/dev/ttyUSB0']
-if not isinstance(prologix_raw, PrologixGPIBParams):
-    raise TypeError("Expected PrologixGPIBParams at exp.instruments['/dev/ttyUSB0']")
-prologix_p = prologix_raw
-prologix_i = prologix_p.create_inst()
-
-sim900_p = cast(Sim900Params, prologix_p.children['4'])
-sim900_i = prologix_i.add_child(sim900_p, '4')
-
-sim928_p = cast(Sim928Params, sim900_p.children['1'])
-sim928_i = sim900_i.add_child(sim928_p, '1')
-
-keysight53220a_raw = exp.instruments['10.7.0.3:8888']
-if not isinstance(keysight53220a_raw, Keysight53220AParams):
-    raise TypeError("Expected Keysight53220AParams at exp.instruments['10.7.0.3:8888']")
-keysight53220a_p = keysight53220a_raw
-keysight53220a_i = keysight53220a_p.create_inst()
-
-voltage_source_1 = sim928_i
-counter_1 = keysight53220a_i.channels[1]
-```
-
-All settings come from YAML. The `_p` / `_i` suffix convention tracks params vs. live
-instruments. `add_child` and `create_inst` are the public API. `isinstance` / `cast` are
-needed for type-safety around the `exp.instruments` dict. The instrument hierarchy
-(PrologixGPIB → Sim900 → Sim928) is encoded through successive `add_child` calls.
-
----
-
 ## Style A — `from_config` everywhere
 
 ```python
@@ -237,10 +203,6 @@ consistency.
 ## Side-by-side
 
 ```
-CURRENT:
-  prologix_i = prologix_p.create_inst()
-  sim900_i   = prologix_i.add_child(sim900_p, '4')
-  sim928_i   = sim900_i.add_child(sim928_p, '1')
 
 STYLE A (from_config):
   prologix = PrologixGPIB.from_config(exp, '/dev/ttyUSB0')
