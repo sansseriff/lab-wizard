@@ -15,6 +15,7 @@ from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     model_to_commented_map,
     to_commented_yaml_value,
+    instrument_hash,
 )
 from lab_wizard.lib.utilities.params_discovery import get_parent_chain, get_type_to_module_map
 from lab_wizard.wizard.backend.get_measurements import get_measurements, reqs_from_measurement
@@ -41,6 +42,7 @@ class GenerateProjectRequest(BaseModel):
     measurement_name: str
     selected_resources: list[SelectedResource] = Field(default_factory=list)
     project_prefix: str | None = None
+    generation_style: str = "explicit"  # "explicit" | "from_attribute"
 
 
 @dataclass
@@ -317,10 +319,19 @@ def _compose_setup(
             var_inst = _alloc(f"{token}_i")
             created_inst[key_t] = var_inst
 
+            # Compute the hash key for this node from its params
+            node_type = node.type
+            node_key_fields = (
+                node.params.key_fields()
+                if hasattr(node.params, "key_fields")
+                else node.key
+            )
+            node_hash = instrument_hash(node_type, node_key_fields) if node_key_fields else node.key
+
             if idx == 0:
                 lines.extend(
                     [
-                        f"{var_inst} = {inst_cls}.from_config(exp, {node.key!r})",
+                        f"{var_inst} = {inst_cls}.from_config(exp, key={node_hash!r})",
                         "",
                     ]
                 )
@@ -329,7 +340,7 @@ def _compose_setup(
                 parent_inst = created_inst[parent_id]
                 lines.extend(
                     [
-                        f"{var_inst} = {inst_cls}.from_config({parent_inst}, {node.key!r})",
+                        f"{var_inst} = {inst_cls}.from_config({parent_inst}, key={node_hash!r})",
                         "",
                     ]
                 )
@@ -392,6 +403,74 @@ def _compose_setup(
 
     rendered = template_text
     rendered = _replace_wizard_block(rendered, "imports", imports_block)
+    rendered = _replace_wizard_block(
+        rendered, "resource_fields", "\n".join(resources_field_lines)
+    )
+    rendered = _replace_wizard_block(rendered, "instantiation", instantiation_block)
+    rendered = _replace_wizard_block(
+        rendered, "return_fields", "\n".join(return_field_lines)
+    )
+    return rendered
+
+
+def _compose_setup_from_attribute(
+    measurement_name: str,
+    selected_map: dict[str, _NodeRef],
+    selected_channels: dict[str, int | None],
+    requirements: list[FilledReq],
+    template_text: str,
+) -> str:
+    """Generate a setup file using Way 1 style: ``exp.from_attribute("name")``.
+
+    No instrument class imports are emitted.  Each resource is resolved by its
+    ``attribute_name`` param value, which is looked up in the project YAML at
+    runtime.  The user never needs to touch raw keys or hash values.
+    """
+    if not requirements:
+        raise ValueError(f"No requirements found for measurement '{measurement_name}'")
+    missing = [r.variable_name for r in requirements if r.variable_name not in selected_map]
+    if missing:
+        raise ValueError(f"Missing required selections: {missing}")
+
+    assignment_lines: list[str] = []
+    return_field_lines: list[str] = []
+    resources_field_lines: list[str] = []
+
+    for req in requirements:
+        base_name = _base_type_info(req.base_type)[1]
+        leaf = selected_map[req.variable_name]
+        ch_idx = selected_channels.get(req.variable_name)
+
+        # Determine which attribute_name to look up.
+        # If a channel_index is specified, use the channel's attribute_name;
+        # otherwise use the leaf instrument's attribute_name.
+        if ch_idx is not None:
+            ch_list = getattr(leaf.params, "channels", None)
+            if isinstance(ch_list, list) and ch_idx < len(ch_list):
+                attr_name = getattr(ch_list[ch_idx], "attribute_name", "") or ""
+            else:
+                attr_name = ""
+        else:
+            attr_name = getattr(leaf.params, "attribute_name", "") or ""
+
+        if not attr_name:
+            raise ValueError(
+                f"from_attribute generation requires attribute_name to be set on "
+                f"{leaf.type}:{leaf.key} (resource '{req.variable_name}'). "
+                "Set it in the instrument config and regenerate."
+            )
+
+        local_name = f"{req.variable_name}_1"
+        assignment_lines.append(
+            f"{local_name} = exp.from_attribute({attr_name!r})"
+        )
+        return_field_lines.append(f"{req.variable_name}={local_name},")
+        resources_field_lines.append(f"{req.variable_name}: {base_name}")
+
+    instantiation_block = "\n".join(assignment_lines)
+
+    rendered = template_text
+    rendered = _replace_wizard_block(rendered, "imports", "")
     rendered = _replace_wizard_block(
         rendered, "resource_fields", "\n".join(resources_field_lines)
     )
@@ -500,13 +579,22 @@ def generate_measurement_project(
     with yaml_path.open("w", encoding="utf-8") as f:
         y_writer.dump(to_commented_yaml_value(yaml_payload), f)
 
-    setup_code = _compose_setup(
-        req.measurement_name,
-        selected_map,
-        selected_channels,
-        requirements,
-        template_text,
-    )
+    if req.generation_style == "from_attribute":
+        setup_code = _compose_setup_from_attribute(
+            req.measurement_name,
+            selected_map,
+            selected_channels,
+            requirements,
+            template_text,
+        )
+    else:
+        setup_code = _compose_setup(
+            req.measurement_name,
+            selected_map,
+            selected_channels,
+            requirements,
+            template_text,
+        )
 
     setup_path = project_dir / f"{req.measurement_name}_setup.py"
     setup_path.write_text(setup_code, encoding="utf-8")

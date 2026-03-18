@@ -1,12 +1,9 @@
 [project]
-name = "snspd-wizard"
+name = "lab-wizard-repo"
 version = "0.1.0"
 description = "Main SNSPD wizard app"
 requires-python = ">=3.14"
-dependencies = [
-    "lab-wizard",
-    "ruamel-yaml>=0.18.16",
-]
+dependencies = ["lab-wizard", "ruamel-yaml>=0.18.16"]
 
 
 [build-system]

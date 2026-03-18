@@ -39,6 +39,8 @@ Provided functions:
 
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, cast, Iterable
+import hashlib
+import re
 import logging
 
 from pydantic import BaseModel
@@ -49,7 +51,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from lab_wizard.lib.utilities.params_discovery import load_params_class
 
 # KeyLike mixins — used for generic key derivation without hardcoding type strings
-from lab_wizard.lib.instruments.general.parent_child import USBLike, IPLike
+from lab_wizard.lib.instruments.general.parent_child import USBLike, IPLike, SlotLike, GPIBAddressLike
 
 logger = logging.getLogger("lab_wizard.lib.utilities.config_io")
 
@@ -115,6 +117,28 @@ def to_commented_yaml_value(value: Any) -> Any:
     return value
 
 
+def _yaml_priority_fields(model_cls: type) -> list[str]:
+    """Collect YAML-priority fields from a model class via MRO.
+
+    Always puts 'type' first (if present), then collects _yaml_key_fields_
+    from each base class in MRO order (deduplicating). This means adding
+    _yaml_key_fields_ to a new XXXLike mixin automatically floats its fields
+    to the top without any changes here.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    all_fields = set(model_cls.model_fields)
+    if "type" in all_fields:
+        result.append("type")
+        seen.add("type")
+    for base in model_cls.__mro__:
+        for fname in getattr(base, "_yaml_key_fields_", ()):
+            if fname not in seen and fname in all_fields:
+                seen.add(fname)
+                result.append(fname)
+    return result
+
+
 def model_to_commented_map(
     model: BaseModel,
     *,
@@ -124,8 +148,10 @@ def model_to_commented_map(
 ) -> CommentedMap:
     """Build a CommentedMap from a Pydantic model, attaching Field descriptions."""
     excluded = set(exclude_fields)
+    priority = _yaml_priority_fields(type(model))
+    rest = [f for f in type(model).model_fields if f not in set(priority)]
     cm = CommentedMap()
-    for field_name in type(model).model_fields:
+    for field_name in priority + rest:
         if field_name in excluded:
             continue
         field_value = getattr(model, field_name)
@@ -142,55 +168,26 @@ def model_to_commented_map(
     return cm
 
 
-# ---------------------------- Key slug helpers ----------------------------
-
-SLUG_ESCAPE_PREFIX = "~"
+# ---------------------------- Hash key helpers ----------------------------
 
 
-def key_to_slug(key: str) -> str:
-    """Convert an arbitrary key string into a filesystem-safe slug.
+_HASH_KEY_RE = re.compile(r"^[0-9a-f]{8}$")
 
-    - Alphanumeric characters and '-','_' are left as-is.
-    - All other characters are encoded as '~HH' where HH is the hex code of the
-      character's ordinal. This is reversible via slug_to_key.
+
+def _is_hash_key(key: str) -> bool:
+    """Return True if ``key`` looks like an 8-char hex hash (not a raw address)."""
+    return bool(_HASH_KEY_RE.match(key))
+
+
+def instrument_hash(type_str: str, key_value: str) -> str:
+    """Compute an 8-char deterministic hex hash from instrument type + addressing value.
+
+    This is used as the dict key / filename component for instruments, replacing
+    raw address strings (port paths, IP:port, slot numbers, GPIB addresses).
+    The hash is stable: the same type + key_value always produces the same result.
     """
-
-    pieces: List[str] = []
-    for ch in key:
-        if ch.isalnum() or ch in "-_":
-            pieces.append(ch)
-        else:
-            pieces.append(f"{SLUG_ESCAPE_PREFIX}{ord(ch):02X}")
-    return "".join(pieces)
-
-
-def slug_to_key(slug: str) -> str:
-    """Inverse of key_to_slug.
-
-    Not currently used by the loader (we keep original keys in YAML), but
-    available for tools that need to map filenames back to dictionary keys.
-    """
-
-    out: List[str] = []
-    i = 0
-    n = len(slug)
-    while i < n:
-        ch = slug[i]
-        if ch == SLUG_ESCAPE_PREFIX and i + 2 < n:
-            hex_part = slug[i + 1 : i + 3]
-            try:
-                code = int(hex_part, 16)
-            except ValueError:
-                # Not a valid escape, keep literal
-                out.append(ch)
-                i += 1
-                continue
-            out.append(chr(code))
-            i += 3
-        else:
-            out.append(ch)
-            i += 1
-    return "".join(out)
+    raw = f"{type_str}:{key_value}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:8]
 
 
 # ---------------------------- Loading ----------------------------
@@ -248,22 +245,39 @@ def _attach_children(
         if getattr(child_params, "enabled", True) is False:
             continue
 
+        # Migration: if the YAML key looks like a raw address (not a hash) and
+        # the child params has an apply_key() method, inject the raw key value
+        # into the params field (e.g. set gpib_address='4' or slot='1').
+        # This handles one-time migration from old format where the dict key WAS
+        # the address.  Once normalize_instruments re-saves, the YAML will carry
+        # the address as a params field and the key will be a hash.
+        if not _is_hash_key(key) and hasattr(child_params, "apply_key"):
+            child_params.apply_key(key)
+
         # recursively attach grandchildren
         _attach_children(base_dir, child_params, child_raw, visited_paths)
-        # add to parent
+        # add to parent — use the hash key derived from child params, not the
+        # raw YAML key, so the in-memory tree already has canonical keys.
         if not hasattr(parent_params, "children"):
             raise ValueError(f"Parent type {type(parent_params).__name__} has no children field")
-        parent_params.children[key] = child_params  # type: ignore[attr-defined]
+        child_type_str = str(getattr(child_params, "type", ""))
+        child_key = _key_for_loaded_params(child_params, child_type_str)
+        parent_params.children[child_key] = child_params  # type: ignore[attr-defined]
 
 
 def _key_for_loaded_params(params: Any, type_str: str) -> str:
-    """Derive the in-memory dict key for a loaded top-level Params object.
+    """Derive the in-memory dict key for a loaded Params object.
 
-    Uses the KeyLike mixins when available; falls back to the type string.
+    If the params object has a ``key_fields()`` method (i.e. inherits from any
+    KeyLike mixin — USBLike, IPLike, SlotLike, GPIBAddressLike), the key is
+    computed as ``instrument_hash(type_str, key_fields())``.  This keeps raw
+    hardware addresses out of generated Python files and makes keys stable
+    under filesystem-safe naming.  Falls back to the type string for params
+    that carry no addressing information.
     """
-    if isinstance(params, (USBLike, IPLike)):
-        key = params.key_fields()
-        return key if key else type_str
+    if hasattr(params, "key_fields"):
+        raw = params.key_fields()
+        return instrument_hash(type_str, raw) if raw else type_str
     return type_str
 
 
@@ -350,10 +364,13 @@ def merge_parent_params(base_parent: Any, delta_parent: Any) -> Any:
 # ---------------------------- Saving ----------------------------
 
 def _node_filename(type_str: str, key: Optional[str]) -> str:
-    """Return the .yml filename for a node based on type and key."""
+    """Return the .yml filename for a node based on type and key.
+
+    Keys are now 8-char hex hashes, which are already filesystem-safe — no
+    slug encoding needed.
+    """
     if key:
-        slug = key_to_slug(str(key))
-        return f"{type_str}_key_{slug}.yml"
+        return f"{type_str}_key_{key}.yml"
     return f"{type_str}.yml"
 
 
@@ -428,6 +445,46 @@ def save_instruments_to_config(instruments: Dict[str, Any], config_dir: str | Pa
     logger.info("Saved %d top-level instruments to %s", len(instruments), inst_dir)
 
 
+# ---------------------------- Hash validation ----------------------------
+
+
+def validate_and_repair_hashes(
+    instruments: Dict[str, Any],
+) -> Tuple[Dict[str, Any], bool]:
+    """Walk the instruments tree; rekey any node whose hash no longer matches its params.
+
+    This is called automatically after loading a project YAML. If a user edits
+    a param field that feeds into the key (e.g. changes ``slot`` from ``'1'``
+    to ``'2'``), the stale hash key is replaced with the correct one on the
+    next load and the YAML is rewritten in-place.
+
+    Returns:
+        (repaired_dict, was_changed) — repaired_dict is a new dict with correct
+        keys; was_changed is True if any key was updated.
+    """
+    changed = False
+    repaired: Dict[str, Any] = {}
+    for old_key, params in instruments.items():
+        type_str = str(getattr(params, "type", ""))
+        expected_key = _key_for_loaded_params(params, type_str)
+        if old_key != expected_key:
+            logger.info(
+                "Hash mismatch for %s: old key=%r → new key=%r (params changed)",
+                type_str,
+                old_key,
+                expected_key,
+            )
+            changed = True
+        # Recurse into children
+        if hasattr(params, "children") and params.children:
+            repaired_children, child_changed = validate_and_repair_hashes(params.children)
+            if child_changed:
+                params.children = repaired_children  # type: ignore[attr-defined]
+                changed = True
+        repaired[expected_key] = params
+    return repaired, changed
+
+
 # ---------------------------- High-level workflows ----------------------------
 
 def merge_instruments(base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
@@ -474,33 +531,47 @@ def normalize_instruments(config_dir: str | Path) -> Dict[str, Any]:
     """Normalize the instruments config tree.
 
     Operations:
-    - Load the current instruments tree.
-    - Re-save using canonical filenames (type + key slug) and auto-managed refs.
-    - Remove any orphaned YAML files in config/instruments that are no longer
-      referenced by the current tree (best-effort).
+    - Load the current instruments tree (hash keys are recomputed from params).
+    - Compute the canonical set of files that the tree WILL produce on save.
+    - Save using canonical hash-based filenames.
+    - Remove any YAML files under config/instruments that are no longer part of
+      the canonical set (e.g. old slug-named files from before the hash migration,
+      or orphans from type/key renames).
+
+    This is safe to run multiple times; subsequent calls are idempotent.
     """
 
     base_dir = Path(config_dir)
+    inst_dir = (base_dir / "instruments").resolve()
 
-    # Step 1: Load and immediately re-save; filenames and refs are canonicalized
-    # by _choose_node_path and _save_node_recursive.
+    # Step 1: Load current tree (keys are recomputed as hashes from params).
     instruments = load_instruments(config_dir)
+
+    # Step 2: Compute which files the CURRENT tree will produce after saving.
+    # We do this BEFORE writing so we can diff against what is currently on disk.
+    files_to_keep: set[Path] = set()
+    for k, v in instruments.items():
+        _collect_written_paths(inst_dir, inst_dir, v, str(k), files_to_keep)
+
+    # Step 3: Save with canonical hash-based filenames.
     save_instruments_to_config(instruments, config_dir)
 
-    # Step 2: Re-load and compute the closure of all YAML files reachable from
-    # the logical instruments tree (top-level + children via refs).
-    _, reachable_paths = load_instruments_with_paths(config_dir)
+    # Step 4: Remove any YAML files not in the canonical set
+    # (old slug-encoded names, orphans, etc.).
+    for f in _iter_instrument_yaml_files(base_dir):
+        if f not in files_to_keep:
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
-    # Step 3: Any YAML file under instruments/ that is not reachable is treated
-    # as an orphan (e.g. leftovers from type/key renames) and can be removed.
-    all_files = set(_iter_instrument_yaml_files(base_dir))
-    orphans = all_files - reachable_paths
-    for orphan in orphans:
-        try:
-            orphan.unlink()
-        except OSError:
-            # Best-effort cleanup; ignore failures (permissions, races, etc.).
-            pass
+    # Step 5: Remove any directories that are now empty (deepest first).
+    for d in sorted(inst_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if d.is_dir() and not any(d.iterdir()):
+            try:
+                d.rmdir()
+            except OSError:
+                pass
 
     return instruments
 
@@ -513,10 +584,7 @@ def _default_key_for_params(type_str: str, params: Any) -> str:
 
     Uses the KeyLike mixin when available; falls back to the type string.
     """
-    if isinstance(params, (USBLike, IPLike)):
-        key = params.key_fields()
-        return key if key else type_str
-    return type_str
+    return _key_for_loaded_params(params, type_str)
 
 
 def _apply_key_to_params(type_str: str, params: Any, key: str) -> None:
@@ -524,8 +592,12 @@ def _apply_key_to_params(type_str: str, params: Any, key: str) -> None:
 
     This ensures the YAML content stays consistent with the filename/key
     so that load_instruments() won't produce key collisions.
+
+    For top-level instruments the key is expected to be a raw address value
+    (e.g. ``/dev/ttyUSB0``, ``10.7.0.3:8888``) that will be hashed by
+    _key_for_loaded_params when the tree is re-loaded.
     """
-    if isinstance(params, (USBLike, IPLike)):
+    if hasattr(params, "apply_key"):
         params.apply_key(key)
 
 
@@ -623,17 +695,20 @@ def add_instrument_chain(
             new_params = params_cls()
             _apply_key_to_params(ts, new_params, key)
 
+            # Always use the hash key for storage so filenames are filesystem-safe.
+            # The raw key value was already applied to the params fields above via
+            # apply_key(), so the hardware address is preserved in the YAML content.
+            hash_key = _key_for_loaded_params(new_params, ts)
+
             if current_parent is None:
-                if not key:
-                    key = _default_key_for_params(ts, new_params)
-                instruments[key] = new_params
+                instruments[hash_key] = new_params
                 current_parent = new_params
             else:
                 if not hasattr(current_parent, "children"):
                     raise ValueError(
                         f"Parent type {type(current_parent).__name__} does not support children"
                     )
-                current_parent.children[key] = new_params  # type: ignore[attr-defined]
+                current_parent.children[hash_key] = new_params  # type: ignore[attr-defined]
                 current_parent = new_params
 
     save_instruments_to_config(instruments, config_dir)
@@ -659,14 +734,24 @@ def reinitialize_instrument(
     if target is None:
         raise ValueError(f"Instrument type={type_str} key={key} not found in config")
 
+    # Preserve the key-field value (port/slot/gpib_address etc.) before reset so
+    # the instrument's hardware address — and therefore its hash key — is unchanged.
+    key_field_value: Optional[str] = None
+    if hasattr(target, "key_fields"):
+        key_field_value = target.key_fields()
+
     existing_children = getattr(target, "children", None)
-    for name in target.model_fields:
+    for name in type(target).model_fields:
         if name == "children":
             continue
         if hasattr(default_params, name):
             setattr(target, name, getattr(default_params, name))
     if existing_children is not None and hasattr(target, "children"):
         target.children = existing_children  # type: ignore[attr-defined]
+
+    # Re-apply the original key field so the hash is stable after save/reload.
+    if key_field_value is not None and hasattr(target, "apply_key"):
+        target.apply_key(key_field_value)
 
     save_instruments_to_config(instruments, config_dir)
     logger.info("Reinitialized instrument type=%s key=%s", type_str, key)

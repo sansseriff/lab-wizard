@@ -177,12 +177,11 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
         return cls(dep, params)
 
     @classmethod
-    def from_config(cls, exp: Exp, key: str | int) -> "Keysight53220A":
-        norm_key = str(key)
-        raw = exp.instruments[norm_key]
+    def from_config(cls, exp: Exp, *, key: str) -> "Keysight53220A":
+        raw = exp.instruments[key]
         if not isinstance(raw, Keysight53220AParams):
             raise TypeError(
-                f"Expected Keysight53220AParams at exp.instruments[{norm_key!r}]"
+                f"Expected Keysight53220AParams at exp.instruments[{key!r}]"
             )
         return cls.from_params(raw)
 

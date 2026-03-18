@@ -2,7 +2,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, TypeVar, Generic, Iterable, Set, Type, Self, Iterator, ClassVar
 import inspect
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, field_validator
 
 
 # Move base classes above TypeVar declarations so bounds use real types (not strings)
@@ -53,6 +53,7 @@ class USBLike(BaseModel):
     Inheriting this tells config_io and the UI how to derive and apply keys.
     """
 
+    _yaml_key_fields_: ClassVar[tuple[str, ...]] = ("port",)
     port: str = "/dev/ttyUSB0"
     key_hint: ClassVar[str] = "USB port (e.g. /dev/ttyUSB0)"
 
@@ -70,6 +71,7 @@ class IPLike(BaseModel):
     Inheriting this tells config_io and the UI how to derive and apply keys.
     """
 
+    _yaml_key_fields_: ClassVar[tuple[str, ...]] = ("ip_address", "ip_port")
     ip_address: str = "0.0.0.0"
     ip_port: int = 0
     key_hint: ClassVar[str] = "IP:port (e.g. 10.7.0.4:8345)"
@@ -87,26 +89,51 @@ class IPLike(BaseModel):
 
 
 class SlotLike(BaseModel):
-    """Params mixin for slot/GPIB-addressed child instruments.
+    """Params mixin for slot-addressed child instruments (e.g. SIM900 modules).
 
-    The key is the slot or GPIB address supplied externally by the parent
-    at instantiation time; no field needs to be updated.
+    The slot number is stored as a param field so it participates in hash
+    derivation and appears in YAML alongside other settings.
+    Integer values from existing YAML files are coerced to str automatically.
     """
 
-    key_hint: ClassVar[str] = "Slot or GPIB address (e.g. 4)"
+    _yaml_key_fields_: ClassVar[tuple[str, ...]] = ("slot",)
+    slot: str = "0"
+    key_hint: ClassVar[str] = "Slot number (e.g. 1)"
+
+    @field_validator("slot", mode="before")
+    @classmethod
+    def _coerce_slot(cls, v: Any) -> str:
+        return str(v)
 
     def key_fields(self) -> str:
-        return ""
+        return self.slot
 
     def apply_key(self, key: str) -> None:
-        pass
+        self.slot = key
 
 
-# hmm I want ParentParams to have a method create_inst() IFF it is a top parent.
-# if its not a top parent then it presumably needs to pass down a resource like a comm object
+class GPIBAddressLike(BaseModel):
+    """Params mixin for instruments addressed by GPIB number on a Prologix bus.
 
+    The GPIB address is stored as a param field so it participates in hash
+    derivation and appears in YAML alongside other settings.
+    Integer values from existing YAML files are coerced to str automatically.
+    """
 
-# and I want
+    _yaml_key_fields_: ClassVar[tuple[str, ...]] = ("gpib_address",)
+    gpib_address: str = "0"
+    key_hint: ClassVar[str] = "GPIB address (e.g. 4)"
+
+    @field_validator("gpib_address", mode="before")
+    @classmethod
+    def _coerce_gpib(cls, v: Any) -> str:
+        return str(v)
+
+    def key_fields(self) -> str:
+        return self.gpib_address
+
+    def apply_key(self, key: str) -> None:
+        self.gpib_address = key
 
 
 class ChildParams(Instrument, BaseModel, Params2Inst[I_co], Generic[I_co]):
@@ -115,6 +142,7 @@ class ChildParams(Instrument, BaseModel, Params2Inst[I_co], Generic[I_co]):
     Generic over the concrete Child instrument type (I_co). This lets APIs
     accepting a ChildParams[I] return an I without ad-hoc overloads.
     """
+
     enabled: bool = True
 
     @model_validator(mode="after")
@@ -151,7 +179,15 @@ class ParentParams(BaseModel, Params2Inst[PR_co], Generic[PR_co, R, P]):
     # Use Field to avoid shared mutable default
     children: dict[str, P] = Field(default_factory=dict)
     """
+
     enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_type_exists(self) -> Self:
+        """Ensure a 'type' discriminator exists (required for union discrimination)."""
+        if not hasattr(self, "type") or getattr(self, "type") is None:
+            raise ValueError("Missing required 'type' field")
+        return self
 
     @property
     @abstractmethod
@@ -163,11 +199,10 @@ class Parent(Instrument, ABC, Generic[R, P]):
     R: dependency type (e.g., Comm)
     P: ChildParams subtype for children
 
-    Note:
-      The factory method for creating a Parent from only ParentParams has been
-      split out into ParentFactory. This avoids a signature clash when a class
-      is both a Parent and a Child (hybrid). Hybrid classes now only need to
-      implement the Child.from_params(dep, params) factory.
+    The only method that must be implemented per-parent is ``make_child``,
+    which creates the appropriately-scoped dependency for a child and
+    constructs it. All other parent operations (make_all_children)
+    have concrete default implementations here.
     """
 
     children: dict[str, "Child[R, P]"]
@@ -177,40 +212,40 @@ class Parent(Instrument, ABC, Generic[R, P]):
     def dep(self) -> R:
         """
         A dep is some object that children require to operate, such as a Comm object.
-        This should return the same type as the first type expected by the Child.from_params method.
+        This should return the same type as the first type expected by the Child.__init__ method.
         """
         pass
 
     @abstractmethod
-    def init_child_by_key(self, key: str) -> "Child[R, P]":
-        """
-        Create for a key 'my_key', init a child from this.params.children['my_key'],
-        and place it in self.children['my_key'].
+    def make_child(self, key: str) -> "Child[R, P]":
+        """Create the child instrument for the given hash key.
+
+        Implementations should:
+          1. Return cached child if ``key`` is already in ``self.children``.
+          2. Read ``self.params.children[key]`` to get the child's Params object.
+          3. Derive the scoped dependency from the **params field** (e.g.
+             ``params.gpib_address`` or ``params.slot``), NOT from ``key``.
+          4. Instantiate the child with ``ChildClass(scoped_dep, params)``.
+          5. Store the result in ``self.children[key]`` and return it.
         """
         pass
 
-    @abstractmethod
-    def init_children(self) -> None:
-        """
-        This is intended to enable the 'automatic' creation of all children by
-        iterating over the self.params.children dict. And therefore filling
-        the self.children dict.
-        """
-        pass
+    def make_all_children(self) -> None:
+        """Instantiate all children declared in params.children."""
+        for key in list(self.params.children.keys()):  # type: ignore[attr-defined]
+            if key not in self.children:
+                self.make_child(key)
 
-    @abstractmethod
-    def add_child(self, params: P, key: str) -> "Child[R, Any]":
-        """Add a child by key with the provided params and return the instance.
+    # def add_child(self, params: P, key: str) -> "Child[R, P]":
+    #     """Store params under key and create the child instrument.
 
-        Expected behavior:
-          - Store params into self.params.children[key]
-          - Instantiate child via params.inst.from_params_with_dep(self.dep, key, params)
-          - Record in self.children[key]
-          - Return the created child
-
-        Note: Subclasses should use a generic TypeVar to return more specific types.
-        """
-        pass
+    #     Expected behavior:
+    #       - Store params into self.params.children[key]
+    #       - Instantiate child via self.make_child(key)
+    #       - Return the created child
+    #     """
+    #     self.params.children[key] = params  # type: ignore[attr-defined]
+    #     return self.make_child(key)
 
 
 PP = TypeVar(
@@ -227,13 +262,24 @@ class ParentFactory(ABC, Generic[PP, PR]):
     PR: resulting Parent subtype
 
     from_params:
-      Accepts a params instance (PP) and returns (parent_instance, same_params_object).
+      Accepts a params instance (PP) and returns the constructed parent instrument.
+
+    from_config:
+      Concrete default — looks up the params in exp.instruments[key] and
+      delegates to from_params. Root instrument classes do NOT need to
+      override this.
     """
 
     @classmethod
     @abstractmethod
     def from_params(cls, params: PP) -> PR:
         pass
+
+    @classmethod
+    def from_config(cls, exp: Any, *, key: str) -> PR:
+        """Look up hash key in exp.instruments and construct via from_params."""
+        params = exp.instruments[key]
+        return cls.from_params(params)  # type: ignore[arg-type]
 
 
 # ------------------- Params / __init__ alignment utilities -------------------
@@ -297,10 +343,9 @@ class Child(Instrument, ABC, Generic[R, P_child]):
 
     P_child: concrete ChildParams subtype describing configuration for this child
 
-    Older instrument implementations may still use ``from_params_with_dep`` to
-    build a child from a parent dependency plus key. Newer implementations can
-    bypass that pattern and have parents inject more specific comm objects
-    directly during child construction.
+    ``from_config`` is a concrete classmethod here — child classes do NOT need
+    to override it. The pattern is always: check cache → delegate to
+    ``parent.make_child(key)`` → type-check → return.
     """
 
     @property
@@ -310,17 +355,27 @@ class Child(Instrument, ABC, Generic[R, P_child]):
         pass
 
     @classmethod
-    def from_params_with_dep(
-        cls: type[C],
-        parent_dep: R,
-        key: str,
-        params: P_child,
-    ) -> C:
-        """Compatibility factory for older child construction patterns."""
-        raise NotImplementedError(
-            f"{cls.__name__} no longer uses from_params_with_dep; construct it via "
-            "the parent or via from_config instead."
-        )
+    def from_config(cls: type[C], parent: Any, *, key: str) -> C:
+        """Construct or retrieve the child instrument for the given hash key.
+
+        Checks the parent's children cache first; if not present, delegates
+        to ``parent.make_child(key)``. No per-child override needed.
+        """
+        existing = getattr(parent, "children", {}).get(key)
+        if existing is not None:
+            if not isinstance(existing, cls):
+                raise TypeError(
+                    f"Expected {cls.__name__} child at {key!r}, "
+                    f"got {type(existing).__name__}"
+                )
+            return existing
+        child = parent.make_child(key)
+        if not isinstance(child, cls):
+            raise TypeError(
+                f"parent.make_child({key!r}) returned {type(child).__name__}, "
+                f"expected {cls.__name__}"
+            )
+        return child
 
 
 # ----------------------- ChannelProvider Mixin -----------------------
@@ -374,4 +429,5 @@ __all__ = [
     "USBLike",
     "IPLike",
     "SlotLike",
+    "GPIBAddressLike",
 ]

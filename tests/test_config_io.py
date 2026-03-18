@@ -1,6 +1,7 @@
 import pathlib
 
 from lab_wizard.lib.utilities.config_io import (
+    instrument_hash,
     load_instruments,
     save_instruments_to_config,
 )
@@ -24,17 +25,17 @@ def test_orphan_module_preservation(tmp_path: pathlib.Path):
     # 1. Setup a DBay with one active child.
     #    New layout: dbay YAML lives directly under instruments/.
     #    Children go in a sibling folder named after the parent YAML stem.
-    _write(inst_dir / "dbay_key_10~2E7~2E0~2E4~3A8345.yml", """
+    _write(inst_dir / "dbay_key_oldhash.yml", """
 type: dbay
 ip_address: 10.7.0.4
 ip_port: 8345
 children:
   "1":
     kind: dac4D
-    ref: dbay_key_10~2E7~2E0~2E4~3A8345/dac4D_key_1.yml
+    ref: dbay_key_oldhash/dac4D_key_1.yml
 """)
 
-    _write(inst_dir / "dbay_key_10~2E7~2E0~2E4~3A8345" / "dac4D_key_1.yml", """
+    _write(inst_dir / "dbay_key_oldhash" / "dac4D_key_1.yml", """
 type: dac4D
 name: ActiveDAC
 num_channels: 4
@@ -48,20 +49,18 @@ name: OrphanDAC
 num_channels: 16
 """)
 
-    # 3. Load instruments
+    # 3. Load instruments — keys are hash-based
     instruments = load_instruments(cfg)
 
-    # Verify loaded structure
-    dbay_key = "10.7.0.4:8345"
-    assert dbay_key in instruments
-    dbay = instruments[dbay_key]
+    dbay_hash = instrument_hash("dbay", "10.7.0.4:8345")
+    assert dbay_hash in instruments
+    dbay = instruments[dbay_hash]
     assert isinstance(dbay, DBayParams)
 
-    # Active child should be present
-    assert "1" in dbay.children
-    assert dbay.children["1"].name == "ActiveDAC"
-
-    # Only one child loaded (the orphan is not in the parent's ref map)
+    # Active child is keyed by hash of slot "1"
+    dac4d_hash = instrument_hash("dac4D", "1")
+    assert dac4d_hash in dbay.children
+    assert dbay.children[dac4d_hash].name == "ActiveDAC"
     assert len(dbay.children) == 1
 
     # 4. Save instruments back to disk
@@ -70,8 +69,8 @@ num_channels: 16
     # 5. Orphan file must still exist — save does not delete unreferenced files
     assert orphan_path.exists(), "Orphaned module file should not be deleted during save"
 
-    # Active file must still exist (possibly at the canonical path written by save)
-    canonical_child = inst_dir / "dbay_key_10~2E7~2E0~2E4~3A8345" / "dac4D_key_1.yml"
+    # Active file must exist at the canonical hash-based path
+    canonical_child = inst_dir / f"dbay_key_{dbay_hash}" / f"dac4D_key_{dac4d_hash}.yml"
     assert canonical_child.exists()
 
 
@@ -83,28 +82,28 @@ def test_enabled_flag(tmp_path: pathlib.Path):
     inst_dir = cfg / "instruments"
 
     # New layout: prologix YAML directly under instruments/
-    _write(inst_dir / "prologix_gpib_key_~2Fdev~2FttyUSB0.yml", """
+    _write(inst_dir / "prologix_gpib_key_oldhash.yml", """
 type: prologix_gpib
 port: /dev/ttyUSB0
 enabled: true
 children:
   "5":
     kind: sim900
-    ref: prologix_gpib_key_~2Fdev~2FttyUSB0/sim900_key_5.yml
+    ref: prologix_gpib_key_oldhash/sim900_key_5.yml
 """)
 
     _write(
-        inst_dir / "prologix_gpib_key_~2Fdev~2FttyUSB0" / "sim900_key_5.yml", """
+        inst_dir / "prologix_gpib_key_oldhash" / "sim900_key_5.yml", """
 type: sim900
 children:
   "1":
     kind: sim928
-    ref: prologix_gpib_key_~2Fdev~2FttyUSB0/sim900_key_5/sim928_key_1.yml
+    ref: prologix_gpib_key_oldhash/sim900_key_5/sim928_key_1.yml
 """)
 
     sim928_path = (
         inst_dir
-        / "prologix_gpib_key_~2Fdev~2FttyUSB0"
+        / "prologix_gpib_key_oldhash"
         / "sim900_key_5"
         / "sim928_key_1.yml"
     )
@@ -114,31 +113,34 @@ enabled: false
 """)
 
     # A disabled top-level instrument
-    _write(inst_dir / "dbay_key_1~2E2~2E3~2E4~3A8345.yml", """
+    _write(inst_dir / "dbay_key_oldhash2.yml", """
 type: dbay
 ip_address: 1.2.3.4
 ip_port: 8345
 enabled: false
 """)
 
-    # Load
+    # Load — keys are now hashes
     instruments = load_instruments(cfg)
 
-    # Prologix should be loaded
-    assert "/dev/ttyUSB0" in instruments
-    prologix = instruments["/dev/ttyUSB0"]
+    prologix_hash = instrument_hash("prologix_gpib", "/dev/ttyUSB0")
+    assert prologix_hash in instruments
+    prologix = instruments[prologix_hash]
 
-    # Sim900 should be loaded as a child
-    assert "5" in prologix.children
-    sim900 = prologix.children["5"]
+    # Sim900 child keyed by hash of gpib_address "5" (migrated from raw key "5")
+    sim900_hash = instrument_hash("sim900", "5")
+    assert sim900_hash in prologix.children
+    sim900 = prologix.children[sim900_hash]
 
     # Sim928 should NOT be loaded (enabled: false)
-    assert "1" not in sim900.children
+    sim928_hash = instrument_hash("sim928", "1")
+    assert sim928_hash not in sim900.children
 
     # Disabled DBay should NOT be loaded
-    assert "1.2.3.4:8345" not in instruments
+    dbay_hash = instrument_hash("dbay", "1.2.3.4:8345")
+    assert dbay_hash not in instruments
 
-    # 4. Save and verify disabled sim928 file is untouched (save never writes it)
+    # Save and verify disabled sim928 file is untouched (save never writes it)
     save_instruments_to_config(instruments, cfg)
 
     assert sim928_path.exists(), "Disabled module file should still exist after save"

@@ -1,12 +1,16 @@
 from lab_wizard.lib.instruments.general.vsource import VSource
-from typing import Literal, Any, cast
+from typing import Literal, Any
 from pydantic import Field
 from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
 from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 
 
 class Sim928Params(SlotLike, ChildParams["Sim928"]):
-    """Parameters for SIM928 voltage source module"""
+    """Parameters for SIM928 voltage source module.
+
+    ``slot`` (via SlotLike) holds the physical slot number within the SIM900
+    mainframe and participates in hash key derivation.
+    """
 
     type: Literal["sim928"] = "sim928"
     offline: bool | None = False
@@ -25,35 +29,15 @@ class Sim928(Child[Any, Sim928Params], VSource):
     """
     SIM928 module in the SIM900 mainframe
     Voltage source
+
+    from_config is inherited from Child base class — no override needed.
     """
 
     @property
     def parent_class(self) -> str:
         return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
-    @classmethod
-    def from_config(cls, parent: Any, key: str | int) -> "Sim928":
-        norm_key = str(key)
-        existing = getattr(parent, "children", {}).get(norm_key)
-        if existing is not None:
-            if not isinstance(existing, cls):
-                raise TypeError(
-                    f"Expected Sim928 child at {norm_key!r}, got {type(existing).__name__}"
-                )
-            return existing
-
-        child_params = parent.params.children[norm_key]
-        if not isinstance(child_params, Sim928Params):
-            raise TypeError(
-                f"Expected Sim928Params at {norm_key!r}, got {type(child_params).__name__}"
-            )
-        return cast("Sim928", parent.init_child_by_key(norm_key))
-
     def __init__(self, dep: Sim900SlotDep, params: Sim928Params):
-        """
-        :param comm: Communication object for this module
-        :param params: Parameters for the module
-        """
         self.dep = dep
         self.settling_time = params.settling_time
         self.attribute_name = params.attribute_name

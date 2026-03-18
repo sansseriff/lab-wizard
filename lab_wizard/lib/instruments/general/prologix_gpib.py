@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated, TypeVar, cast, Any, Literal
+from typing import Annotated, Any, Literal
 from pydantic import Field, model_validator
 
-from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params, Sim900
+from lab_wizard.lib.instruments.sim900.sim900 import Sim900, Sim900Params
+from lab_wizard.lib.instruments.andoAQ8201A.andoAQ8201A import AndoAQ8201AParams
 from lab_wizard.lib.instruments.general.parent_child import (
     Parent,
     ParentParams,
@@ -15,15 +16,13 @@ from lab_wizard.lib.instruments.general.parent_child import (
 )
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixControllerDep
 from lab_wizard.lib.instruments.general.serial import SerialDep, LocalSerialDep
-from lab_wizard.lib.instruments.sim900.comm import Sim900MainframeDep
 from lab_wizard.lib.utilities.model_tree import Exp
-
-# TypeVar for method-level inference
-TChild = TypeVar("TChild", bound=Child[Any, Any])
 
 
 # Union of possible child param types on a serial bus (extend as needed)
-PrologixChildParams = Annotated[Sim900Params, Field(discriminator="type")]
+PrologixChildParams = Annotated[
+    Sim900Params | AndoAQ8201AParams, Field(discriminator="type")
+]
 
 
 class PrologixGPIBParams(
@@ -68,8 +67,9 @@ class PrologixGPIB(
 ):
     """
     PrologixGPIB implements the Parent + ParentFactory interfaces.
-    Children receive progressively more specific comm objects built from the
-    Prologix controller transport.
+    Children receive a GPIB-addressed comm object scoped to their gpib_address param.
+
+    from_config and add_child/make_all_children are inherited from the base classes.
     """
 
     def __init__(self, controller: PrologixControllerDep, params: PrologixGPIBParams):
@@ -87,48 +87,21 @@ class PrologixGPIB(
         controller = PrologixControllerDep(serial_dep)
         return cls(controller, params)
 
-    @classmethod
-    def from_config(cls, exp: Exp, key: str | int) -> "PrologixGPIB":
-        norm_key = str(key)
-        raw = exp.instruments[norm_key]
-        if not isinstance(raw, PrologixGPIBParams):
-            raise TypeError(
-                f"Expected PrologixGPIBParams at exp.instruments[{norm_key!r}]"
-            )
-        return cls.from_params(raw)
+    def make_child(self, key: str) -> Child[Any, Any]:
+        """Create a child instrument using its gpib_address param (not the hash key)."""
+        if key in self.children:
+            return self.children[key]
+        child_params = self.params.children[key]
+        gpib_dep = self._dep.addressed(int(child_params.gpib_address))
+        child = child_params.inst(gpib_dep, child_params)  # type: ignore[arg-type]
+        self.children[key] = child
+        return child
 
     def disconnect(self):
         try:
             self.dep.close()
         except Exception:
             pass
-
-    def _sim900_dep(self, key: str | int):
-        return Sim900MainframeDep(self.dep.addressed(int(key)))
-
-    def init_child_by_key(self, key: str) -> Child[Any, Any]:
-        norm_key = str(key)
-        if norm_key in self.children:
-            return self.children[norm_key]
-
-        child_params = self.params.children[norm_key]
-        if not isinstance(child_params, Sim900Params):
-            raise TypeError(
-                f"Expected Sim900Params at Prologix child {norm_key!r}, got {type(child_params).__name__}"
-            )
-        child = Sim900(self._sim900_dep(norm_key), child_params)
-        self.children[norm_key] = child
-        return child
-
-    def init_children(self) -> None:
-        for key in list(self.params.children.keys()):
-            self.init_child_by_key(key)
-
-    def add_child(self, params: ChildParams[TChild], key: str) -> TChild:
-        norm_key = str(key)
-        self.params.children[norm_key] = params  # type: ignore[assignment]
-        child = self.init_child_by_key(norm_key)
-        return cast(TChild, child)
 
     def get_child(self, key: str | int) -> Child[Any, Any] | None:
         return self.children.get(str(key))
@@ -144,4 +117,4 @@ class PrologixGPIB(
 if __name__ == "__main__":
     # Example top-level usage
     prologix = PrologixGPIBParams(port="/dev/ttyUSB0").create_inst()
-    sim900 = prologix.add_child(Sim900Params(), "3")
+    sim900 = Sim900(prologix.dep.addressed(5), Sim900Params())

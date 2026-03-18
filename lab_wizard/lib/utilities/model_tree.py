@@ -1,5 +1,11 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, List, Annotated, Literal, Tuple, Optional
+import yaml
+
 from pydantic import BaseModel, Field, SerializeAsAny, model_validator
-from typing import Any, List, Annotated, Literal
+from ruamel.yaml import YAML as RuamelYAML
 
 from lab_wizard.lib.utilities.params_discovery import load_params_class
 
@@ -68,25 +74,120 @@ ExpUnion = Annotated[IVCurveParams | PCRCurveParams, Field(discriminator="type")
 def _parse_instrument_tree(data: dict[str, Any]) -> Any:
     """
     Recursively parse an instrument dict into the correct Params class.
-    
+
     Uses dynamic discovery to find the right class based on the 'type' field.
     Handles nested 'children' dicts recursively.
     """
     if not isinstance(data, dict) or "type" not in data:
         return data
-    
+
     type_str = data["type"]
-    
+
     # Parse children recursively first
     if "children" in data and isinstance(data["children"], dict):
         parsed_children = {}
         for key, child_data in data["children"].items():
             parsed_children[key] = _parse_instrument_tree(child_data)
         data = {**data, "children": parsed_children}
-    
+
     # Load the Params class and instantiate
     params_cls = load_params_class(type_str)
     return params_cls(**data)
+
+
+# --------------- attribute_name search helpers ---------------
+
+
+def _find_attribute_path(
+    instruments: dict[str, Any],
+    attribute_name: str,
+) -> Optional[Tuple[list[Tuple[str, Any]], Optional[int]]]:
+    """Depth-first search for a node or channel with the given attribute_name.
+
+    Returns ``(path, channel_index)`` where:
+      - ``path`` is a list of ``(hash_key, params)`` tuples from root to leaf
+      - ``channel_index`` is ``None`` unless the match is a channel list item
+
+    Returns ``None`` if not found.
+    """
+    for root_key, root_params in instruments.items():
+        result = _search_node(
+            key=root_key,
+            params=root_params,
+            attribute_name=attribute_name,
+            ancestors=[],
+        )
+        if result is not None:
+            return result
+    return None
+
+
+def _search_node(
+    key: str,
+    params: Any,
+    attribute_name: str,
+    ancestors: list[Tuple[str, Any]],
+) -> Optional[Tuple[list[Tuple[str, Any]], Optional[int]]]:
+    path = ancestors + [(key, params)]
+
+    # Check this node's own attribute_name field
+    if getattr(params, "attribute_name", None) == attribute_name:
+        return path, None
+
+    # Check channel list items (for instruments like Keysight53220A, Sim970)
+    channels = getattr(params, "channels", None)
+    if isinstance(channels, list):
+        for idx, ch_params in enumerate(channels):
+            if getattr(ch_params, "attribute_name", None) == attribute_name:
+                return path, idx
+
+    # Recurse into children
+    children = getattr(params, "children", None)
+    if isinstance(children, dict):
+        for child_key, child_params in children.items():
+            result = _search_node(child_key, child_params, attribute_name, path)
+            if result is not None:
+                return result
+
+    return None
+
+
+def _construct_from_path(
+    path: list[Tuple[str, Any]],
+    exp: "Exp",
+    channel_index: Optional[int],
+) -> Any:
+    """Construct the full instrument chain for the given path and return the target.
+
+    ``path`` is a list of ``(hash_key, params)`` from root → leaf.
+    The root instrument is created via ``params.create_inst()`` (CanInstantiate).
+    Each subsequent level is created via ``parent_inst.make_child(key)``.
+    If ``channel_index`` is not None, returns ``leaf_inst.channels[channel_index]``.
+    """
+    if not path:
+        raise ValueError("Empty path — cannot construct instrument")
+
+    root_key, root_params = path[0]
+    if not hasattr(root_params, "create_inst"):
+        raise TypeError(
+            f"Root params {type(root_params).__name__} does not support create_inst(); "
+            "top-level instruments must inherit CanInstantiate."
+        )
+    current_inst = root_params.create_inst()
+
+    for hash_key, _params in path[1:]:
+        current_inst = current_inst.make_child(hash_key)
+
+    if channel_index is not None:
+        channels = getattr(current_inst, "channels", None)
+        if channels is None or channel_index >= len(channels):
+            raise IndexError(
+                f"channel_index {channel_index} out of range for "
+                f"{type(current_inst).__name__}"
+            )
+        return channels[channel_index]
+
+    return current_inst
 
 
 class Exp(BaseModel):
@@ -102,13 +203,13 @@ class Exp(BaseModel):
     def _parse_instruments_dynamically(cls, data: dict[str, Any]) -> dict[str, Any]:
         """
         Parse instruments using dynamic discovery before Pydantic validation.
-        
+
         This allows the YAML to contain any registered instrument type without
         needing a static union that imports all Params classes upfront.
         """
         if "instruments" not in data or not isinstance(data["instruments"], dict):
             return data
-        
+
         parsed_instruments = {}
         for key, inst_data in data["instruments"].items():
             if isinstance(inst_data, dict) and "type" in inst_data:
@@ -116,8 +217,29 @@ class Exp(BaseModel):
             else:
                 # Already parsed or not a dict - pass through
                 parsed_instruments[key] = inst_data
-        
+
         return {**data, "instruments": parsed_instruments}
+
+    def from_attribute(self, attribute_name: str) -> Any:
+        """Construct the instrument (or channel) that has the given attribute_name.
+
+        Walks the instruments tree depth-first, finds the node or channel
+        whose ``attribute_name`` param matches, then builds the full parent
+        chain top-down and returns the target instrument.
+
+        Example::
+
+            exp = load_exp_from_yaml("my_exp.yaml")
+            sim928 = exp.from_attribute("my_favorit_sim928")
+            counter_ch = exp.from_attribute("my_keysight53_channel")
+        """
+        result = _find_attribute_path(self.instruments, attribute_name)
+        if result is None:
+            raise ValueError(
+                f"No instrument with attribute_name={attribute_name!r} found in exp"
+            )
+        path, channel_index = result
+        return _construct_from_path(path, self, channel_index)
 
     def find_all_resources(self) -> dict[str, tuple[str, object]]:
         """Find all resources in the experiment tree.
@@ -140,90 +262,56 @@ class Exp(BaseModel):
 
         return resources
 
-    def _generate_intermediate_variables(
-        self, path: str, generated_vars: dict[str, str], counter: dict[str, int]
-    ) -> tuple[str, list[str]]:
-        """Generate intermediate variables for complex paths and return the final variable name and intermediate code lines."""
-        parts = path.split(".")
-        intermediate_lines = []
 
-        # If it's a simple path, return as-is
-        if len(parts) <= 2:  # e.g., "exp.instruments['source1']"
-            return path, []
+def _rewrite_exp_yaml(yaml_path: Path | str, exp: Exp) -> None:
+    """Rewrite the project YAML with corrected hash keys (in-place)."""
+    import json
 
-        # Build intermediate variables
-        current_path = parts[0]  # Start with "exp"
+    y = RuamelYAML(typ="rt")
+    y.default_flow_style = False
 
-        for i in range(1, len(parts) - 1):  # Skip the last part
-            current_path += "." + parts[i]
+    # Load original for round-trip preservation of non-instruments keys
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        data = y.load(f)
 
-            # Check if we need to create an intermediate variable
-            if current_path not in generated_vars:
-                # Determine the type and generate a variable name
-                if "instruments[" in current_path:
-                    # Extract instrument key for naming
-                    import re
+    # Rebuild instruments section from repaired Exp
+    from lab_wizard.lib.utilities.config_io import to_commented_yaml_value, model_to_commented_map
 
-                    match = re.search(r"instruments\['([^']+)'\]", current_path)
-                    if match:
-                        inst_key = match.group(1)
-                        var_name = f"{inst_key}_{counter[inst_key]}"
-                        counter[inst_key] += 1
+    repaired_instruments = {}
+    for k, v in exp.instruments.items():
+        if isinstance(v, BaseModel):
+            repaired_instruments[k] = model_to_commented_map(v, exclude_none=True)
+        else:
+            repaired_instruments[k] = v
 
-                        # Get the instrument type for the tg() call
-                        inst_obj = self.instruments.get(inst_key)
-                        if inst_obj:
-                            type_name = type(inst_obj).__name__
-                            generated_vars[current_path] = var_name
-                            intermediate_lines.append(
-                                f"{var_name} = tg({current_path}, {type_name})"
-                            )
+    data["instruments"] = to_commented_yaml_value(repaired_instruments)
 
-        # Build the final path using intermediate variables
-        final_path = parts[0]
-        for i in range(1, len(parts)):
-            segment = "." + parts[i]
-            check_path = final_path + segment
+    with open(yaml_path, "w", encoding="utf-8") as f:
+        y.dump(data, f)
 
-            if check_path in generated_vars and i < len(parts) - 1:
-                # Replace with intermediate variable
-                final_path = generated_vars[check_path]
-            else:
-                final_path += segment
 
-        return final_path, intermediate_lines
+def load_exp_from_yaml(yaml_path: str | Path) -> Exp:
+    """Load an Exp object from a project YAML file.
 
-    def code_generate(self, resource_mapping: dict[str, str] = None):
-        """Generate code to access resources based on MyResources mapping.
-        resource_mapping: dict mapping resource_id -> variable_name
-        """
-        if resource_mapping is None:
-            resource_mapping = {}
+    After parsing, hash keys are validated against the params they represent.
+    If any key is stale (e.g. the user edited a ``slot`` or ``port`` field),
+    the key is recomputed and the YAML is rewritten in-place so future loads
+    are clean.
+    """
+    from lab_wizard.lib.utilities.config_io import validate_and_repair_hashes
 
-        all_resources = self.find_all_resources()
-        code_lines = []
-        generated_vars: dict[str, str] = {}  # Maps path -> variable_name
-        counter = {"mainframe": 1, "source": 1, "sense": 1}  # For unique naming
-        all_intermediate_lines = []
+    yaml_path = Path(yaml_path)
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    exp = Exp.model_validate(data)
 
-        for resource_id, var_name in resource_mapping.items():
-            if resource_id in all_resources:
-                path, obj = all_resources[resource_id]
+    repaired, changed = validate_and_repair_hashes(exp.instruments)
+    if changed:
+        exp = exp.model_copy(update={"instruments": repaired})
+        try:
+            _rewrite_exp_yaml(yaml_path, exp)
+        except OSError:
+            # Read-only filesystem or test environment — skip rewrite
+            pass
 
-                # Use the helper function to generate intermediate variables
-                final_path, intermediate_lines = self._generate_intermediate_variables(
-                    path, generated_vars, counter
-                )
-
-                # Add intermediate lines (avoid duplicates)
-                for line in intermediate_lines:
-                    if line not in all_intermediate_lines:
-                        all_intermediate_lines.append(line)
-
-                # Generate the final access code
-                if hasattr(obj, "generate_access_code"):
-                    code_line = obj.generate_access_code(var_name, final_path)
-                    code_lines.append(code_line)
-
-        # Combine all lines
-        return "\n".join(all_intermediate_lines + code_lines)
+    return exp

@@ -1,4 +1,4 @@
-from typing import Any, Literal, List, cast
+from typing import Any, Literal, List
 
 from pydantic import BaseModel, Field
 
@@ -164,37 +164,6 @@ class Dac16D(Child[Comm, Dac16DParams], ChannelProvider[Dac16DChannel]):
             )
         return cls(module_info, parent_dep, params)
 
-    @classmethod
-    def from_config(cls, parent: Any, key: str | int) -> "Dac16D":
-        norm_key = str(key)
-        existing = getattr(parent, "children", {}).get(norm_key)
-        if existing is not None:
-            if not isinstance(existing, cls):
-                raise TypeError(
-                    f"Expected Dac16D child at {norm_key!r}, got {type(existing).__name__}"
-                )
-            return existing
-
-        child_params = parent.params.children[norm_key]
-        if not isinstance(child_params, Dac16DParams):
-            raise TypeError(
-                f"Expected Dac16DParams at {norm_key!r}, got {type(child_params).__name__}"
-            )
-        return cast("Dac16D", parent.init_child_by_key(norm_key))
-
-    @classmethod
-    def from_params_with_dep(
-        cls, parent_dep: Comm, key: str, params: ChildParams[Any]
-    ) -> "Dac16D":
-        try:
-            slot = int(key)
-        except ValueError:
-            raise TypeError(f"Dac16D requires numeric key for slot, got {key!r}")
-        full = parent_dep.get("full-state")
-        data_list = full.get("data", [])
-        module_info = data_list[slot]
-        dac16d_params = params if isinstance(params, Dac16DParams) else Dac16DParams()
-        return cls.from_module_info(parent_dep, slot, module_info, dac16d_params)
 
     @property
     def dep(self) -> Comm:  # type: ignore[override]

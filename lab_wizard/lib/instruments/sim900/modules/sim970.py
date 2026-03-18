@@ -5,9 +5,7 @@ from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, 
 from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 import time
 import numpy as np
-from typing import Literal, Any, cast, TypeVar
-
-TChild = TypeVar("TChild", bound=Child[Any, Any])
+from typing import Literal, Any
 
 
 class Sim970ChannelParams(BaseModel):
@@ -24,13 +22,15 @@ class Sim970ChannelParams(BaseModel):
 class Sim970Params(SlotLike, ChildParams["Sim970"]):
     """Parameters for SIM970 module.
 
+    ``slot`` (via SlotLike) holds the physical slot number within the SIM900
+    mainframe and participates in hash key derivation.
+
     Per-channel settings (settling time, max retries, attribute name) live in
     each entry of ``channels``. The number of channels is derived from the
     length of that list.
     """
 
     type: Literal["sim970"] = "sim970"
-    slot: int = 0
     attribute_name: str = "Sim970"
     offline: bool | None = False
     channels: list[Sim970ChannelParams] = Field(default_factory=lambda: [Sim970ChannelParams() for _ in range(4)])
@@ -38,10 +38,6 @@ class Sim970Params(SlotLike, ChildParams["Sim970"]):
     @property
     def inst(self):  # type: ignore[override]
         return Sim970
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
 
 class Sim970Channel(VSense):
@@ -86,6 +82,8 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
 
     Channels are exposed via the ``channels`` list and created from per-channel
     ``Sim970ChannelParams`` entries in ``Sim970Params.channels``.
+
+    from_config is inherited from Child base class — no override needed.
     """
 
     def __init__(
@@ -103,25 +101,6 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
     def parent_class(self) -> str:
         return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
-    @classmethod
-    def from_config(cls, parent: Any, key: str | int) -> "Sim970":
-        norm_key = str(key)
-        existing = getattr(parent, "children", {}).get(norm_key)
-        if existing is not None:
-            if not isinstance(existing, cls):
-                raise TypeError(
-                    f"Expected Sim970 child at {norm_key!r}, got {type(existing).__name__}"
-                )
-            return existing
-
-        child_params = parent.params.children[norm_key]
-        if not isinstance(child_params, Sim970Params):
-            raise TypeError(
-                f"Expected Sim970Params at {norm_key!r}, got {type(child_params).__name__}"
-            )
-        return cast("Sim970", parent.init_child_by_key(norm_key))
-
-    # ---- Parent API ----
     @property
     def dep(self) -> Sim900SlotDep:  # type: ignore[override]
         return self._dep
