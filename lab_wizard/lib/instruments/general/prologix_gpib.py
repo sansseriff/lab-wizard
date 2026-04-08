@@ -57,10 +57,6 @@ class PrologixGPIBParams(
     def create_inst(self) -> "PrologixGPIB":
         return PrologixGPIB.from_params(self)
 
-    def __call__(self) -> "PrologixGPIB":
-        return self.create_inst()
-
-
 class PrologixGPIB(
     Parent[PrologixControllerDep, PrologixChildParams],
     ParentFactory[PrologixGPIBParams, "PrologixGPIB"],

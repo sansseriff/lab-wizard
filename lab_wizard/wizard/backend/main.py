@@ -29,6 +29,9 @@ from lab_wizard.lib.utilities.config_io import (
     add_instrument_chain,
     reinitialize_instrument,
     remove_instrument,
+    load_instruments,
+    save_instruments_to_config,
+    instrument_hash,
 )
 from lab_wizard.lib.utilities.params_discovery import get_instrument_metadata
 from lab_wizard.wizard.backend.project_generation import (
@@ -243,7 +246,7 @@ def api_manage_instruments(env: Env = Depends(get_env)):
     return {"tree": tree, "metadata": metadata}
 
 
-from pydantic import BaseModel as _BM
+from pydantic import BaseModel as _BM, Field as _Field
 from typing import List as _List
 
 
@@ -251,6 +254,7 @@ class _ChainStep(_BM):
     type: str
     key: str
     action: str  # "create_new" | "use_existing"
+    extra: dict = _Field(default_factory=dict)  # optional extra fields to set on newly-created params
 
 
 class _AddBody(_BM):
@@ -302,6 +306,74 @@ def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
     except Exception as e:
         logger.exception("Remove instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/manage-instruments/probe-dbay")
+def api_probe_dbay(ip_address: str, ip_port: int):
+    """Try to reach a DBay GUI server and return its loaded modules."""
+    import json
+    url = f"http://{ip_address}:{ip_port}/full-state"
+    try:
+        with urllib.request.urlopen(url, timeout=2) as r:
+            state = json.loads(r.read())
+        modules = [
+            {"slot": m["core"]["slot"], "type": m["core"]["type"]}
+            for m in state.get("data", [])
+            if m.get("core", {}).get("type") not in ("empty", None)
+        ]
+        return {"reachable": True, "modules": modules}
+    except Exception:
+        return {"reachable": False, "modules": []}
+
+
+class _SyncDbayBody(_BM):
+    ip_address: str
+    ip_port: int
+
+
+@app.post("/api/manage-instruments/sync-dbay")
+def api_sync_dbay(body: _SyncDbayBody, env: Env = Depends(get_env)):
+    """Fetch modules from a running DBay GUI server and add them to the config."""
+    import json
+    from lab_wizard.lib.utilities.params_discovery import load_params_class
+
+    config_dir = _config_dir(env)
+    instruments = load_instruments(config_dir)
+
+    dbay_params = next(
+        (p for p in instruments.values()
+         if getattr(p, "type", None) == "dbay"
+         and getattr(p, "ip_address", None) == body.ip_address
+         and getattr(p, "ip_port", None) == body.ip_port),
+        None,
+    )
+    if dbay_params is None:
+        raise HTTPException(status_code=404, detail="DBay not found in config")
+
+    url = f"http://{body.ip_address}:{body.ip_port}/full-state"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            state = json.loads(r.read())
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Cannot reach DBay GUI server: {e}")
+
+    _SYNC_TYPE_MAP = {"dac4D": "dac4D", "dac16D": "dac16D"}
+    added = []
+    for m in state.get("data", []):
+        mtype = m.get("core", {}).get("type")
+        slot = m.get("core", {}).get("slot")
+        if mtype not in _SYNC_TYPE_MAP or slot is None:
+            continue
+        params_cls = load_params_class(_SYNC_TYPE_MAP[mtype])
+        child_params = params_cls()
+        child_params.slot = str(slot)
+        child_key = instrument_hash(mtype, str(slot))
+        dbay_params.children[child_key] = child_params
+        added.append({"slot": slot, "type": mtype})
+
+    save_instruments_to_config(instruments, config_dir)
+    logger.info("DBay sync: added %d modules for %s:%s", len(added), body.ip_address, body.ip_port)
+    return {"status": "ok", "added": added, "tree": get_configured_tree(config_dir)}
 
 
 @app.post("/api/create-measurement-project")

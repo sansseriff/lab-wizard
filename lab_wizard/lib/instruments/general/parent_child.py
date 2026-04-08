@@ -171,16 +171,40 @@ PR_co = TypeVar("PR_co", bound="Parent[Any, Any]")
 
 class ParentParams(BaseModel, Params2Inst[PR_co], Generic[PR_co, R, P]):
     """
-
     PR_co: Corresponding Parent instrument type
     R: Dependency type (e.g., Comm)
     P: ChildParams subtype for children
 
-    # Use Field to avoid shared mutable default
-    children: dict[str, P] = Field(default_factory=dict)
+    REQUIRED IN EVERY CONCRETE SUBCLASS — define a typed children field:
+        children: dict[str, YourChildParamsUnion] = Field(default_factory=dict)
+
+    This cannot be defined here because each subclass needs a different
+    Annotated union type for Pydantic's discriminator to work. Forgetting
+    it causes a runtime AttributeError on first child access.
     """
 
     enabled: bool = True
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Skip abstract classes
+        if getattr(cls, "__abstractmethods__", None):
+            return
+        # Skip Pydantic generic parameterizations (e.g. ParentParams[Any, Any, Any])
+        if "[" in cls.__name__:
+            return
+        # If no 'children' annotation anywhere in the MRO (excluding this base), warn
+        has_children = any(
+            "children" in getattr(base, "__annotations__", {})
+            for base in cls.__mro__
+            if base is not ParentParams
+        )
+        if not has_children:
+            raise TypeError(
+                f"{cls.__name__} inherits ParentParams but does not define a "
+                "'children' field. Add: "
+                "children: dict[str, YourChildUnion] = Field(default_factory=dict)"
+            )
 
     @model_validator(mode="after")
     def validate_type_exists(self) -> Self:
@@ -351,7 +375,17 @@ class Child(Instrument, ABC, Generic[R, P_child]):
     @property
     @abstractmethod
     def parent_class(self) -> str:
-        """Fully-qualified (or uniquely identifying) name of the expected parent class."""
+        """Fully-qualified class name of the expected parent instrument class.
+
+        !! This property is read statically by params_discovery.py (see
+        _PARENT_CLASS_RETURN regex) to build the parent-child metadata used
+        by the wizard UI and get_parent_chain(). It is NOT called at runtime.
+
+        Removing or renaming this property breaks instrument discovery silently.
+        The return string MUST be a fully-qualified dotted path, e.g.:
+            "lab_wizard.lib.instruments.sim900.sim900.Sim900"
+        !!
+        """
         pass
 
     @classmethod

@@ -141,10 +141,6 @@ class Keysight53220AParams(IPLike, BaseModel, CanInstantiate["Keysight53220A"]):
     def create_inst(self) -> Keysight53220A:
         return Keysight53220A.from_params(self)
 
-    def __call__(self) -> Keysight53220A:
-        return self.create_inst()
-
-
 class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
     """Keysight 53220A Universal Counter.
 

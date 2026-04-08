@@ -31,7 +31,7 @@ ip_address: 10.7.0.4
 ip_port: 8345
 children:
   "1":
-    kind: dac4D
+    type: dac4D
     ref: dbay_key_oldhash/dac4D_key_1.yml
 """)
 
@@ -88,7 +88,7 @@ port: /dev/ttyUSB0
 enabled: true
 children:
   "5":
-    kind: sim900
+    type: sim900
     ref: prologix_gpib_key_oldhash/sim900_key_5.yml
 """)
 
@@ -97,7 +97,7 @@ children:
 type: sim900
 children:
   "1":
-    kind: sim928
+    type: sim928
     ref: prologix_gpib_key_oldhash/sim900_key_5/sim928_key_1.yml
 """)
 

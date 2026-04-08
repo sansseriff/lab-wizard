@@ -20,11 +20,19 @@
 	let showAddWizard = $state(false);
 	let addStep = $state(0);
 	let selectedType: string | null = $state(null);
-	let chainSteps: { type: string; key: string; action: 'create_new' | 'use_existing' }[] = $state(
+	let chainSteps: { type: string; key: string; action: 'create_new' | 'use_existing'; extra?: Record<string, any> }[] = $state(
 		[]
 	);
 	let currentChainIndex = $state(0);
 	let addLoading = $state(false);
+
+	// DBay-specific state
+	let dbayIpAddress = $state('127.0.0.1');
+	let dbayPort = $state(8345);
+	let dbayMode: 'gui' | 'direct' = $state('gui');
+	let dbayProbeResult: { reachable: boolean; modules: { slot: number; type: string }[] } | null =
+		$state(null);
+	let dbayProbing = $state(false);
 
 	async function refetchData() {
 		const d = await fetchWithConfig<{ tree: TreeItem[]; metadata: Record<string, InstrumentMeta> }>(
@@ -98,6 +106,10 @@
 		chainSteps = [];
 		currentChainIndex = 0;
 		statusMessage = null;
+		dbayIpAddress = '127.0.0.1';
+		dbayPort = 8345;
+		dbayMode = 'gui';
+		dbayProbeResult = null;
 	}
 
 	function selectTypeForAdd(typeStr: string) {
@@ -108,7 +120,11 @@
 		const chain = meta.parent_chain;
 		if (chain.length === 0) {
 			chainSteps = [{ type: typeStr, key: '', action: 'create_new' }];
-			if (meta.key_hint) {
+			if (typeStr === 'dbay') {
+				// DBay gets a custom config step with ip/port/mode and auto-probe
+				addStep = 20;
+				probeDbay();
+			} else if (meta.key_hint) {
 				// USBLike / IPLike: must ask for the actual address
 				addStep = 2;
 			} else {
@@ -175,11 +191,42 @@
 		addStep = 3; // confirm
 	}
 
+	async function probeDbay() {
+		dbayProbing = true;
+		dbayProbeResult = null;
+		try {
+			const r = await fetchWithConfig<{
+				reachable: boolean;
+				modules: { slot: number; type: string }[];
+			}>(
+				`/api/manage-instruments/probe-dbay?ip_address=${dbayIpAddress}&ip_port=${dbayPort}`,
+				'GET'
+			);
+			dbayProbeResult = r;
+		} catch {
+			dbayProbeResult = { reachable: false, modules: [] };
+		} finally {
+			dbayProbing = false;
+		}
+	}
+
+	function confirmDbayConfig() {
+		chainSteps[0].key = `${dbayIpAddress}:${dbayPort}`;
+		chainSteps[0].extra = { mode: dbayMode };
+		addStep = 3;
+	}
+
 	async function executeAdd() {
 		addLoading = true;
 		statusMessage = null;
 		try {
 			await fetchWithConfig('/api/manage-instruments/add', 'POST', { chain: chainSteps });
+			if (selectedType === 'dbay' && dbayMode === 'gui') {
+				await fetchWithConfig('/api/manage-instruments/sync-dbay', 'POST', {
+					ip_address: dbayIpAddress,
+					ip_port: dbayPort
+				});
+			}
 			statusMessage = { text: `Added ${selectedType}`, ok: true };
 			await refetchData();
 			showAddWizard = false;
@@ -362,6 +409,71 @@
 					>
 				</div>
 			{/if}
+
+		<!-- Step 20: DBay-specific config (ip, port, mode, probe) -->
+		{#if addStep === 20}
+			<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">Configure DBay connection:</p>
+			<div class="mb-2 flex gap-2">
+				<input
+					type="text"
+					bind:value={dbayIpAddress}
+					placeholder="127.0.0.1"
+					class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+				/>
+				<input
+					type="number"
+					bind:value={dbayPort}
+					placeholder="8345"
+					class="w-24 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+				/>
+				<button
+					class="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+					onclick={probeDbay}
+					disabled={dbayProbing}
+				>
+					{dbayProbing ? 'Checking...' : 'Test'}
+				</button>
+			</div>
+
+			{#if dbayProbeResult}
+				{#if dbayProbeResult.reachable}
+					<div class="mb-3 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
+						<p class="font-medium text-green-700 dark:text-green-400">
+							Server found — {dbayProbeResult.modules.length} module{dbayProbeResult.modules.length === 1 ? '' : 's'} loaded
+						</p>
+						<div class="mt-1 flex flex-wrap gap-1">
+							{#each dbayProbeResult.modules as m}
+								<span
+									class="rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-800 dark:bg-green-900/40 dark:text-green-300"
+									>{m.type} @ slot {m.slot}</span
+								>
+							{/each}
+						</div>
+					</div>
+				{:else}
+					<p class="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+						No server found at this address
+					</p>
+				{/if}
+			{/if}
+
+			<label class="mb-4 flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+				<input
+					type="checkbox"
+					checked={dbayMode === 'gui'}
+					onchange={(e) => (dbayMode = (e.target as HTMLInputElement).checked ? 'gui' : 'direct')}
+					class="h-4 w-4 rounded border-gray-300"
+				/>
+				GUI mode — connect to running DBay GUI server and sync modules
+			</label>
+
+			<button
+				class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500"
+				onclick={confirmDbayConfig}
+			>
+				Next
+			</button>
+		{/if}
 
 		<!-- Step 2: Key entry for the target leaf/child instrument -->
 		{#if addStep === 2}

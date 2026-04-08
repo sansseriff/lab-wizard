@@ -1,20 +1,19 @@
-from typing import Any, Annotated, Literal, cast
+from typing import Any, Annotated, Literal
 from pydantic import Field
 
-from lab_wizard.lib.instruments.dbay.comm import Comm
+from dbay import DBayClient
+
 from lab_wizard.lib.instruments.general.parent_child import (
     Parent,
     ParentParams,
     ParentFactory,
     Child,
-    ChildParams,
     CanInstantiate,
     IPLike,
 )
 from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4DParams, Dac4D
 from lab_wizard.lib.instruments.dbay.modules.dac16d import Dac16DParams, Dac16D
 from lab_wizard.lib.instruments.dbay.modules.empty import EmptyParams, Empty
-from lab_wizard.lib.utilities.model_tree import Exp
 
 
 DBayChildParams = Annotated[
@@ -24,18 +23,25 @@ DBayChildParams = Annotated[
 
 class DBayParams(
     IPLike,
-    ParentParams["DBay", Comm, DBayChildParams],
+    ParentParams["DBay", DBayClient, DBayChildParams],
     CanInstantiate["DBay"],
 ):
     """Params for DBay controller.
 
-    Instantiate via .create_inst() or calling the params object directly.
-    Provide ip_address and ip_port for the DBay HTTP server.
+    GUI mode (default): ip_address + ip_port connect to the DBay GUI server.
+    Direct UDP mode: ip_address + direct_port connect to hardware directly.
+    Direct serial mode: serial_port + baudrate connect to hardware via serial.
     """
 
     type: Literal["dbay"] = "dbay"
     ip_address: str = "10.7.0.4"
     ip_port: int = 8345
+    mode: Literal["gui", "direct"] = "gui"
+    direct_port: int = Field(default=8880, description="UDP port for direct mode")
+    direct_transport: Literal["udp", "serial"] = "udp"
+    serial_port: str | None = None
+    baudrate: int = 115200
+    retain_changes: bool = Field(default=True, description="GUI mode: revert on cleanup if False")
     children: dict[str, DBayChildParams] = Field(default_factory=dict)
 
     @property
@@ -45,102 +51,65 @@ class DBayParams(
     def create_inst(self) -> "DBay":
         return DBay.from_params(self)
 
-    def __call__(self) -> "DBay":
-        return self.create_inst()
-
 
 class DBay(
-    Parent[Comm, DBayChildParams],
+    Parent[DBayClient, DBayChildParams],
     ParentFactory[DBayParams, "DBay"],
 ):
-    """DBay controller - manages DAC modules via HTTP communication.
+    """DBay controller - manages DAC modules via the dbay library.
 
-    make_all_children, and from_config are inherited from base classes.
+    make_all_children and from_config are inherited from base classes.
     """
 
-    def __init__(self, dep: Comm, params: DBayParams):
-        self.comm = dep
+    def __init__(self, client: DBayClient, params: DBayParams):
+        self.client = client
         self.params = params
-        self.children: dict[str, Child[Comm, DBayChildParams]] = {}
-        self._module_snapshot: list[Any] | None = None
-        self._full_state_cache: dict[str, Any] | None = None
+        self.children: dict[str, Child[DBayClient, DBayChildParams]] = {}
 
     @property
-    def dep(self) -> Comm:
-        return self.comm
+    def dep(self) -> DBayClient:
+        return self.client
 
     @classmethod
-    def from_params(cls, params: "DBayParams") -> "DBay":
-        return cls(Comm(params.ip_address, params.ip_port), params)
+    def from_params(cls, params: DBayParams) -> "DBay":
+        if params.mode == "gui":
+            client = DBayClient(
+                mode="gui",
+                server_address=params.ip_address,
+                port=params.ip_port,
+                retain_changes=params.retain_changes,
+            )
+        elif params.direct_transport == "serial":
+            client = DBayClient(
+                mode="direct",
+                direct_transport="serial",
+                serial_port=params.serial_port,
+                baudrate=params.baudrate,
+            )
+        else:
+            client = DBayClient(
+                mode="direct",
+                direct_host=params.ip_address,
+                direct_port=params.direct_port,
+            )
+        return cls(client, params)
 
-    def _full_state(self) -> dict[str, Any]:
-        if self._full_state_cache is None:
-            self._full_state_cache = self.comm.get("full-state")
-        return self._full_state_cache
-
-    def _module_info(self, slot: int) -> dict[str, Any]:
-        data_list = self._full_state().get("data", [])
-        return cast(dict[str, Any], data_list[slot])
-
-    def make_child(self, key: str) -> Child[Comm, Any]:
-        """Create a DAC module child using its slot param (not the hash key)."""
+    def make_child(self, key: str) -> Child[DBayClient, Any]:
         if key in self.children:
             return self.children[key]
 
         params = self.params.children[key]
-        # Use params.slot, NOT the hash key, to identify the hardware slot.
         slot = int(params.slot)
-        module_info = self._module_info(slot)
-        if isinstance(params, Dac4DParams):
-            child = Dac4D.from_module_info(self.dep, slot, module_info, params)
-        elif isinstance(params, Dac16DParams):
-            child = Dac16D.from_module_info(self.dep, slot, module_info, params)
+        if self.params.mode == "gui":
+            module = self.client.module(slot)
         else:
-            child = Empty()
-        self.children[key] = cast(Child[Comm, Any], child)
-        return child
-
-    def load_full_state(self) -> None:
-        response = self._full_state()
-        data: list[dict[str, dict[str, Any]]] = response.get("data", [])
-        snapshot: list[Any] = []
-        for module_info in data:
-            t = module_info.get("core", {}).get("type")
-            if t == "dac4D":
-                core = module_info.setdefault("core", {})
-                core.setdefault("slot", 0)
-                core.setdefault("name", "dac4D-0")
-                if "vsource" not in module_info:
-                    module_info["vsource"] = {"channels": []}
-                channels = module_info["vsource"].setdefault("channels", [])
-                if not channels:
-                    for i in range(4):
-                        channels.append(
-                            {
-                                "index": i,
-                                "bias_voltage": 0.0,
-                                "activated": False,
-                                "heading_text": f"CH{i}",
-                                "measuring": False,
-                            }
-                        )
-                snapshot.append(Dac4D(module_info, self.comm))
-            elif t == "dac16D":
-                snapshot.append(Dac16D(module_info, self.comm))
+            from dbay import dac4D as dac4D_mod, dac16D as dac16D_mod
+            if isinstance(params, Dac4DParams):
+                module = self.client.attach_module(slot, dac4D_mod)
+            elif isinstance(params, Dac16DParams):
+                module = self.client.attach_module(slot, dac16D_mod)
             else:
-                snapshot.append(Empty())
-        self._module_snapshot = snapshot
-
-    def get_modules(self):
-        if self._module_snapshot is None:
-            self.load_full_state()
-        return self._module_snapshot
-
-    def list_modules(self):
-        modules = self.get_modules() or []
-        print("DBay Modules:")
-        print("-------------")
-        for i, module in enumerate(modules):
-            print(f"Slot {i}: {module}")
-        print("-------------")
-        return modules
+                module = None
+        child = params.inst(module, params)
+        self.children[key] = child
+        return child

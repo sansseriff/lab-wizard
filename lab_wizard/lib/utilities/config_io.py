@@ -235,10 +235,10 @@ def _attach_children(
     if not children_map:
         return
     for key, entry in list(children_map.items()):
-        kind = cast(Optional[str], entry.get("kind"))
+        type_str = cast(Optional[str], entry.get("type"))
         ref = cast(Optional[str], entry.get("ref"))
-        if not (isinstance(kind, str) and isinstance(ref, str)):
-            raise ValueError("child entry requires string fields: kind, ref, and mapping key")
+        if not (isinstance(type_str, str) and isinstance(ref, str)):
+            raise ValueError("child entry requires string fields: type, ref, and mapping key")
         child_path = _resolve_child_file(base_dir, ref)
         child_params, child_raw = _load_node(base_dir, child_path, visited_paths)
 
@@ -429,7 +429,7 @@ def _save_node_recursive(
         c_path, _ = _save_node_recursive(inst_dir, child_dir, child, key)
         # ref is relative to instruments/ so the YAML is portable
         ref = c_path.relative_to(inst_dir).as_posix()
-        child_refs[str(key)] = {"kind": str(c_type), "ref": ref}
+        child_refs[str(key)] = {"type": str(c_type), "ref": ref}
 
     cm = _dump_parent_to_dict(params, child_refs)
     _write_yaml(target, cm)
@@ -694,6 +694,10 @@ def add_instrument_chain(
             params_cls = load_params_class(ts)
             new_params = params_cls()
             _apply_key_to_params(ts, new_params, key)
+            extra = step.get("extra") or {}
+            for field_name, field_val in extra.items():
+                if hasattr(new_params, field_name):
+                    setattr(new_params, field_name, field_val)
 
             # Always use the hash key for storage so filenames are filesystem-safe.
             # The raw key value was already applied to the params fields above via

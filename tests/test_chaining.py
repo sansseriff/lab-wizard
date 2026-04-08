@@ -6,6 +6,7 @@ from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
 from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
+from lab_wizard.lib.utilities.config_io import instrument_hash
 
 
 @pytest.fixture(autouse=True)
@@ -37,18 +38,33 @@ def patch_serial(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_requested_chain_expression():
-    controller = PrologixGPIBParams(port="FAKE").create_inst()
-    sim900 = controller.add_child(Sim900Params(), "3")
+    # Build params first with children pre-configured
+    sim928_key = instrument_hash("sim928", "1")
+    sim970_key = instrument_hash("sim970", "5")
+    sim900_key = instrument_hash("sim900", "3")
 
-    sim928 = sim900.add_child(Sim928Params(), "1")
+    sim900_params = Sim900Params(
+        gpib_address="3",
+        children={
+            sim928_key: Sim928Params(slot="1"),
+            sim970_key: Sim970Params(slot="5"),
+        },
+    )
+    controller_params = PrologixGPIBParams(
+        port="FAKE",
+        children={sim900_key: sim900_params},
+    )
 
-    _sim970 = sim900.add_child(Sim970Params(), "5")
+    controller = controller_params.create_inst()
+    sim900 = controller.make_child(sim900_key)
+    sim928 = sim900.make_child(sim928_key)
+    _sim970 = sim900.make_child(sim970_key)
 
     sim928.set_voltage(3.0)
 
-    # Sim970 is a grandchild (child of sim900), so controller.get_child("5") should be None
-    assert controller.get_child("5") is None
-    assert controller.get_child("3") is sim900
-    assert sim900.children.get("1") is sim928
+    # sim970 is a grandchild (child of sim900), not directly in controller.children
+    assert controller.children.get(sim970_key) is None
+    assert controller.children.get(sim900_key) is sim900
+    assert sim900.children.get(sim928_key) is sim928
 
     print(sim900.children)

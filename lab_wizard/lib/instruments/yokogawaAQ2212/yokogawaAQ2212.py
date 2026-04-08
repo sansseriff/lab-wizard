@@ -42,10 +42,6 @@ class YokogawaAQ2212Params(
     def create_inst(self) -> "YokogawaAQ2212":
         return YokogawaAQ2212.from_params(self)
 
-    def __call__(self) -> "YokogawaAQ2212":
-        return self.create_inst()
-
-
 class YokogawaAQ2212(
     Parent[YokoAQ2212Dep, YokoAQ2212ChildParams],
     ParentFactory[YokogawaAQ2212Params, "YokogawaAQ2212"],

@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock, patch
+
 from lab_wizard.lib.instruments.dbay.dbay import DBay
 from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4D
 from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIB
@@ -11,13 +13,7 @@ from lab_wizard.lib.utilities.model_tree import Exp
 def _exp_with_sim_and_counter() -> Exp:
     return Exp.model_validate(
         {
-            "exp": {
-                "type": "pcr_curve",
-                "start_voltage": 0.0,
-                "stop_voltage": 1.0,
-                "step_voltage": 0.01,
-                "photon_rate": 100000.0,
-            },
+            "exp": {"type": "pcr_curve"},
             "device": {
                 "type": "device",
                 "name": "demo",
@@ -42,13 +38,13 @@ def _exp_with_sim_and_counter() -> Exp:
                     "children": {
                         "3": {
                             "type": "sim900",
-                            "num_children": 8,
+                            "gpib_address": "3",
                             "children": {
-                                "1": {"type": "sim928", "offline": False, "settling_time": 0.4},
+                                "1": {"type": "sim928", "slot": "1", "offline": False, "settling_time": 0.4},
                                 "5": {
                                     "type": "sim970",
+                                    "slot": "5",
                                     "offline": False,
-                                    "slot": 5,
                                     "attribute_name": "sense",
                                     "channels": [{}, {}, {}, {}],
                                 },
@@ -72,13 +68,7 @@ def _exp_with_sim_and_counter() -> Exp:
 def _exp_with_dbay() -> Exp:
     return Exp.model_validate(
         {
-            "exp": {
-                "type": "iv_curve",
-                "start_voltage": 0.0,
-                "stop_voltage": 1.0,
-                "step_voltage": 0.01,
-                "num_points": 10,
-            },
+            "exp": {"type": "iv_curve"},
             "device": {
                 "type": "device",
                 "name": "demo",
@@ -100,7 +90,7 @@ def _exp_with_dbay() -> Exp:
                     "ip_address": "10.0.0.6",
                     "ip_port": 8345,
                     "children": {
-                        "1": {"type": "dac4D", "name": "Dac4D", "channels": [{}, {}, {}, {}]}
+                        "1": {"type": "dac4D", "slot": "1", "name": "Dac4D", "channels": [{}, {}, {}, {}]}
                     },
                 }
             },
@@ -111,22 +101,22 @@ def _exp_with_dbay() -> Exp:
 def test_sim_from_config_reuses_existing_instances() -> None:
     exp = _exp_with_sim_and_counter()
 
-    prologix = PrologixGPIB.from_config(exp, "/dev/ttyUSB0")
-    sim900_a = Sim900.from_config(prologix, "3")
-    sim900_b = Sim900.from_config(prologix, 3)
+    prologix = PrologixGPIB.from_config(exp, key="/dev/ttyUSB0")
+    sim900_a = Sim900.from_config(prologix, key="3")
+    sim900_b = Sim900.from_config(prologix, key="3")
     assert sim900_a is sim900_b
 
-    sim928_a = Sim928.from_config(sim900_a, "1")
-    sim928_b = Sim928.from_config(sim900_a, 1)
+    sim928_a = Sim928.from_config(sim900_a, key="1")
+    sim928_b = Sim928.from_config(sim900_a, key="1")
     assert sim928_a is sim928_b
 
 
 def test_sim970_channels_keep_module_slot_transport() -> None:
     exp = _exp_with_sim_and_counter()
 
-    prologix = PrologixGPIB.from_config(exp, "/dev/ttyUSB0")
-    sim900 = Sim900.from_config(prologix, "3")
-    sim970 = Sim970.from_config(sim900, "5")
+    prologix = PrologixGPIB.from_config(exp, key="/dev/ttyUSB0")
+    sim900 = Sim900.from_config(prologix, key="3")
+    sim970 = Sim970.from_config(sim900, key="5")
 
     assert sim970.slot == 5
     assert sim970.channels
@@ -135,12 +125,18 @@ def test_sim970_channels_keep_module_slot_transport() -> None:
 
 def test_dbay_and_keysight_from_config() -> None:
     dbay_exp = _exp_with_dbay()
-    dbay = DBay.from_config(dbay_exp, "10.0.0.6:8345")
-    dac_a = Dac4D.from_config(dbay, "1")
-    dac_b = Dac4D.from_config(dbay, 1)
-    assert dac_a is dac_b
-    assert len(dac_a.channels) == 4
+
+    mock_module = MagicMock()
+    mock_client = MagicMock()
+    mock_client.module.return_value = mock_module
+
+    with patch("lab_wizard.lib.instruments.dbay.dbay.DBayClient", return_value=mock_client):
+        dbay = DBay.from_config(dbay_exp, key="10.0.0.6:8345")
+        dac_a = Dac4D.from_config(dbay, key="1")
+        dac_b = Dac4D.from_config(dbay, key="1")
+        assert dac_a is dac_b
+        assert len(dac_a.channels) == 4
 
     sim_exp = _exp_with_sim_and_counter()
-    keysight = Keysight53220A.from_config(sim_exp, "10.0.0.5:5025")
+    keysight = Keysight53220A.from_config(sim_exp, key="10.0.0.5:5025")
     assert len(keysight.channels) == 2

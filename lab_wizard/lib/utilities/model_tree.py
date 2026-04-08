@@ -43,22 +43,6 @@ class MplPlotter(BaseModel):
     dpi: int = Field(default=100, description="DPI for the matplotlib figure")
 
 
-class IVCurveParams(BaseModel):
-    type: Literal["iv_curve"] = "iv_curve"
-    start_voltage: float = Field(description="Start voltage for the IV curve")
-    stop_voltage: float = Field(description="Stop voltage for the IV curve")
-    step_voltage: float = Field(description="Voltage step size for the IV curve")
-    num_points: int = Field(default=100, description="Number of points in the IV curve")
-
-
-class PCRCurveParams(BaseModel):
-    type: Literal["pcr_curve"] = "pcr_curve"
-    start_voltage: float = Field(description="Start voltage for the PCR curve")
-    stop_voltage: float = Field(description="Stop voltage for the PCR curve")
-    step_voltage: float = Field(description="Voltage step size for the PCR curve")
-    photon_rate: float = Field(description="Number of photons per second")
-
-
 class Device(BaseModel):
     type: Literal["device"] = "device"
     name: str = Field(description="Name of the device")
@@ -68,7 +52,6 @@ class Device(BaseModel):
 
 SaverUnion = Annotated[FileSaver | DatabaseSaver, Field(discriminator="type")]
 PlotterUnion = Annotated[WebPlotter | MplPlotter, Field(discriminator="type")]
-ExpUnion = Annotated[IVCurveParams | PCRCurveParams, Field(discriminator="type")]
 
 
 def _parse_instrument_tree(data: dict[str, Any]) -> Any:
@@ -191,7 +174,7 @@ def _construct_from_path(
 
 
 class Exp(BaseModel):
-    exp: ExpUnion
+    exp: SerializeAsAny[BaseModel]
     device: Device
     saver: dict[str, SaverUnion]
     plotter: dict[str, PlotterUnion]
@@ -240,28 +223,6 @@ class Exp(BaseModel):
             )
         path, channel_index = result
         return _construct_from_path(path, self, channel_index)
-
-    def find_all_resources(self) -> dict[str, tuple[str, object]]:
-        """Find all resources in the experiment tree.
-        Returns dict mapping resource_id -> (access_path, object)."""
-        resources = {}
-
-        for inst_key, instrument in self.instruments.items():
-            base_path = f"exp.instruments['{inst_key}']"
-
-            # Check if the instrument itself has a resource
-            if hasattr(instrument, "has_resource") and instrument.has_resource():
-                resource_id = instrument.get_resource_id()
-                resources[resource_id] = (base_path, instrument)
-
-            # Check for nested resources (e.g., in mainframes)
-            if hasattr(instrument, "find_resources"):
-                nested_resources = instrument.find_resources(base_path)
-                for resource_id, path, obj in nested_resources:
-                    resources[resource_id] = (path, obj)
-
-        return resources
-
 
 def _rewrite_exp_yaml(yaml_path: Path | str, exp: Exp) -> None:
     """Rewrite the project YAML with corrected hash keys (in-place)."""

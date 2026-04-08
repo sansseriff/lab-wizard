@@ -11,6 +11,10 @@ config/instruments/*
 config/measurements/*
 config/plotters/*
 
+!config/instruments/.gitkeep
+!config/measurements/.gitkeep
+!config/plotters/.gitkeep
+
 
 # ignore all __pycache__ directories
 **/__pycache__/

@@ -74,6 +74,9 @@ def _should_skip(path: Path) -> bool:
 
 _CLASS_WITH_BASES = re.compile(r'class\s+(\w+Params)\s*\(([^)]+)\)', re.MULTILINE)
 _TYPE_LITERAL = re.compile(r'type:\s*Literal\[(["\'])([^"\']+)\1\]')
+# Reads the return string of each Child's `parent_class` property from source.
+# This is the canonical way parent-child relationships are discovered —
+# see Child.parent_class docstring in parent_child.py.
 _PARENT_CLASS_RETURN = re.compile(
     r'def\s+parent_class\s*\([^)]*\)[^:]*:.*?return\s+["\']([^"\']+)["\']',
     re.DOTALL,
@@ -99,15 +102,9 @@ def _scan_file_for_params(
         return results
 
     # Find Params class definitions with their base classes
-    class_matches = _CLASS_WITH_BASES.findall(content)
-    if not class_matches:
+    class_iter = list(_CLASS_WITH_BASES.finditer(content))
+    if not class_iter:
         return results
-
-    type_match = _TYPE_LITERAL.search(content)
-    if not type_match:
-        return results
-
-    type_value = type_match.group(2)
 
     try:
         rel_path = path.relative_to(instruments_dir)
@@ -128,15 +125,23 @@ def _scan_file_for_params(
         # "lab_wizard.lib.instruments.sim900.sim900.Sim900" → module part
         parent_module = raw.rsplit(".", 1)[0]
 
-    for class_name, bases_str in class_matches:
+    for i, match in enumerate(class_iter):
+        class_name, bases_str = match.group(1), match.group(2)
         is_top_level = bool(re.search(r'\bCanInstantiate\b', bases_str))
         is_child = bool(re.search(r'\bChildParams\b', bases_str))
         # Only register classes that are actual instrument params
         if not is_top_level and not is_child:
             # could be a channel params class.
             continue
+        # Search for type literal in THIS class's body only
+        body_start = match.end()
+        body_end = class_iter[i + 1].start() if i + 1 < len(class_iter) else len(content)
+        class_body = content[body_start:body_end]
+        type_match = _TYPE_LITERAL.search(class_body)
+        if not type_match:
+            continue  # No type literal → not a registered instrument
         results.append({
-            "type_value": type_value,
+            "type_value": type_match.group(2),
             "module": module_path,
             "class_name": class_name,
             "is_top_level": is_top_level,

@@ -16,7 +16,12 @@ from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
 from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
-from lab_wizard.lib.utilities.config_io import save_instruments_to_config
+from lab_wizard.lib.utilities.config_io import instrument_hash, save_instruments_to_config
+
+_PROLOGIX_KEY = instrument_hash("prologix_gpib", "/dev/ttyUSB0")
+_SIM900_KEY = instrument_hash("sim900", "5")
+_SIM928_KEY = instrument_hash("sim928", "1")
+_SIM970_KEY = instrument_hash("sim970", "2")
 
 
 @pytest.fixture
@@ -158,14 +163,15 @@ class TestResourcesMeta:
 
 def _seed_config(config_dir: Path) -> None:
     instruments = {
-        "/dev/ttyUSB0": PrologixGPIBParams(
+        _PROLOGIX_KEY: PrologixGPIBParams(
             port="/dev/ttyUSB0",
             children={
-                "5": Sim900Params(
+                _SIM900_KEY: Sim900Params(
+                    gpib_address="5",
                     children={
-                        "1": Sim928Params(),
-                        "2": Sim970Params(),
-                    }
+                        _SIM928_KEY: Sim928Params(slot="1"),
+                        _SIM970_KEY: Sim970Params(slot="2"),
+                    },
                 )
             },
         )
@@ -196,22 +202,22 @@ class TestCreateMeasurementProject:
                 {
                     "variable_name": "voltage_source",
                     "type": "sim928",
-                    "key": "1",
+                    "key": _SIM928_KEY,
                     "path": [
-                        {"type": "sim928", "key": "1"},
-                        {"type": "sim900", "key": "5"},
-                        {"type": "prologix_gpib", "key": "/dev/ttyUSB0"},
+                        {"type": "sim928", "key": _SIM928_KEY},
+                        {"type": "sim900", "key": _SIM900_KEY},
+                        {"type": "prologix_gpib", "key": _PROLOGIX_KEY},
                     ],
                 },
                 {
                     "variable_name": "voltage_sense",
                     "type": "sim970",
-                    "key": "2",
+                    "key": _SIM970_KEY,
                     "channel_index": 0,
                     "path": [
-                        {"type": "sim970", "key": "2"},
-                        {"type": "sim900", "key": "5"},
-                        {"type": "prologix_gpib", "key": "/dev/ttyUSB0"},
+                        {"type": "sim970", "key": _SIM970_KEY},
+                        {"type": "sim900", "key": _SIM900_KEY},
+                        {"type": "prologix_gpib", "key": _PROLOGIX_KEY},
                     ],
                 },
             ],
