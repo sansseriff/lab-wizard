@@ -39,7 +39,21 @@ echo ""
 echo "Installing bun (JavaScript runtime)..."
 
 if command -v bun &>/dev/null; then
-    echo "bun is already installed ($(bun --version)). Skipping install."
+    CURRENT_BUN="$(bun --version)"
+    echo "bun is already installed (v${CURRENT_BUN})."
+
+    # Check if an upgrade is available
+    LATEST_BUN="$(curl -fsSL https://github.com/oven-sh/bun/releases/latest -o /dev/null -w '%{url_effective}' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)"
+    if [[ -n "$LATEST_BUN" && "$CURRENT_BUN" != "$LATEST_BUN" ]]; then
+        echo "A newer version of bun is available (v${LATEST_BUN})."
+        read -rp "Upgrade bun? [Y/n] " bun_answer
+        bun_answer="${bun_answer:-Y}"
+        if [[ ! "$bun_answer" =~ ^[Nn]$ ]]; then
+            bun upgrade
+        fi
+    else
+        echo "bun is up to date."
+    fi
 else
     curl -fsSL https://bun.sh/install | bash
     # Source bun into the current shell so we can use it immediately
