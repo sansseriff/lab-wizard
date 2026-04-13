@@ -9,6 +9,30 @@ export type TreeItem = {
 	children: Record<string, TreeItem>;
 };
 
+export type DiscoveryInput = {
+	name: string;
+	type: string;
+	label: string;
+	default?: any;
+};
+
+export type DiscoveryAction = {
+	name: string;
+	label: string;
+	description: string;
+	inputs: DiscoveryInput[];
+	parent_dep?: string;
+	result_type: 'probe' | 'children' | 'self_candidates' | 'generic';
+};
+
+export type ChainStep = {
+	type: string;
+	key: string;
+	action: 'create_new' | 'use_existing';
+	resolved: boolean;
+	extra?: Record<string, any>;
+};
+
 export type InstrumentMeta = {
 	type: string;
 	class_name: string;
@@ -20,6 +44,7 @@ export type InstrumentMeta = {
 	child_types: string[];
 	defaults: Record<string, any>;
 	key_hint: string | null;
+	discovery_actions: DiscoveryAction[];
 };
 
 export type ManageData = {

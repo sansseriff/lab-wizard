@@ -10,6 +10,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
     GPIBAddressLike,
     Parent,
     ParentParams,
+    Discoverable,
 )
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixAddressedInstrumentDep
 from lab_wizard.lib.instruments.andoAQ8201A.comm import AndoAQ8201AFrameDep
@@ -26,6 +27,7 @@ class AndoAQ8201AParams(
     GPIBAddressLike,
     ParentParams["AndoAQ8201A", AndoAQ8201AFrameDep, AndoAQ8201AChildParams],
     ChildParams["AndoAQ8201A"],
+    Discoverable,
 ):
     """Parameters for Ando AQ8201A mainframe (hybrid Parent + Child).
 
@@ -40,6 +42,48 @@ class AndoAQ8201AParams(
     @property
     def inst(self):
         return AndoAQ8201A
+
+    # -- Discovery ----------------------------------------------------------
+
+    @classmethod
+    def discovery_actions(cls) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "scan_gpib",
+                "label": "Scan GPIB Bus",
+                "description": "Search for Ando AQ8201A mainframes on a Prologix controller",
+                "inputs": [],
+                "parent_dep": "prologix_gpib",
+                "result_type": "self_candidates",
+            },
+        ]
+
+    @classmethod
+    def run_discovery(cls, action: str, params: dict[str, Any], *, parent: Any = None) -> dict[str, Any]:
+        if action == "scan_gpib":
+            if parent is None:
+                raise ValueError("scan_gpib requires a prologix_gpib parent")
+            return cls._scan_gpib(parent)
+        raise NotImplementedError(f"Unknown action: {action}")
+
+    @classmethod
+    def _scan_gpib(cls, parent_inst: Any) -> dict[str, Any]:
+        from lab_wizard.lib.instruments.general.discovery import get_idn
+
+        controller = parent_inst.dep
+        timeout = float(parent_inst.params.timeout)
+
+        found: list[dict[str, Any]] = []
+        for address in range(30):
+            idn = get_idn(controller, address, read_delay_s=timeout)
+            if not idn or not idn.startswith("ANDO"):
+                continue
+            found.append({
+                "key_fields": {"gpib_address": str(address)},
+                "idn": idn,
+            })
+
+        return {"found": found}
 
 
 class AndoAQ8201A(

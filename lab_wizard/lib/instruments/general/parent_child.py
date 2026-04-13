@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from typing import Any, TypeVar, Generic, Iterable, Set, Type, Self, Iterator, ClassVar
 import inspect
 from pydantic import BaseModel, model_validator, field_validator
+from lab_wizard.lib.instruments.general.discovery import Discoverable
 
 
 # Move base classes above TypeVar declarations so bounds use real types (not strings)

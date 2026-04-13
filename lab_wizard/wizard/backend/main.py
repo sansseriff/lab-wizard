@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi import Depends
 import time
 import urllib.request
+
 try:
     import webview  # type: ignore
 except Exception:  # ImportError or runtime issues shouldn't block headless mode
@@ -20,10 +21,19 @@ from typing import Any
 from uvicorn import Config, Server
 from uuid import uuid4
 from lab_wizard.wizard.backend.models import Env, OutputReq
-from lab_wizard.wizard.backend.utils_runtime import has_gui_context, green, get_ipv4_addresses, is_ssh_session
+from lab_wizard.wizard.backend.utils_runtime import (
+    has_gui_context,
+    green,
+    get_ipv4_addresses,
+    is_ssh_session,
+)
 
 
-from lab_wizard.wizard.backend.get_measurements import get_measurements, reqs_from_measurement, discover_matching_instruments
+from lab_wizard.wizard.backend.get_measurements import (
+    get_measurements,
+    reqs_from_measurement,
+    discover_matching_instruments,
+)
 from lab_wizard.lib.utilities.config_io import (
     get_configured_tree,
     add_instrument_chain,
@@ -38,9 +48,12 @@ from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     generate_measurement_project,
 )
+from lab_wizard.wizard.backend.custom_resource_generation import (
+    GenerateCustomResourceRequest,
+    generate_custom_resource_project,
+)
 from pathlib import Path
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
-
 
 
 from lab_wizard.wizard.backend.location import WEB_DIR, LOG_DIR
@@ -93,7 +106,9 @@ app = FastAPI(lifespan=lifespan)
 async def request_logging_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
     request_id = uuid4().hex[:12]
     start = time.perf_counter()
-    logger.debug("request.start id=%s %s %s", request_id, request.method, request.url.path)
+    logger.debug(
+        "request.start id=%s %s %s", request_id, request.method, request.url.path
+    )
     try:
         response = await call_next(request)
     except Exception:
@@ -113,6 +128,7 @@ async def request_logging_middleware(request: Request, call_next):  # type: igno
     response.headers["X-Request-ID"] = request_id
     return response
 
+
 class UvicornServer(multiprocessing.Process):
     def __init__(self, config: Config):
         super().__init__()
@@ -125,9 +141,6 @@ class UvicornServer(multiprocessing.Process):
     def run(self):
         # print("running server")
         self.server.run()
-
-
-
 
 
 # NOTE: Mount StaticFiles AFTER declaring API routes so it doesn't intercept /api/*
@@ -162,7 +175,6 @@ def get_instruments(
 
     logger.info("Getting instruments for measurement '%s'", name)
 
-
     # in order to keep pages stateless, we re-aquire all measurements and then select the requested one
     all_meas = get_measurements(env)
     if name not in all_meas:
@@ -172,8 +184,7 @@ def get_instruments(
     if verbose:
         logger.debug("Measurement choice for '%s': %s", name, choice)
 
-
-    try: 
+    try:
         reqs = reqs_from_measurement(choice)
 
         for req in reqs:
@@ -190,43 +201,30 @@ def get_instruments(
 
             req.matching_instruments = matches
 
-
         # convert reqs to OutputReq for JSON serialization
         # must convert req.base_type from type to str
-        reqs = [OutputReq(
-            variable_name=req.variable_name,
-            base_type=str(req.base_type),
-            matching_instruments=req.matching_instruments
-        ) for req in reqs]
-
+        reqs = [
+            OutputReq(
+                variable_name=req.variable_name,
+                base_type=str(req.base_type),
+                matching_instruments=req.matching_instruments,
+            )
+            for req in reqs
+        ]
 
         if verbose:
             logger.debug("Final instrument requirements for '%s': %s", name, reqs)
 
         return reqs
-    
+
     except Exception as e:
         logger.exception("Error getting requirements for measurement '%s': %s", name, e)
         # raise HTTPException(status_code=500, detail=f"Error getting requirements: {e}")
         return {"error": str(e)}
-    
-
-
-
-
-
-@app.get("/api/resources/meta")
-def get_resources_meta(env: Env = Depends(get_env)):
-    """Return placeholder metadata for the create custom resource page."""
-    return {
-        "types": [
-            {"id": "instrument", "label": "Instrument"},
-            {"id": "component", "label": "Component"},
-        ]
-    }
 
 
 # -------------------- Manage Instruments --------------------
+
 
 def _config_dir(env: Env) -> str:
     return str(env.base_dir.parent / "config")
@@ -254,7 +252,9 @@ class _ChainStep(_BM):
     type: str
     key: str
     action: str  # "create_new" | "use_existing"
-    extra: dict = _Field(default_factory=dict)  # optional extra fields to set on newly-created params
+    extra: dict = _Field(
+        default_factory=dict
+    )  # optional extra fields to set on newly-created params
 
 
 class _AddBody(_BM):
@@ -308,71 +308,107 @@ def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/api/manage-instruments/probe-dbay")
-def api_probe_dbay(ip_address: str, ip_port: int):
-    """Try to reach a DBay GUI server and return its loaded modules."""
-    import json
-    url = f"http://{ip_address}:{ip_port}/full-state"
+class _DiscoverBody(_BM):
+    type: str
+    action: str
+    params: dict = _Field(default_factory=dict)
+    # Resolved ancestor chain, ordered root-first.
+    # e.g. [{"type": "prologix_gpib", "key": "a1b2c3d4"}]
+    parent_chain: list[dict] = _Field(default_factory=list)
+
+
+def _walk_parent_chain(chain: list[dict], env: Env):
+    """Walk a resolved ancestor chain top-down, initializing each level.
+
+    ``chain`` is root-first: [{"type": "prologix_gpib", "key": "a1b2"}, ...]
+    Returns the last (deepest) initialized instrument — the immediate parent
+    of the discovery target.
+    """
+    config_dir = _config_dir(env)
+    instruments = load_instruments(config_dir)
+
+    root_key = chain[0]["key"]
+    root_params = instruments.get(root_key)
+    if root_params is None:
+        raise HTTPException(404, f"Top-level {chain[0]['type']} ({root_key}) not found in config")
+
+    current_inst = root_params.create_inst()
+    for step in chain[1:]:
+        current_inst = current_inst.make_child(step["key"])
+
+    return current_inst
+
+
+@app.post("/api/manage-instruments/discover")
+def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
+    """Run a discovery action defined on an instrument's Params class."""
+    from lab_wizard.lib.utilities.params_discovery import load_params_class
+
+    cls = load_params_class(body.type)
+    if not hasattr(cls, "run_discovery"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Type '{body.type}' does not support discovery",
+        )
+
+    parent_inst = None
+    if body.parent_chain:
+        parent_inst = _walk_parent_chain(body.parent_chain, env)
+
     try:
-        with urllib.request.urlopen(url, timeout=2) as r:
-            state = json.loads(r.read())
-        modules = [
-            {"slot": m["core"]["slot"], "type": m["core"]["type"]}
-            for m in state.get("data", [])
-            if m.get("core", {}).get("type") not in ("empty", None)
-        ]
-        return {"reachable": True, "modules": modules}
-    except Exception:
-        return {"reachable": False, "modules": []}
+        return cls.run_discovery(body.action, body.params, parent=parent_inst)
+    except NotImplementedError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception("Discovery action failed: %s/%s — %s", body.type, body.action, e)
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        if parent_inst is not None and hasattr(parent_inst, 'disconnect'):
+            parent_inst.disconnect()
 
 
-class _SyncDbayBody(_BM):
-    ip_address: str
-    ip_port: int
+class _ApplyChildrenBody(_BM):
+    parent_type: str
+    parent_key: str
+    children: list[dict]  # [{type, key_fields: {slot?, gpib_address?, ...}}]
 
 
-@app.post("/api/manage-instruments/sync-dbay")
-def api_sync_dbay(body: _SyncDbayBody, env: Env = Depends(get_env)):
-    """Fetch modules from a running DBay GUI server and add them to the config."""
-    import json
+@app.post("/api/manage-instruments/apply-children")
+def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
+    """Add discovered children to an existing parent instrument in config."""
     from lab_wizard.lib.utilities.params_discovery import load_params_class
 
     config_dir = _config_dir(env)
     instruments = load_instruments(config_dir)
 
-    dbay_params = next(
-        (p for p in instruments.values()
-         if getattr(p, "type", None) == "dbay"
-         and getattr(p, "ip_address", None) == body.ip_address
-         and getattr(p, "ip_port", None) == body.ip_port),
+    parent = next(
+        (
+            p
+            for p in instruments.values()
+            if getattr(p, "type", None) == body.parent_type
+        ),
         None,
     )
-    if dbay_params is None:
-        raise HTTPException(status_code=404, detail="DBay not found in config")
+    if parent is None:
+        raise HTTPException(status_code=404, detail=f"Parent {body.parent_type} ({body.parent_key}) not found")
 
-    url = f"http://{body.ip_address}:{body.ip_port}/full-state"
-    try:
-        with urllib.request.urlopen(url, timeout=5) as r:
-            state = json.loads(r.read())
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Cannot reach DBay GUI server: {e}")
-
-    _SYNC_TYPE_MAP = {"dac4D": "dac4D", "dac16D": "dac16D"}
     added = []
-    for m in state.get("data", []):
-        mtype = m.get("core", {}).get("type")
-        slot = m.get("core", {}).get("slot")
-        if mtype not in _SYNC_TYPE_MAP or slot is None:
+    for child_spec in body.children:
+        child_type = child_spec["type"]
+        key_fields = child_spec.get("key_fields", {})
+        if child_type is None:
             continue
-        params_cls = load_params_class(_SYNC_TYPE_MAP[mtype])
+        params_cls = load_params_class(child_type)
         child_params = params_cls()
-        child_params.slot = str(slot)
-        child_key = instrument_hash(mtype, str(slot))
-        dbay_params.children[child_key] = child_params
-        added.append({"slot": slot, "type": mtype})
+        for field_name, field_val in key_fields.items():
+            if hasattr(child_params, field_name):
+                setattr(child_params, field_name, str(field_val))
+        child_key = instrument_hash(child_type, *[str(v) for v in key_fields.values()])
+        parent.children[child_key] = child_params
+        added.append({"type": child_type, **key_fields})
 
     save_instruments_to_config(instruments, config_dir)
-    logger.info("DBay sync: added %d modules for %s:%s", len(added), body.ip_address, body.ip_port)
+    logger.info("apply-children: added %d children to %s (%s)", len(added), body.parent_type, body.parent_key)
     return {"status": "ok", "added": added, "tree": get_configured_tree(config_dir)}
 
 
@@ -390,6 +426,23 @@ def api_create_measurement_project(
         )
     except Exception as e:
         logger.exception("Create measurement project API failed: %s", e)
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/create-custom-resource-project")
+def api_create_custom_resource_project(
+    body: GenerateCustomResourceRequest,
+    env: Env = Depends(get_env),
+):
+    """Create a new timestamped project containing a programmatically built setup file."""
+    try:
+        return generate_custom_resource_project(
+            config_dir=Path(_config_dir(env)),
+            projects_dir=_projects_dir(env),
+            req=body,
+        )
+    except Exception as e:
+        logger.exception("Create custom resource project API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -416,7 +469,7 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
 
     health_url = url_to_load.rstrip("/") + "/api/health"
     _wait_for_server(health_url)
-    
+
     def on_closed():
         pipe_send.send("closed")
 
@@ -436,9 +489,10 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
     # if FRAMELESS:
     #     win.events.before_load += add_buttons
     _win.events.closed += on_closed  # type: ignore[attr-defined]
-    webview.start(storage_path=tempfile.mkdtemp(), debug=debug, icon="../static/icon.png")
+    webview.start(
+        storage_path=tempfile.mkdtemp(), debug=debug, icon="../static/icon.png"
+    )
     _win.evaluate_js("window.special = 3")  # type: ignore[attr-defined]
-
 
 
 def parse_arguments():
@@ -481,7 +535,6 @@ if __name__ == "__main__":
     instance = UvicornServer(config=config)
     instance.start()
 
-
     # If port 0 (auto), we can't easily query the bound port from uvicorn.Server in this process
     # without IPC, so keep to explicit ports for now. If needed, add a pipe to report.
     url = f"http://{webview_ip}:{server_port}/"
@@ -510,7 +563,9 @@ if __name__ == "__main__":
         # Enumerate all non-loopback IPv4s and print URLs
         ips = get_ipv4_addresses()
         if ips:
-            print("Reachable URLs on this host:")
+            print(
+                "Reachable URLs on this host (for remote access, let port 8884 through your firewall):"
+            )
             for ip in ips:
                 print("  ", green(f"http://{ip}:{server_port}/"))
         else:

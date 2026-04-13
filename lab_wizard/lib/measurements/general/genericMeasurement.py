@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 
 class GenericMeasurement(ABC):
     @abstractmethod
-    def run_measurement(self):
+    def run_measurement(self) -> dict[str, Any]:
         """
         Run the measurement process.
 

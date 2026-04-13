@@ -10,11 +10,15 @@ from lab_wizard.lib.instruments.general.parent_child import (
     Child,
     CanInstantiate,
     IPLike,
+    Discoverable,
 )
 from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4DParams, Dac4D
 from lab_wizard.lib.instruments.dbay.modules.dac16d import Dac16DParams, Dac16D
 from lab_wizard.lib.instruments.dbay.modules.empty import EmptyParams, Empty
 
+
+# Map DBay server module types to child Params types
+_CHILD_TYPE_MAP: dict[str, str] = {"dac4D": "dac4D", "dac16D": "dac16D"}
 
 DBayChildParams = Annotated[
     Dac4DParams | Dac16DParams | EmptyParams, Field(discriminator="type")
@@ -25,6 +29,7 @@ class DBayParams(
     IPLike,
     ParentParams["DBay", DBayClient, DBayChildParams],
     CanInstantiate["DBay"],
+    Discoverable,
 ):
     """Params for DBay controller.
 
@@ -50,6 +55,53 @@ class DBayParams(
 
     def create_inst(self) -> "DBay":
         return DBay.from_params(self)
+
+    # -- Discovery ----------------------------------------------------------
+
+    @classmethod
+    def discovery_actions(cls) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "populate_children",
+                "label": "Discover & Sync Modules",
+                "description": "Connect to DBay server and auto-populate child modules",
+                "inputs": [
+                    {"name": "ip_address", "type": "text", "label": "IP Address", "default": "127.0.0.1"},
+                    {"name": "ip_port", "type": "number", "label": "Port", "default": 8345},
+                ],
+                "result_type": "children",
+            },
+        ]
+
+    @classmethod
+    def run_discovery(cls, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        if action == "populate_children":
+            return cls._discover_children(params["ip_address"], int(params["ip_port"]))
+        raise NotImplementedError(f"Unknown action: {action}")
+
+    @classmethod
+    def _discover_children(cls, ip_address: str, ip_port: int) -> dict[str, Any]:
+        import json
+        import urllib.request
+
+        url = f"http://{ip_address}:{ip_port}/full-state"
+        with urllib.request.urlopen(url, timeout=5) as r:
+            state = json.loads(r.read())
+
+        children: list[dict[str, Any]] = []
+        for m in state.get("data", []):
+            mtype = m.get("core", {}).get("type")
+            slot = m.get("core", {}).get("slot")
+            if mtype not in _CHILD_TYPE_MAP or slot is None:
+                continue
+            children.append({
+                "type": _CHILD_TYPE_MAP[mtype],
+                "key_fields": {"slot": str(slot)},
+            })
+        return {
+            "children": children,
+            "parent_key": f"{ip_address}:{ip_port}",
+        }
 
 
 class DBay(

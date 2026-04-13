@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
+import logging
+
+logger = logging.getLogger(__name__)
 from pydantic import Field, model_validator
 
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900, Sim900Params
@@ -13,6 +16,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
     ChildParams,
     CanInstantiate,
     USBLike,
+    Discoverable,
 )
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixControllerDep
 from lab_wizard.lib.instruments.general.serial import SerialDep, LocalSerialDep
@@ -29,6 +33,7 @@ class PrologixGPIBParams(
     USBLike,
     ParentParams["PrologixGPIB", SerialDep, PrologixChildParams],
     CanInstantiate["PrologixGPIB"],
+    Discoverable,
 ):
     """Params for Prologix GPIB controller.
 
@@ -56,6 +61,40 @@ class PrologixGPIBParams(
 
     def create_inst(self) -> "PrologixGPIB":
         return PrologixGPIB.from_params(self)
+
+    # -- Discovery ----------------------------------------------------------
+
+    @classmethod
+    def discovery_actions(cls) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "scan_usb",
+                "label": "Scan USB Ports",
+                "description": "Find Prologix GPIB-USB controllers connected to this computer",
+                "inputs": [],
+                "result_type": "probe",
+            },
+        ]
+
+    @classmethod
+    def run_discovery(
+        cls, action: str, params: dict[str, Any], *, parent: Any = None
+    ) -> dict[str, Any]:
+        if action == "scan_usb":
+            return cls._scan_usb()
+        raise NotImplementedError(f"Unknown action: {action}")
+
+    @classmethod
+    def _scan_usb(cls) -> dict[str, Any]:
+        import serial.tools.list_ports
+
+        controllers = [
+            {"port": p.device, "description": p.description}
+            for p in serial.tools.list_ports.comports()
+            if p.description and "Prologix" in p.description
+        ]
+        return {"found": controllers}
+
 
 class PrologixGPIB(
     Parent[PrologixControllerDep, PrologixChildParams],

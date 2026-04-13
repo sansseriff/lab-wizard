@@ -395,10 +395,13 @@ def get_instrument_metadata() -> dict[str, dict[str, Any]]:
     for ts, info in type_map.items():
         defaults: dict[str, Any] = {}
         key_hint: str | None = None
+        discovery_actions: list[dict[str, Any]] = []
         try:
             cls = load_params_class(ts, verbose=False)
             defaults = cls().model_dump()
             key_hint = getattr(cls, "key_hint", None)
+            if hasattr(cls, "discovery_actions"):
+                discovery_actions = cls.discovery_actions()
         except Exception:
             pass
 
@@ -413,6 +416,7 @@ def get_instrument_metadata() -> dict[str, dict[str, Any]]:
             "child_types": sorted(children_of.get(ts, [])),
             "defaults": defaults,
             "key_hint": key_hint,
+            "discovery_actions": discovery_actions,
         }
 
     _instrument_metadata = result

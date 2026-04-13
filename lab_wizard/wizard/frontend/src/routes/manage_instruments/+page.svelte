@@ -3,8 +3,8 @@
 	import type { TreeItem as TreeNodeItem } from '$lib/components/TreeNode.svelte';
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import { fetchWithConfig } from '../../api';
-	import { Plus, ArrowLeft } from 'phosphor-svelte';
-	import type { TreeItem, InstrumentMeta } from './+page.ts';
+	import { PlusIcon, ArrowLeftIcon } from 'phosphor-svelte';
+	import type { TreeItem, InstrumentMeta, DiscoveryAction, ChainStep } from './+page.ts';
 
 	let { data } = $props();
 	let tree: TreeItem[] = $state(data.tree ?? []);
@@ -20,19 +20,20 @@
 	let showAddWizard = $state(false);
 	let addStep = $state(0);
 	let selectedType: string | null = $state(null);
-	let chainSteps: { type: string; key: string; action: 'create_new' | 'use_existing'; extra?: Record<string, any> }[] = $state(
-		[]
-	);
+	let chainSteps: ChainStep[] = $state([]);
 	let currentChainIndex = $state(0);
 	let addLoading = $state(false);
 
-	// DBay-specific state
-	let dbayIpAddress = $state('127.0.0.1');
-	let dbayPort = $state(8345);
-	let dbayMode: 'gui' | 'direct' = $state('gui');
-	let dbayProbeResult: { reachable: boolean; modules: { slot: number; type: string }[] } | null =
-		$state(null);
-	let dbayProbing = $state(false);
+	// Generic discovery state
+	let discoveryActions: DiscoveryAction[] = $state([]);
+	let discoveryInputs: Record<string, any> = $state({});
+	let discoveryInputsHaveChanged = $state(false);
+	let discoveryResult: Record<string, any> | null = $state(null);
+	let discoveryLoading = $state(false);
+	let discoveryTargetType: string | null = $state(null); // which type discovery is currently for (leaf or parent)
+
+	// Optimistically saved parent keys (for cleanup on cancel)
+	let savedParentKeys: string[] = $state([]);
 
 	async function refetchData() {
 		const d = await fetchWithConfig<{ tree: TreeItem[]; metadata: Record<string, InstrumentMeta> }>(
@@ -106,10 +107,35 @@
 		chainSteps = [];
 		currentChainIndex = 0;
 		statusMessage = null;
-		dbayIpAddress = '127.0.0.1';
-		dbayPort = 8345;
-		dbayMode = 'gui';
-		dbayProbeResult = null;
+		discoveryActions = [];
+		discoveryInputs = {};
+		discoveryResult = null;
+		discoveryTargetType = null;
+		savedParentKeys = [];
+	}
+
+	async function saveResolvedParent(stepIndex: number) {
+		const step = chainSteps[stepIndex];
+		if (step.action !== 'create_new' || !step.key) return;
+
+		// Build a mini-chain for just this parent and its ancestors above it
+		const miniChain: ChainStep[] = [];
+		// The current step being saved
+		miniChain.push({ ...step });
+		// All ancestors above this step (higher indices = further up)
+		for (let i = stepIndex + 1; i < chainSteps.length; i++) {
+			miniChain.push({ ...chainSteps[i] });
+		}
+
+		await fetchWithConfig('/api/manage-instruments/add', 'POST', {
+			chain: miniChain
+		});
+
+		// Switch step to use_existing now that it's saved
+		chainSteps[stepIndex].action = 'use_existing';
+		// Track for cleanup on cancel
+		savedParentKeys.push(step.key);
+		await refetchData();
 	}
 
 	function selectTypeForAdd(typeStr: string) {
@@ -117,29 +143,47 @@
 		const meta = metadata[typeStr];
 		if (!meta) return;
 
+		// Set up discovery actions from metadata
+		discoveryActions = meta.discovery_actions ?? [];
+		discoveryTargetType = typeStr;
+		discoveryResult = null;
+		discoveryInputsHaveChanged = false;
+
+		// Initialize discovery inputs from action defaults
+		if (discoveryActions.length > 0) {
+			const inputs: Record<string, any> = {};
+			for (const action of discoveryActions) {
+				for (const inp of action.inputs) {
+					if (inp.default !== undefined) inputs[inp.name] = inp.default;
+				}
+			}
+			discoveryInputs = inputs;
+		}
+
 		const chain = meta.parent_chain;
 		if (chain.length === 0) {
-			chainSteps = [{ type: typeStr, key: '', action: 'create_new' }];
-			if (typeStr === 'dbay') {
-				// DBay gets a custom config step with ip/port/mode and auto-probe
+			chainSteps = [{ type: typeStr, key: '', action: 'create_new', resolved: false }];
+			if (discoveryActions.length > 0) {
+				// Has discovery support — show discovery step
 				addStep = 20;
-				probeDbay();
+				// Auto-run discovery immediately (no need to wait for user)
+				if (discoveryActions.length > 0) {
+					runDiscovery(discoveryActions[0].name);
+				}
 			} else if (meta.key_hint) {
-				// USBLike / IPLike: must ask for the actual address
 				addStep = 2;
 			} else {
-				// No key policy: use type string as a stable key
 				chainSteps[0].key = typeStr;
 				addStep = 3;
 			}
 		} else {
 			// Build chain bottom-up: leaf first, then parents
 			chainSteps = [
-				{ type: typeStr, key: '', action: 'create_new' },
-				...chain.map((pt) => ({ type: pt, key: '', action: 'use_existing' as const }))
+				{ type: typeStr, key: '', action: 'create_new', resolved: false },
+				...chain.map((pt) => ({ type: pt, key: '', action: 'use_existing' as const, resolved: false }))
 			];
-			currentChainIndex = chain.length; // start from the root (last in chainSteps)
-			addStep = 1; // parent selection step
+			currentChainIndex = chain.length;
+			addStep = 1;
 		}
 	}
 
@@ -155,19 +199,43 @@
 		return results;
 	}
 
-	function selectExistingParent(key: string) {
+	async function selectExistingParent(key: string) {
 		chainSteps[currentChainIndex].action = 'use_existing';
 		chainSteps[currentChainIndex].key = key;
+		chainSteps[currentChainIndex].resolved = true;
 		advanceChain();
 	}
 
 	function selectCreateNewParent() {
 		chainSteps[currentChainIndex].action = 'create_new';
-		addStep = 10; // key entry for new parent
+		const parentType = chainSteps[currentChainIndex].type;
+		const parentMeta = metadata[parentType];
+		const parentDiscovery = parentMeta?.discovery_actions ?? [];
+
+		if (parentDiscovery.length > 0) {
+			// Parent has discovery actions — show discovery UI for the parent
+			discoveryTargetType = parentType;
+			discoveryActions = parentDiscovery;
+			discoveryResult = null;
+			discoveryInputsHaveChanged = false;
+			const inputs: Record<string, any> = {};
+			for (const action of parentDiscovery) {
+				for (const inp of action.inputs) {
+					if (inp.default !== undefined) inputs[inp.name] = inp.default;
+				}
+			}
+			discoveryInputs = inputs;
+			addStep = 20;
+			runDiscovery(parentDiscovery[0].name);
+		} else {
+			addStep = 10; // manual key entry for new parent
+		}
 	}
 
-	function confirmNewParentKey(key: string) {
+	async function confirmNewParentKey(key: string) {
 		chainSteps[currentChainIndex].key = key;
+		chainSteps[currentChainIndex].resolved = true;
+		await saveResolvedParent(currentChainIndex);
 		advanceChain();
 	}
 
@@ -179,10 +247,50 @@
 			return;
 		}
 		if (currentChainIndex === 0) {
-			// This is the leaf — needs a key
-			addStep = 2;
+			// We've resolved all parents and are now at the leaf (index 0).
+			const leafType = chainSteps[0].type;
+			const leafMeta = metadata[leafType];
+			const leafDiscovery = leafMeta?.discovery_actions ?? [];
+
+			if (leafDiscovery.length > 0) {
+				// Leaf has discovery — go to step 20
+				discoveryTargetType = leafType;
+				discoveryActions = leafDiscovery;
+				discoveryResult = null;
+				discoveryInputsHaveChanged = false;
+
+				// Initialize discovery inputs from defaults
+				const inputs: Record<string, any> = {};
+				for (const action of leafDiscovery) {
+					for (const inp of action.inputs) {
+						if (inp.default !== undefined) inputs[inp.name] = inp.default;
+					}
+				}
+				discoveryInputs = inputs;
+
+				addStep = 20;
+				runDiscovery(leafDiscovery[0].name);
+			} else {
+				addStep = 2; // Manual key entry
+			}
 		} else {
 			addStep = 1; // next parent in chain
+		}
+	}
+
+	const isParentDiscovery = $derived(discoveryTargetType !== null && discoveryTargetType !== selectedType);
+
+	async function resolveDiscoverySelection(key: string) {
+		if (isParentDiscovery) {
+			// Resolve the current parent chain step and advance
+			chainSteps[currentChainIndex].key = key;
+			chainSteps[currentChainIndex].resolved = true;
+			await saveResolvedParent(currentChainIndex);
+			advanceChain();
+		} else {
+			// Leaf discovery — set leaf key and execute
+			chainSteps[0].key = key;
+			executeAdd();
 		}
 	}
 
@@ -191,43 +299,70 @@
 		addStep = 3; // confirm
 	}
 
-	async function probeDbay() {
-		dbayProbing = true;
-		dbayProbeResult = null;
-		try {
-			const r = await fetchWithConfig<{
-				reachable: boolean;
-				modules: { slot: number; type: string }[];
-			}>(
-				`/api/manage-instruments/probe-dbay?ip_address=${dbayIpAddress}&ip_port=${dbayPort}`,
-				'GET'
-			);
-			dbayProbeResult = r;
-		} catch {
-			dbayProbeResult = { reachable: false, modules: [] };
-		} finally {
-			dbayProbing = false;
-		}
-	}
 
-	function confirmDbayConfig() {
-		chainSteps[0].key = `${dbayIpAddress}:${dbayPort}`;
-		chainSteps[0].extra = { mode: dbayMode };
-		addStep = 3;
+	async function runDiscovery(actionName: string) {
+		const targetType = discoveryTargetType ?? selectedType;
+		if (!targetType) return;
+		discoveryLoading = true;
+		discoveryResult = null;
+		try {
+			// Build resolved ancestor chain (root-first) from chainSteps
+			// chainSteps is leaf-first: [leaf, parent, grandparent, ...]
+			const targetIndex = chainSteps.findIndex(s => s.type === targetType);
+			const parentChain: {type: string, key: string}[] = [];
+			if (targetIndex >= 0) {
+				for (let i = chainSteps.length - 1; i > targetIndex; i--) {
+					const step = chainSteps[i];
+					if (step.resolved && step.key) {
+						parentChain.push({ type: step.type, key: step.key });
+					}
+				}
+			}
+
+			const response = await fetchWithConfig('/api/manage-instruments/discover', 'POST', {
+				type: targetType,
+				action: actionName,
+				params: discoveryInputs,
+				...(parentChain.length > 0 ? { parent_chain: parentChain } : {})
+			});
+			discoveryResult = response;
+		} catch (e: any) {
+			statusMessage = { text: `Discovery failed: ${e.message ?? e}`, ok: false };
+		} finally {
+			discoveryLoading = false;
+		}
 	}
 
 	async function executeAdd() {
 		addLoading = true;
 		statusMessage = null;
 		try {
+			// Ensure the leaf key is set from discovery result if not already done
+			if (!chainSteps[0].key) {
+				if (discoveryResult?.parent_key) {
+					chainSteps[0].key = discoveryResult.parent_key;
+				}
+			}
+
+			// Add the parent first
 			await fetchWithConfig('/api/manage-instruments/add', 'POST', { chain: chainSteps });
-			if (selectedType === 'dbay' && dbayMode === 'gui') {
-				await fetchWithConfig('/api/manage-instruments/sync-dbay', 'POST', {
-					ip_address: dbayIpAddress,
-					ip_port: dbayPort
+
+			// If discovery found children, apply them
+			if (
+				discoveryResult?.children &&
+				discoveryResult.children.length > 0 &&
+				selectedType
+			) {
+				const parentKey = chainSteps[0].key;
+				await fetchWithConfig('/api/manage-instruments/apply-children', 'POST', {
+					parent_type: selectedType,
+					parent_key: parentKey,
+					children: discoveryResult.children
 				});
 			}
+
 			statusMessage = { text: `Added ${selectedType}`, ok: true };
+			savedParentKeys = []; // parents are now permanent
 			await refetchData();
 			showAddWizard = false;
 		} catch (e: any) {
@@ -245,6 +380,27 @@
 	);
 	const currentExisting = $derived(currentStepType ? findExistingInstances(currentStepType) : []);
 
+	async function cancelAddWizard() {
+		// Clean up optimistically saved parents (children first = reverse order)
+		for (let i = savedParentKeys.length - 1; i >= 0; i--) {
+			const key = savedParentKeys[i];
+			// Find the type from chainSteps
+			const step = chainSteps.find(s => s.key === key);
+			if (step) {
+				try {
+					await fetchWithConfig('/api/manage-instruments/remove', 'POST', {
+						type: step.type, key
+					});
+				} catch {
+					// fire-and-forget cleanup
+				}
+			}
+		}
+		savedParentKeys = [];
+		showAddWizard = false;
+		await refetchData();
+	}
+
 	// Temp key input
 	let tempKey = $state('');
 </script>
@@ -255,7 +411,7 @@
 			href="/"
 			class="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
 		>
-			<ArrowLeft size={20} />
+			<ArrowLeftIcon size={20} />
 		</a>
 		<h1 class="text-2xl font-semibold">Manage Instruments</h1>
 	</div>
@@ -294,7 +450,7 @@
 			class="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 active:bg-indigo-700"
 			onclick={startAddWizard}
 		>
-			<Plus size={16} />
+			<PlusIcon size={16} />
 			Add Instrument
 		</button>
 	{/if}
@@ -308,9 +464,36 @@
 				<h2 class="text-lg font-medium">Add Instrument</h2>
 				<button
 					class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-					onclick={() => (showAddWizard = false)}>Cancel</button
+					onclick={cancelAddWizard}>Cancel</button
 				>
 			</div>
+
+			<!-- Dependency chain sidebar — only shown for instruments with parent chains -->
+			{#if chainSteps.length > 1}
+				<div class="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
+					{#each [...chainSteps].reverse() as step, i}
+						{@const isLast = i === chainSteps.length - 1}
+						<div class="flex items-center gap-2">
+							<!-- Node box -->
+							<div
+								class="flex-shrink-0 rounded-lg border-2 px-3 py-2 text-xs font-medium transition-colors
+									{step.resolved
+										? 'border-green-500 bg-green-50 text-green-800 dark:border-green-400 dark:bg-green-900/30 dark:text-green-300'
+										: 'border-dashed border-gray-300 bg-white text-gray-500 dark:border-gray-600 dark:bg-gray-800/50 dark:text-gray-400'}"
+							>
+								<div class="font-semibold">{step.type}</div>
+								{#if step.key}
+									<div class="mt-0.5 font-mono text-xs opacity-75">{step.key}</div>
+								{/if}
+							</div>
+							<!-- Arrow connector -->
+							{#if !isLast}
+								<div class="flex-shrink-0 text-gray-400">→</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
 
 			<!-- Step 0: Select instrument type -->
 			{#if addStep === 0}
@@ -319,7 +502,7 @@
 				</p>
 
 				{#if topLevelTypes.length > 0}
-					<h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+					<h3 class="mb-1 text-xs font-semibold tracking-wide text-gray-500 uppercase">
 						Top-level instruments
 					</h3>
 					<div class="mb-3 space-y-1">
@@ -337,7 +520,7 @@
 
 				{#if Object.keys(parentGroups()).length > 0}
 					{#each Object.entries(parentGroups()) as [parentType, children]}
-						<h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+						<h3 class="mb-1 text-xs font-semibold tracking-wide text-gray-500 uppercase">
 							{parentType} modules
 						</h3>
 						<div class="mb-3 space-y-1">
@@ -363,7 +546,7 @@
 				</p>
 
 				{#if currentExisting.length > 0}
-					<h3 class="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+					<h3 class="mb-1 text-xs font-semibold tracking-wide text-gray-500 uppercase">
 						Use existing
 					</h3>
 					<div class="mb-3 space-y-1">
@@ -387,18 +570,18 @@
 				</button>
 			{/if}
 
-		<!-- Step 10: Key entry for a new parent being created -->
-		{#if addStep === 10 && currentStepType}
-			<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
-				Enter a key for the new <span class="font-medium">{currentStepType}</span>:
-			</p>
-			<div class="flex gap-2">
-				<input
-					type="text"
-					bind:value={tempKey}
-					placeholder={metadata[currentStepType]?.key_hint ?? 'e.g. address or slot'}
-					class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-				/>
+			<!-- Step 10: Key entry for a new parent being created -->
+			{#if addStep === 10 && currentStepType}
+				<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
+					Enter a key for the new <span class="font-medium">{currentStepType}</span>:
+				</p>
+				<div class="flex gap-2">
+					<input
+						type="text"
+						bind:value={tempKey}
+						placeholder={metadata[currentStepType]?.key_hint ?? 'e.g. address or slot'}
+						class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+					/>
 					<button
 						class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
 						disabled={!tempKey.trim()}
@@ -410,93 +593,217 @@
 				</div>
 			{/if}
 
-		<!-- Step 20: DBay-specific config (ip, port, mode, probe) -->
-		{#if addStep === 20}
-			<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">Configure DBay connection:</p>
-			<div class="mb-2 flex gap-2">
-				<input
-					type="text"
-					bind:value={dbayIpAddress}
-					placeholder="127.0.0.1"
-					class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-				/>
-				<input
-					type="number"
-					bind:value={dbayPort}
-					placeholder="8345"
-					class="w-24 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-				/>
-				<button
-					class="rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-					onclick={probeDbay}
-					disabled={dbayProbing}
-				>
-					{dbayProbing ? 'Checking...' : 'Test'}
-				</button>
-			</div>
+			<!-- Step 20: Discovery interface (simplified) -->
+			{#if addStep === 20 && discoveryActions.length > 0}
+				{@const currentAction = discoveryActions[0]}
+				<p class="mb-4 text-sm text-gray-600 dark:text-gray-300">
+					<span class="font-medium">{discoveryTargetType ?? selectedType}</span> — {currentAction.description}
+				</p>
 
-			{#if dbayProbeResult}
-				{#if dbayProbeResult.reachable}
-					<div class="mb-3 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
-						<p class="font-medium text-green-700 dark:text-green-400">
-							Server found — {dbayProbeResult.modules.length} module{dbayProbeResult.modules.length === 1 ? '' : 's'} loaded
+				<!-- Parent dep note: no manual inputs needed -->
+				{#if currentAction.parent_dep}
+					{@const parentStep = chainSteps.find(s => s.type === currentAction.parent_dep && s.resolved)}
+					{#if parentStep}
+						<p class="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+							Using connection from parent ({parentStep.type}: {parentStep.key})
 						</p>
-						<div class="mt-1 flex flex-wrap gap-1">
-							{#each dbayProbeResult.modules as m}
-								<span
-									class="rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-800 dark:bg-green-900/40 dark:text-green-300"
-									>{m.type} @ slot {m.slot}</span
-								>
-							{/each}
-						</div>
-					</div>
-				{:else}
-					<p class="mb-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
-						No server found at this address
-					</p>
+					{/if}
 				{/if}
+
+				<!-- Input fields (only show if action has inputs and no parent_dep) -->
+				{#if currentAction.inputs.length > 0 && !currentAction.parent_dep}
+					<div class="mb-4 space-y-2 rounded-md bg-gray-50 p-3 dark:bg-gray-900/30">
+						{#each currentAction.inputs as inp}
+							<label class="block text-xs font-medium text-gray-700 dark:text-gray-300">
+								{inp.label}
+								{#if inp.type === 'number'}
+									<input
+										type="number"
+										value={discoveryInputs[inp.name] ?? inp.default ?? ''}
+										onchange={(e) => {
+											const newVal = (e.target as HTMLInputElement).value;
+											discoveryInputs[inp.name] = newVal;
+											discoveryInputsHaveChanged = true;
+										}}
+										class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+									/>
+								{:else}
+									<input
+										type="text"
+										value={discoveryInputs[inp.name] ?? inp.default ?? ''}
+										onchange={(e) => {
+											const newVal = (e.target as HTMLInputElement).value;
+											discoveryInputs[inp.name] = newVal;
+											discoveryInputsHaveChanged = true;
+										}}
+										class="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+									/>
+								{/if}
+							</label>
+						{/each}
+					</div>
+				{/if}
+
+				<!-- Discovery result -->
+				{#if discoveryResult}
+					{#if currentAction.result_type === 'children'}
+						<!-- Children discovery result -->
+						{#if discoveryResult.children && discoveryResult.children.length > 0}
+							<div class="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
+								<p class="font-medium text-green-700 dark:text-green-400">
+									✓ Found {discoveryResult.children.length} device{discoveryResult.children.length === 1 ? '' : 's'}
+								</p>
+								<div class="mt-2 space-y-1">
+									{#each discoveryResult.children as child}
+										<div class="rounded bg-white px-2 py-1 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+											<span class="font-medium">{child.type}</span>
+											{#each Object.entries(child.key_fields) as [k, v]}
+												<span class="text-gray-500">— {k}: {v}</span>
+											{/each}
+											{#if child.idn}
+												<span class="block text-xs text-gray-500">{child.idn}</span>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							</div>
+						{:else}
+							<p class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+								⚠ No devices found. Check connection and try again.
+							</p>
+						{/if}
+					{:else if currentAction.result_type === 'probe'}
+						<!-- Probe result: connection/port discovery -->
+						{#if discoveryResult.found && discoveryResult.found.length > 0}
+							<div class="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
+								<p class="font-medium text-green-700 dark:text-green-400 mb-2">
+									Found {discoveryResult.found.length} controller{discoveryResult.found.length === 1 ? '' : 's'}:
+								</p>
+								<div class="space-y-1">
+									{#each discoveryResult.found as port_entry}
+										<button
+											class="w-full rounded-md border px-3 py-2 text-left text-sm transition bg-white hover:bg-green-100 border-green-200 dark:bg-gray-800 dark:hover:bg-green-900/40 dark:border-green-800"
+											onclick={() => resolveDiscoverySelection(port_entry.port)}
+										>
+											<span class="font-medium font-mono">{port_entry.port}</span>
+											{#if port_entry.description}
+												<span class="ml-2 text-xs text-gray-500">{port_entry.description}</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{:else}
+							<p class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+								⚠ No Prologix controllers found. Check USB connection.
+							</p>
+						{/if}
+					{:else if currentAction.result_type === 'self_candidates'}
+						<!-- Self-candidates: instances of the instrument being added -->
+						{#if discoveryResult.found && discoveryResult.found.length > 0}
+							<div class="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
+								<p class="font-medium text-green-700 dark:text-green-400 mb-2">
+									Found {discoveryResult.found.length} candidate{discoveryResult.found.length === 1 ? '' : 's'}:
+								</p>
+								<div class="space-y-1">
+									{#each discoveryResult.found as candidate}
+										{@const keyValue = Object.values(candidate.key_fields ?? {})[0] ?? ''}
+										<button
+											class="w-full rounded-md border px-3 py-2 text-left text-sm transition bg-white hover:bg-green-100 border-green-200 dark:bg-gray-800 dark:hover:bg-green-900/40 dark:border-green-800"
+											onclick={() => resolveDiscoverySelection(String(keyValue))}
+										>
+											{#each Object.entries(candidate.key_fields ?? {}) as [k, v]}
+												<span class="font-medium">{k}: <span class="font-mono">{v}</span></span>
+											{/each}
+											{#if candidate.idn}
+												<span class="ml-2 text-xs text-gray-500">{candidate.idn}</span>
+											{/if}
+										</button>
+									{/each}
+								</div>
+							</div>
+						{:else}
+							<p class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+								⚠ No instruments found on the bus.
+							</p>
+						{/if}
+					{/if}
+				{:else}
+					<!-- Loading state -->
+					{#if discoveryLoading}
+						<p class="mb-4 rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-400">
+							Scanning...
+						</p>
+					{/if}
+				{/if}
+
+				<!-- Action buttons -->
+				<div class="flex gap-2">
+					{#if discoveryInputsHaveChanged || !discoveryResult}
+						<button
+							class="flex-1 rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
+							onclick={() => runDiscovery(currentAction.name)}
+							disabled={discoveryLoading}
+						>
+							{discoveryLoading ? 'Scanning...' : 'Re-scan'}
+						</button>
+					{/if}
+					{#if discoveryResult?.children && discoveryResult.children.length > 0}
+						<button
+							class="flex-1 rounded-md bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-500 disabled:opacity-50"
+							onclick={() => {
+								if (isParentDiscovery && discoveryResult?.parent_key) {
+									resolveDiscoverySelection(discoveryResult.parent_key);
+								} else {
+									executeAdd();
+								}
+							}}
+							disabled={addLoading}
+						>
+							{addLoading ? 'Adding...' : isParentDiscovery ? `Confirm ${discoveryTargetType}` : `Add ${selectedType} & Modules`}
+						</button>
+					{:else if discoveryResult !== null && !discoveryLoading}
+						<!-- result came back but no valid selection made — show manual entry -->
+						<button
+							class="flex-1 rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500"
+							onclick={() => (addStep = isParentDiscovery ? 10 : 2)}
+						>
+							Continue (Manual Entry)
+						</button>
+					{:else if !discoveryResult && !discoveryLoading}
+						<!-- No result yet and not scanning — offer manual fallback -->
+						<button
+							class="flex-1 rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500"
+							onclick={() => (addStep = isParentDiscovery ? 10 : 2)}
+						>
+							Continue (Manual Entry)
+						</button>
+					{/if}
+				</div>
 			{/if}
 
-			<label class="mb-4 flex cursor-pointer items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-				<input
-					type="checkbox"
-					checked={dbayMode === 'gui'}
-					onchange={(e) => (dbayMode = (e.target as HTMLInputElement).checked ? 'gui' : 'direct')}
-					class="h-4 w-4 rounded border-gray-300"
-				/>
-				GUI mode — connect to running DBay GUI server and sync modules
-			</label>
-
-			<button
-				class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500"
-				onclick={confirmDbayConfig}
-			>
-				Next
-			</button>
-		{/if}
-
-		<!-- Step 2: Key entry for the target leaf/child instrument -->
-		{#if addStep === 2}
-			<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
-				Enter a key for the new <span class="font-medium">{chainSteps[0].type}</span>:
-			</p>
-			<div class="flex gap-2">
-				<input
-					type="text"
-					bind:value={tempKey}
-					placeholder={metadata[chainSteps[0].type]?.key_hint ?? 'e.g. 1, 5'}
-					class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
-				/>
-				<button
-					class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
-					disabled={!tempKey.trim()}
-					onclick={() => {
-						setLeafKey(tempKey.trim());
-						tempKey = '';
-					}}>Next</button
-				>
-			</div>
-		{/if}
+			<!-- Step 2: Key entry for the target leaf/child instrument -->
+			{#if addStep === 2}
+				<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
+					Enter a key for the new <span class="font-medium">{chainSteps[0].type}</span>:
+				</p>
+				<div class="flex gap-2">
+					<input
+						type="text"
+						bind:value={tempKey}
+						placeholder={metadata[chainSteps[0].type]?.key_hint ?? 'e.g. 1, 5'}
+						class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-800"
+					/>
+					<button
+						class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
+						disabled={!tempKey.trim()}
+						onclick={() => {
+							setLeafKey(tempKey.trim());
+							tempKey = '';
+						}}>Next</button
+					>
+				</div>
+			{/if}
 
 			<!-- Step 3: Confirm -->
 			{#if addStep === 3}
@@ -526,7 +833,7 @@
 					</button>
 					<button
 						class="rounded-md px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-gray-700"
-						onclick={() => (showAddWizard = false)}>Cancel</button
+						onclick={cancelAddWizard}>Cancel</button
 					>
 				</div>
 			{/if}
@@ -565,11 +872,7 @@
 					onclick={executeConfirm}
 					disabled={actionLoading}
 				>
-					{actionLoading
-						? 'Working...'
-						: confirmAction === 'reset'
-							? 'Reset'
-							: 'Remove'}
+					{actionLoading ? 'Working...' : confirmAction === 'reset' ? 'Reset' : 'Remove'}
 				</button>
 			</div>
 		</div>
