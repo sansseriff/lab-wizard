@@ -352,12 +352,20 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
         )
 
     parent_inst = None
-    if body.parent_chain:
-        parent_inst = _walk_parent_chain(body.parent_chain, env)
-
     try:
+        if body.parent_chain:
+            parent_inst = _walk_parent_chain(body.parent_chain, env)
         return cls.run_discovery(body.action, body.params, parent=parent_inst)
+    except HTTPException:
+        # Already has a useful status/detail — log and re-raise so FastAPI's
+        # default handler doesn't swallow it silently on the server side.
+        logger.exception(
+            "Discovery action failed (HTTPException): %s/%s parent_chain=%s",
+            body.type, body.action, body.parent_chain,
+        )
+        raise
     except NotImplementedError as e:
+        logger.exception("Discovery action not implemented: %s/%s", body.type, body.action)
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.exception("Discovery action failed: %s/%s — %s", body.type, body.action, e)

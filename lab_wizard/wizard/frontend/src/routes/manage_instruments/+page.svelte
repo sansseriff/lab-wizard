@@ -127,14 +127,23 @@
 			miniChain.push({ ...chainSteps[i] });
 		}
 
-		await fetchWithConfig('/api/manage-instruments/add', 'POST', {
-			chain: miniChain
-		});
+		const response = await fetchWithConfig<{ saved_keys: { type: string; key: string }[] }>(
+			'/api/manage-instruments/add',
+			'POST',
+			{ chain: miniChain }
+		);
 
+		// The backend stores instruments under a hash key, not the raw port/address.
+		// Replace the chainStep key with the real hash so subsequent discovery calls
+		// (which send parent_chain) can find the parent in the config.
+		const savedForThisStep = response.saved_keys?.find((s) => s.type === step.type);
+		if (savedForThisStep) {
+			chainSteps[stepIndex].key = savedForThisStep.key;
+		}
 		// Switch step to use_existing now that it's saved
 		chainSteps[stepIndex].action = 'use_existing';
 		// Track for cleanup on cancel
-		savedParentKeys.push(step.key);
+		savedParentKeys.push(chainSteps[stepIndex].key);
 		await refetchData();
 	}
 

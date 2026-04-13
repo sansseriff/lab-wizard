@@ -18,9 +18,23 @@ export function fetchWithConfig<T = any>(
     }
 
     const result_promise = fetch(url, config)
-        .then((response: Response) => {
+        .then(async (response: Response) => {
             if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+                // Try to extract FastAPI's JSON error detail; fall back to raw text.
+                let detail = '';
+                try {
+                    const body = await response.clone().json();
+                    detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body);
+                } catch {
+                    try {
+                        detail = await response.text();
+                    } catch {
+                        detail = '';
+                    }
+                }
+                throw new Error(
+                    `HTTP ${response.status}${detail ? `: ${detail}` : ''}`
+                );
             }
             return response.json() as Promise<T>;
         })

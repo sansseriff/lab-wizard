@@ -668,6 +668,7 @@ def add_instrument_chain(
     steps = list(reversed(chain))
 
     current_parent: Any = None
+    saved_keys: List[Dict[str, str]] = []
     for step in steps:
         ts = step["type"]
         key = step["key"]
@@ -715,9 +716,11 @@ def add_instrument_chain(
                 current_parent.children[hash_key] = new_params  # type: ignore[attr-defined]
                 current_parent = new_params
 
+            saved_keys.append({"type": ts, "key": hash_key})
+
     save_instruments_to_config(instruments, config_dir)
     logger.info("Added/updated instrument chain with %d steps", len(chain))
-    return {"status": "ok", "tree": get_configured_tree(config_dir)}
+    return {"status": "ok", "tree": get_configured_tree(config_dir), "saved_keys": saved_keys}
 
 
 def reinitialize_instrument(
