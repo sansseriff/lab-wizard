@@ -71,10 +71,6 @@ class LocalSerialDep(SerialDep):
 
     def write(self, data: bytes | str) -> int:
         ser = self._ensure()
-        try:
-            ser.flush()
-        except Exception:  # pragma: no cover
-            pass
         return ser.write(_ensure_bytes(data))  # type: ignore[no-any-return]
 
     def read(self, size: Optional[int] = None) -> bytes:

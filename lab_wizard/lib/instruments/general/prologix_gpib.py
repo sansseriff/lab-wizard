@@ -43,8 +43,8 @@ class PrologixGPIBParams(
 
     type: Literal["prologix_gpib"] = "prologix_gpib"
     baudrate: int = 9600
-    timeout: int = Field(
-        default=1,
+    timeout: float = Field(
+        default=0.1,
         description="(seconds)",
     )
     children: dict[str, PrologixChildParams] = Field(
@@ -118,8 +118,9 @@ class PrologixGPIB(
 
     @classmethod
     def from_params(cls, params: PrologixGPIBParams) -> "PrologixGPIB":
-        serial_dep = LocalSerialDep(params.port, params.baudrate, float(params.timeout))
-        controller = PrologixControllerDep(serial_dep)
+        timeout = float(params.timeout)
+        serial_dep = LocalSerialDep(params.port, params.baudrate, timeout)
+        controller = PrologixControllerDep(serial_dep, read_delay_s=timeout)
         return cls(controller, params)
 
     def make_child(self, key: str) -> Child[Any, Any]:

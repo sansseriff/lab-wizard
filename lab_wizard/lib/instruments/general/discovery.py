@@ -10,20 +10,25 @@ from typing import Any
 import time
 
 
-def get_idn(controller_dep: Any, address: int, read_delay_s: float = 0.1) -> str:
+def get_idn(controller_dep: Any, address: int) -> str:
     """Query *IDN? from a GPIB-addressed instrument.
 
     Args:
-        controller_dep: PrologixAddressedInstrumentDep or similar with query() method
+        controller_dep: PrologixControllerDep or similar with
+            ``query_instrument(address, command)``. The controller's own
+            ``read_delay_s`` governs the inter-write/read pause.
         address: GPIB address to query
-        read_delay_s: Delay before reading response
 
     Returns:
         IDN string (empty if no response or error)
     """
     try:
         raw = controller_dep.query_instrument(address, "*IDN?")
-        return raw.decode(errors="replace").strip() if isinstance(raw, bytes) else str(raw).strip()
+        return (
+            raw.decode(errors="replace").strip()
+            if isinstance(raw, bytes)
+            else str(raw).strip()
+        )
     except Exception:
         return ""
 
@@ -40,11 +45,11 @@ class Discoverable:
         """Return descriptors for each discovery action this type supports.
 
         Each descriptor is a dict with keys:
-            name         – unique action identifier (e.g. "probe", "scan_usb")
-            label        – short button text for the UI
-            description  – longer help text
-            inputs       – list of {name, type, label, default?} for UI fields
-            parent_dep   – (optional) type string of the parent instrument this
+            name         - unique action identifier (e.g. "probe", "scan_usb")
+            label        - short button text for the UI
+            description  - longer help text
+            inputs       - list of {name, type, label, default?} for UI fields
+            parent_dep   - (optional) type string of the parent instrument this
                            action depends on (e.g. "prologix_gpib").  When set,
                            the backend loads the parent from config and passes it
                            as the ``parent`` kwarg to ``run_discovery``.  Manual
@@ -59,7 +64,9 @@ class Discoverable:
         return []
 
     @classmethod
-    def run_discovery(cls, action: str, params: dict[str, Any], *, parent: Any = None) -> dict[str, Any]:
+    def run_discovery(
+        cls, action: str, params: dict[str, Any], *, parent: Any = None
+    ) -> dict[str, Any]:
         """Execute a named discovery action with the given input params.
 
         Args:

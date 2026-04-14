@@ -71,11 +71,10 @@ class AndoAQ8201AParams(
         from lab_wizard.lib.instruments.general.discovery import get_idn
 
         controller = parent_inst.dep
-        timeout = float(parent_inst.params.timeout)
 
         found: list[dict[str, Any]] = []
         for address in range(30):
-            idn = get_idn(controller, address, read_delay_s=timeout)
+            idn = get_idn(controller, address)
             if not idn or not idn.startswith("ANDO"):
                 continue
             found.append({
