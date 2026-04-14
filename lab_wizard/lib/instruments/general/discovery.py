@@ -7,7 +7,6 @@ populate children, etc.) that the wizard UI renders dynamically.
 
 from __future__ import annotations
 from typing import Any
-import time
 
 
 def get_idn(controller_dep: Any, address: int) -> str:
@@ -15,8 +14,7 @@ def get_idn(controller_dep: Any, address: int) -> str:
 
     Args:
         controller_dep: PrologixControllerDep or similar with
-            ``query_instrument(address, command)``. The controller's own
-            ``read_delay_s`` governs the inter-write/read pause.
+            ``query_instrument(address, command)``.
         address: GPIB address to query
 
     Returns:

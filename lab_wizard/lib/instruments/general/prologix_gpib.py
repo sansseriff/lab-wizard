@@ -44,8 +44,8 @@ class PrologixGPIBParams(
     type: Literal["prologix_gpib"] = "prologix_gpib"
     baudrate: int = 9600
     timeout: float = Field(
-        default=0.1,
-        description="(seconds)",
+        default=0.15,
+        description="(seconds) pyserial read timeout; also drives ++read_tmo_ms",
     )
     children: dict[str, PrologixChildParams] = Field(
         default_factory=dict,
@@ -119,8 +119,10 @@ class PrologixGPIB(
     @classmethod
     def from_params(cls, params: PrologixGPIBParams) -> "PrologixGPIB":
         timeout = float(params.timeout)
-        serial_dep = LocalSerialDep(params.port, params.baudrate, timeout)
-        controller = PrologixControllerDep(serial_dep, read_delay_s=timeout)
+        # pyserial timeout needs a small margin over the Prologix read timeout
+        # so pyserial never returns while the Prologix is still mid-read.
+        serial_dep = LocalSerialDep(params.port, params.baudrate, timeout + 0.05)
+        controller = PrologixControllerDep(serial_dep, timeout_s=timeout)
         return cls(controller, params)
 
     def make_child(self, key: str) -> Child[Any, Any]:
