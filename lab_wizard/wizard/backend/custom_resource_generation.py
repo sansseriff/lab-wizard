@@ -22,8 +22,10 @@ from lab_wizard.lib.utilities.config_io import (
     instrument_hash,
     load_instruments,
     model_to_commented_map,
+    save_instruments_to_config,
     to_commented_yaml_value,
 )
+from lab_wizard.wizard.backend.attribute_name_autogen import autogen_attribute_names
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
     _NodeRef,
@@ -51,6 +53,7 @@ class GenerateCustomResourceRequest(BaseModel):
     generation_style: str = "explicit"  # "explicit" | "from_attribute"
     file_style: str = "dataclass"  # "dataclass" | "simple"
     resource_class_name: str = "CustomResources"
+    persist_attribute_names: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +400,20 @@ def generate_custom_resource_project(
             req.selections, var_names, leaves
         )
     else:
+        mutations = autogen_attribute_names(
+            instruments,
+            [(leaf, sel.channel_index) for sel, leaf in zip(req.selections, leaves)],
+        )
+        if mutations:
+            logger.info(
+                "Auto-generated %d attribute_name(s) for from_attribute generation",
+                len(mutations),
+            )
+            if req.persist_attribute_names:
+                save_instruments_to_config(instruments, config_dir)
+                logger.info(
+                    "Persisted auto-generated attribute_names to %s", config_dir
+                )
         instantiation_lines, import_pairs, final_exprs = _compose_from_attribute(
             req.selections, var_names, leaves
         )

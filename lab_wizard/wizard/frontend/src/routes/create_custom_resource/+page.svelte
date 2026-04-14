@@ -37,6 +37,7 @@
 	let resourceClassName = $state('CustomResources');
 	let generationStyle = $state<'explicit' | 'from_attribute'>('explicit');
 	let fileStyle = $state<'dataclass' | 'simple'>('dataclass');
+	let persistAttributeNames = $state(false);
 
 	let creating = $state(false);
 	let createError: string | null = $state(null);
@@ -184,7 +185,8 @@
 				project_prefix: projectPrefix.trim() || 'custom_resource',
 				generation_style: generationStyle,
 				file_style: fileStyle,
-				resource_class_name: resourceClassName.trim() || 'CustomResources'
+				resource_class_name: resourceClassName.trim() || 'CustomResources',
+				persist_attribute_names: generationStyle === 'from_attribute' && persistAttributeNames
 			};
 			const res = await fetchWithConfig('/api/create-custom-resource-project', 'POST', body);
 			createResult = {
@@ -243,6 +245,19 @@
 				</label>
 			</div>
 		</div>
+
+		{#if generationStyle === 'from_attribute'}
+			<label class="flex items-start gap-2 sm:col-span-2">
+				<input type="checkbox" class="mt-0.5" bind:checked={persistAttributeNames} />
+				<span class="text-xs text-gray-600 dark:text-gray-300">
+					Save auto-generated attribute names back to the instrument config
+					<span class="block text-[11px] text-gray-500 dark:text-gray-400">
+						Leave off for one-off/project-specific names. Turn on to make them persistent
+						"favorites" reachable from any future project.
+					</span>
+				</span>
+			</label>
+		{/if}
 
 		<div class="block">
 			<span class="text-xs text-gray-600 dark:text-gray-300">File style</span>
