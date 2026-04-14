@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import atexit
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -67,6 +68,7 @@ class LocalSerialDep(SerialDep):
                 port=self.port, baudrate=self.baudrate, timeout=self.timeout
             )
             logger.debug("Opened serial port %s", self.port)
+            atexit.register(self.close)
         return self._serial
 
     @property
@@ -91,5 +93,17 @@ class LocalSerialDep(SerialDep):
 
     def close(self) -> None:
         if self._serial and getattr(self._serial, "is_open", False):
-            self._serial.close()
-            logger.debug("Closed serial port %s", self.port)
+            try:
+                self._serial.close()
+                logger.debug("Closed serial port %s", self.port)
+            except Exception:
+                pass
+
+    def __del__(self) -> None:
+        # Owning dep for the pyserial handle — releasing here is correct
+        # because no other object aliases the handle. Kept exception-safe so
+        # GC / interpreter-shutdown invocations can't raise.
+        try:
+            self.close()
+        except Exception:
+            pass

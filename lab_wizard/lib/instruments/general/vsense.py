@@ -22,21 +22,7 @@ class VSense(ABC):
     implement this interface.
     """
 
-    def __init__(self):
-        self.connected = False
-
-    def __del__(self):
-        if hasattr(self, "connected") and self.connected:
-            try:
-                self.disconnect()
-            except Exception:
-                # Avoid raising during GC
-                pass
-
     # ---- Abstract API ----
-    @abstractmethod
-    def disconnect(self) -> bool: ...
-
     @abstractmethod
     def get_voltage(self) -> float: ...
 
@@ -52,15 +38,8 @@ class StandInVSense(VSense):
     ignore_in_cli = True
 
     def __init__(self):
-        super().__init__()
-        self.connected = True
         self.measurement_value = 0.0
         print("Stand-in sensing instrument initialized.")
-
-    def disconnect(self) -> bool:
-        self.connected = False
-        print("StandInVSense disconnected (no real hardware).")
-        return True
 
     def get_voltage(self) -> float:
         return self.measurement_value

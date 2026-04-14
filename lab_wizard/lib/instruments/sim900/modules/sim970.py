@@ -52,11 +52,6 @@ class Sim970Channel(VSense):
         self.settling_time = params.settling_time
         self.max_retries = params.max_retries
         self.attribute_name = params.attribute_name
-        self.connected = True
-
-    def disconnect(self) -> bool:  # type: ignore[override]
-        self.connected = False
-        return True
 
     def get_voltage(self) -> float:  # type: ignore[override]
         return self._get_voltage_impl(0)
@@ -91,7 +86,6 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
     ):
         self._dep = dep
         self.params = params
-        self.connected = True
         self.slot = dep.slot
         self.channels: list[Sim970Channel] = []
         for i, ch_params in enumerate(params.channels):
@@ -104,21 +98,6 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
     @property
     def dep(self) -> Sim900SlotDep:  # type: ignore[override]
         return self._dep
-
-    def disconnect(self) -> bool:
-        if not self.connected:
-            return True
-        for ch in self.channels:
-            try:
-                ch.disconnect()
-            except Exception:
-                pass
-        self.connected = False
-        return True
-
-    def __del__(self):
-        if hasattr(self, "connected") and self.connected:
-            self.disconnect()
 
     # Backward compatibility helper: allow get_voltage on module returning ch0
     def get_voltage(self) -> float:  # type: ignore[override]

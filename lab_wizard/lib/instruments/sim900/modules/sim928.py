@@ -41,7 +41,6 @@ class Sim928(Child[Any, Sim928Params], VSource):
         self.dep = dep
         self.settling_time = params.settling_time
         self.attribute_name = params.attribute_name
-        self.connected = True
 
     # Implement abstract VSource interface (single-channel instrument)
     def set_voltage(self, voltage: float) -> bool:  # type: ignore[override]
@@ -56,7 +55,3 @@ class Sim928(Child[Any, Sim928Params], VSource):
     def turn_off(self) -> bool:  # type: ignore[override]
         result = self.dep.write("OPOF")
         return result is not False
-
-    def disconnect(self) -> bool:  # type: ignore[override]
-        self.connected = False
-        return True

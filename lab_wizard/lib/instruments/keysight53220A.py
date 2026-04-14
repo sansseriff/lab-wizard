@@ -69,11 +69,6 @@ class Keysight53220AChannel(Counter):
         self._gate_time = params.gate_time
         self._threshold = params.threshold_absolute
         self.attribute_name = params.attribute_name
-        self.connected = True
-
-    def disconnect(self) -> bool:
-        self.connected = False
-        return True
 
     def count(self, gate_time: float = 1.0, channel: int | None = None) -> int:
         if abs(gate_time - self._gate_time) > 0.001:
@@ -151,7 +146,6 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
     def __init__(self, dep: VisaDep, params: Keysight53220AParams):
         self._dep = dep
         self.params = params
-        self.connected = not params.offline
 
         self.channels: list[Keysight53220AChannel] = [
             Keysight53220AChannel(
@@ -163,7 +157,7 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
             for i, ch_params in enumerate(params.channels)
         ]
 
-        if self.connected:
+        if not params.offline:
             self._apply_configuration()
 
     @classmethod
@@ -193,22 +187,8 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
 
         return success
 
-    def disconnect(self) -> bool:
-        for ch in self.channels:
-            ch.disconnect()
-        try:
-            self._dep.close()
-        except Exception:
-            pass
-        self.connected = False
-        return True
-
     def reset(self) -> bool:
         if self.params.offline:
             return True
         self._dep.write("*RST")
         return True
-
-    def __del__(self):
-        if hasattr(self, "connected") and self.connected:
-            self.disconnect()

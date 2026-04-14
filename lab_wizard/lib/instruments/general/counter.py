@@ -12,33 +12,11 @@ from abc import ABC, abstractmethod
 class Counter(ABC):
     """
     Abstract base class for counter instruments.
+
+    Lifetime follows RAII: connection happens in the constructor and the
+    underlying transport (e.g. LocalVisaDep) releases its handle via its
+    own __del__/atexit. Subclasses do not implement their own disconnect.
     """
-
-    def __init__(self):
-        self.connected = False
-
-        """
-        NOTE: There is no 'connect' method here. Connection should happen in the constructor, thereby 
-        following the RAII principle (Resource Acquisition Is Initialization).
-        """
-
-    def __del__(self):
-        """
-        Destructor that ensures proper cleanup.
-        Calls disconnect() to handle instrument-specific disconnection.
-        """
-        if hasattr(self, "connected") and self.connected:
-            self.disconnect()
-
-    @abstractmethod
-    def disconnect(self) -> bool:
-        """
-        Disconnect from the instrument.
-
-        Returns:
-            bool: True if disconnection successful, False otherwise
-        """
-        pass
 
     @abstractmethod
     def count(self, gate_time: float = 1.0, channel: int | None = None) -> int:
@@ -79,14 +57,8 @@ class StandInCounter(Counter):
     ignore_in_cli = True
 
     def __init__(self):
-        self.connected = True  # Stand-in is always "connected"
         self.gate_time = 1.0
         print("Stand-in counter instrument initialized.")
-
-    def disconnect(self) -> bool:
-        print("This is not a real counter. Using stand-in Counter.")
-        self.connected = False
-        return not self.connected
 
     def count(self, gate_time: float = 1.0, channel: int | None = None) -> int:
         channel_str = f" on channel {channel}" if channel is not None else ""

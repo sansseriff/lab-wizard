@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import atexit
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
@@ -8,6 +10,8 @@ try:  # pragma: no cover
     import pyvisa  # type: ignore
 except Exception:  # pragma: no cover
     pyvisa = None  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 
 def _coerce_str(payload: Any) -> str:
@@ -68,6 +72,8 @@ class LocalVisaDep(VisaDep):
             rm = pyvisa.ResourceManager("@py")
             self._inst = rm.open_resource(self.resource)
             self._inst.timeout = int(self.timeout * 1000)
+            logger.debug("Opened VISA resource %s", self.resource)
+            atexit.register(self.close)
         return self._inst
 
     @property
@@ -102,5 +108,15 @@ class LocalVisaDep(VisaDep):
         if self._inst is not None:
             try:
                 self._inst.close()
+                logger.debug("Closed VISA resource %s", self.resource)
             except Exception:
                 pass
+            self._inst = None
+
+    def __del__(self) -> None:
+        # Owning dep for the pyvisa handle — release here; aliasing is not
+        # possible since _inst is only constructed inside this object.
+        try:
+            self.close()
+        except Exception:
+            pass
