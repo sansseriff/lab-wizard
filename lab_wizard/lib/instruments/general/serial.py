@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional, Any
 
 from lab_wizard.lib.instruments.general.parent_child import Dependency
+
+logger = logging.getLogger(__name__)
 
 try:
     import serial as pyserial  # type: ignore
@@ -63,6 +66,7 @@ class LocalSerialDep(SerialDep):
             self._serial = pyserial.Serial(
                 port=self.port, baudrate=self.baudrate, timeout=self.timeout
             )
+            logger.debug("Opened serial port %s", self.port)
         return self._serial
 
     @property
@@ -88,3 +92,4 @@ class LocalSerialDep(SerialDep):
     def close(self) -> None:
         if self._serial and getattr(self._serial, "is_open", False):
             self._serial.close()
+            logger.debug("Closed serial port %s", self.port)
