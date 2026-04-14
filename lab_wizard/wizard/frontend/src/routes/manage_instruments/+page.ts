@@ -11,7 +11,7 @@ export type TreeItem = {
 
 export type DiscoveryInput = {
 	name: string;
-	type: string;
+	type: 'text' | 'number';
 	label: string;
 	default?: any;
 };
@@ -22,8 +22,26 @@ export type DiscoveryAction = {
 	description: string;
 	inputs: DiscoveryInput[];
 	parent_dep?: string;
-	result_type: 'probe' | 'children' | 'self_candidates' | 'generic';
+	result_type: 'probe' | 'children' | 'self_candidates';
 };
+
+export type ProbeResult = {
+	result_type: 'probe';
+	found: { port: string; description?: string }[];
+};
+
+export type ChildrenResult = {
+	result_type: 'children';
+	children: { type: string; key_fields: Record<string, string>; idn?: string }[];
+	parent_key: string | null;
+};
+
+export type SelfCandidatesResult = {
+	result_type: 'self_candidates';
+	found: { key_fields: Record<string, string>; idn?: string }[];
+};
+
+export type DiscoveryResult = ProbeResult | ChildrenResult | SelfCandidatesResult;
 
 export type ChainStep = {
 	type: string;

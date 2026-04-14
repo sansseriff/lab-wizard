@@ -18,6 +18,12 @@ from lab_wizard.lib.instruments.general.parent_child import (
     USBLike,
     Discoverable,
 )
+from lab_wizard.lib.instruments.general.discovery import (
+    DiscoveryAction,
+    NoParams,
+    ProbeFound,
+    ProbeResult,
+)
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixControllerDep
 from lab_wizard.lib.instruments.general.serial import SerialDep, LocalSerialDep
 from lab_wizard.lib.utilities.model_tree import Exp
@@ -65,35 +71,27 @@ class PrologixGPIBParams(
     # -- Discovery ----------------------------------------------------------
 
     @classmethod
-    def discovery_actions(cls) -> list[dict[str, Any]]:
+    def discovery_actions(cls) -> list[DiscoveryAction[Any, Any]]:
         return [
-            {
-                "name": "scan_usb",
-                "label": "Scan USB Ports",
-                "description": "Find Prologix GPIB-USB controllers connected to this computer",
-                "inputs": [],
-                "result_type": "probe",
-            },
+            DiscoveryAction(
+                name="scan_usb",
+                label="Scan USB Ports",
+                description="Find Prologix GPIB-USB controllers connected to this computer",
+                params_model=NoParams,
+                handler=cls._scan_usb,
+            ),
         ]
 
     @classmethod
-    def run_discovery(
-        cls, action: str, params: dict[str, Any], *, parent: Any = None
-    ) -> dict[str, Any]:
-        if action == "scan_usb":
-            return cls._scan_usb()
-        raise NotImplementedError(f"Unknown action: {action}")
-
-    @classmethod
-    def _scan_usb(cls) -> dict[str, Any]:
+    def _scan_usb(cls, params: NoParams) -> ProbeResult:
         import serial.tools.list_ports
 
-        controllers = [
-            {"port": p.device, "description": p.description}
+        found = [
+            ProbeFound(port=p.device, description=p.description)
             for p in serial.tools.list_ports.comports()
             if p.description and "Prologix" in p.description
         ]
-        return {"found": controllers}
+        return ProbeResult(found=found)
 
 
 class PrologixGPIB(

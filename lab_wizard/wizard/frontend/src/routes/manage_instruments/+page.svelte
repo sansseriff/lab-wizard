@@ -4,7 +4,13 @@
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import { fetchWithConfig } from '../../api';
 	import { PlusIcon, ArrowLeftIcon } from 'phosphor-svelte';
-	import type { TreeItem, InstrumentMeta, DiscoveryAction, ChainStep } from './+page.ts';
+	import type {
+		TreeItem,
+		InstrumentMeta,
+		DiscoveryAction,
+		DiscoveryResult,
+		ChainStep
+	} from './+page.ts';
 
 	let { data } = $props();
 	let tree: TreeItem[] = $state(data.tree ?? []);
@@ -28,7 +34,7 @@
 	let discoveryActions: DiscoveryAction[] = $state([]);
 	let discoveryInputs: Record<string, any> = $state({});
 	let discoveryInputsHaveChanged = $state(false);
-	let discoveryResult: Record<string, any> | null = $state(null);
+	let discoveryResult: DiscoveryResult | null = $state(null);
 	let discoveryLoading = $state(false);
 	let discoveryTargetType: string | null = $state(null); // which type discovery is currently for (leaf or parent)
 
@@ -347,10 +353,12 @@
 		statusMessage = null;
 		try {
 			// Ensure the leaf key is set from discovery result if not already done
-			if (!chainSteps[0].key) {
-				if (discoveryResult?.parent_key) {
-					chainSteps[0].key = discoveryResult.parent_key;
-				}
+			if (
+				!chainSteps[0].key &&
+				discoveryResult?.result_type === 'children' &&
+				discoveryResult.parent_key
+			) {
+				chainSteps[0].key = discoveryResult.parent_key;
 			}
 
 			// Add the parent first
@@ -358,7 +366,7 @@
 
 			// If discovery found children, apply them
 			if (
-				discoveryResult?.children &&
+				discoveryResult?.result_type === 'children' &&
 				discoveryResult.children.length > 0 &&
 				selectedType
 			) {
@@ -655,9 +663,8 @@
 
 				<!-- Discovery result -->
 				{#if discoveryResult}
-					{#if currentAction.result_type === 'children'}
-						<!-- Children discovery result -->
-						{#if discoveryResult.children && discoveryResult.children.length > 0}
+					{#if discoveryResult.result_type === 'children'}
+						{#if discoveryResult.children.length > 0}
 							<div class="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
 								<p class="font-medium text-green-700 dark:text-green-400">
 									✓ Found {discoveryResult.children.length} device{discoveryResult.children.length === 1 ? '' : 's'}
@@ -681,9 +688,8 @@
 								⚠ No devices found. Check connection and try again.
 							</p>
 						{/if}
-					{:else if currentAction.result_type === 'probe'}
-						<!-- Probe result: connection/port discovery -->
-						{#if discoveryResult.found && discoveryResult.found.length > 0}
+					{:else if discoveryResult.result_type === 'probe'}
+						{#if discoveryResult.found.length > 0}
 							<div class="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
 								<p class="font-medium text-green-700 dark:text-green-400 mb-2">
 									Found {discoveryResult.found.length} controller{discoveryResult.found.length === 1 ? '' : 's'}:
@@ -707,21 +713,20 @@
 								⚠ No Prologix controllers found. Check USB connection.
 							</p>
 						{/if}
-					{:else if currentAction.result_type === 'self_candidates'}
-						<!-- Self-candidates: instances of the instrument being added -->
-						{#if discoveryResult.found && discoveryResult.found.length > 0}
+					{:else if discoveryResult.result_type === 'self_candidates'}
+						{#if discoveryResult.found.length > 0}
 							<div class="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">
 								<p class="font-medium text-green-700 dark:text-green-400 mb-2">
 									Found {discoveryResult.found.length} candidate{discoveryResult.found.length === 1 ? '' : 's'}:
 								</p>
 								<div class="space-y-1">
 									{#each discoveryResult.found as candidate}
-										{@const keyValue = Object.values(candidate.key_fields ?? {})[0] ?? ''}
+										{@const keyValue = Object.values(candidate.key_fields)[0] ?? ''}
 										<button
 											class="w-full rounded-md border px-3 py-2 text-left text-sm transition bg-white hover:bg-green-100 border-green-200 dark:bg-gray-800 dark:hover:bg-green-900/40 dark:border-green-800"
 											onclick={() => resolveDiscoverySelection(String(keyValue))}
 										>
-											{#each Object.entries(candidate.key_fields ?? {}) as [k, v]}
+											{#each Object.entries(candidate.key_fields) as [k, v]}
 												<span class="font-medium">{k}: <span class="font-mono">{v}</span></span>
 											{/each}
 											{#if candidate.idn}
@@ -757,11 +762,15 @@
 							{discoveryLoading ? 'Scanning...' : 'Re-scan'}
 						</button>
 					{/if}
-					{#if discoveryResult?.children && discoveryResult.children.length > 0}
+					{#if discoveryResult?.result_type === 'children' && discoveryResult.children.length > 0}
 						<button
 							class="flex-1 rounded-md bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-500 disabled:opacity-50"
 							onclick={() => {
-								if (isParentDiscovery && discoveryResult?.parent_key) {
+								if (
+									isParentDiscovery &&
+									discoveryResult?.result_type === 'children' &&
+									discoveryResult.parent_key
+								) {
 									resolveDiscoverySelection(discoveryResult.parent_key);
 								} else {
 									executeAdd();

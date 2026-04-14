@@ -12,6 +12,12 @@ from lab_wizard.lib.instruments.general.parent_child import (
     ParentParams,
     Discoverable,
 )
+from lab_wizard.lib.instruments.general.discovery import (
+    DiscoveryAction,
+    NoParams,
+    SelfCandidate,
+    SelfCandidatesResult,
+)
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixAddressedInstrumentDep
 from lab_wizard.lib.instruments.andoAQ8201A.comm import AndoAQ8201AFrameDep
 from lab_wizard.lib.instruments.andoAQ8201A.modules.attenuator31 import Attenuator31Params
@@ -46,43 +52,37 @@ class AndoAQ8201AParams(
     # -- Discovery ----------------------------------------------------------
 
     @classmethod
-    def discovery_actions(cls) -> list[dict[str, Any]]:
+    def discovery_actions(cls) -> list[DiscoveryAction[Any, Any]]:
         return [
-            {
-                "name": "scan_gpib",
-                "label": "Scan GPIB Bus",
-                "description": "Search for Ando AQ8201A mainframes on a Prologix controller",
-                "inputs": [],
-                "parent_dep": "prologix_gpib",
-                "result_type": "self_candidates",
-            },
+            DiscoveryAction(
+                name="scan_gpib",
+                label="Scan GPIB Bus",
+                description="Search for Ando AQ8201A mainframes on a Prologix controller",
+                params_model=NoParams,
+                handler=cls._scan_gpib,
+                parent_dep="prologix_gpib",
+            ),
         ]
 
     @classmethod
-    def run_discovery(cls, action: str, params: dict[str, Any], *, parent: Any = None) -> dict[str, Any]:
-        if action == "scan_gpib":
-            if parent is None:
-                raise ValueError("scan_gpib requires a prologix_gpib parent")
-            return cls._scan_gpib(parent)
-        raise NotImplementedError(f"Unknown action: {action}")
-
-    @classmethod
-    def _scan_gpib(cls, parent_inst: Any) -> dict[str, Any]:
+    def _scan_gpib(cls, params: NoParams, parent_inst: Any) -> SelfCandidatesResult:
         from lab_wizard.lib.instruments.general.discovery import get_idn
 
         controller = parent_inst.dep
 
-        found: list[dict[str, Any]] = []
+        found: list[SelfCandidate] = []
         for address in range(30):
             idn = get_idn(controller, address)
             if not idn or not idn.startswith("ANDO"):
                 continue
-            found.append({
-                "key_fields": {"gpib_address": str(address)},
-                "idn": idn,
-            })
+            found.append(
+                SelfCandidate(
+                    key_fields={"gpib_address": str(address)},
+                    idn=idn,
+                )
+            )
 
-        return {"found": found}
+        return SelfCandidatesResult(found=found)
 
 
 class AndoAQ8201A(

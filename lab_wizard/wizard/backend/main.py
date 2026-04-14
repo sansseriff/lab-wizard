@@ -345,28 +345,26 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
     from lab_wizard.lib.utilities.params_discovery import load_params_class
 
     cls = load_params_class(body.type)
-    if not hasattr(cls, "run_discovery"):
+    actions = {a.name: a for a in cls.discovery_actions()}
+    action = actions.get(body.action)
+    if action is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Type '{body.type}' does not support discovery",
+            detail=f"Type '{body.type}' has no discovery action '{body.action}'",
         )
 
     parent_inst = None
     try:
         if body.parent_chain:
             parent_inst = _walk_parent_chain(body.parent_chain, env)
-        return cls.run_discovery(body.action, body.params, parent=parent_inst)
+        result = action.run(body.params, parent=parent_inst)
+        return result.model_dump()
     except HTTPException:
-        # Already has a useful status/detail — log and re-raise so FastAPI's
-        # default handler doesn't swallow it silently on the server side.
         logger.exception(
             "Discovery action failed (HTTPException): %s/%s parent_chain=%s",
             body.type, body.action, body.parent_chain,
         )
         raise
-    except NotImplementedError as e:
-        logger.exception("Discovery action not implemented: %s/%s", body.type, body.action)
-        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.exception("Discovery action failed: %s/%s — %s", body.type, body.action, e)
         raise HTTPException(status_code=400, detail=str(e))

@@ -1,5 +1,5 @@
 from typing import Any, Annotated, Literal
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from dbay import DBayClient
 
@@ -12,6 +12,11 @@ from lab_wizard.lib.instruments.general.parent_child import (
     IPLike,
     Discoverable,
 )
+from lab_wizard.lib.instruments.general.discovery import (
+    ChildrenResult,
+    DiscoveredChild,
+    DiscoveryAction,
+)
 from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4DParams, Dac4D
 from lab_wizard.lib.instruments.dbay.modules.dac16d import Dac16DParams, Dac16D
 from lab_wizard.lib.instruments.dbay.modules.empty import EmptyParams, Empty
@@ -23,6 +28,11 @@ _CHILD_TYPE_MAP: dict[str, str] = {"dac4D": "dac4D", "dac16D": "dac16D"}
 DBayChildParams = Annotated[
     Dac4DParams | Dac16DParams | EmptyParams, Field(discriminator="type")
 ]
+
+
+class DBayDiscoverChildrenParams(BaseModel):
+    ip_address: str = Field("127.0.0.1", description="IP Address")
+    ip_port: int = Field(8345, description="Port")
 
 
 class DBayParams(
@@ -46,7 +56,9 @@ class DBayParams(
     direct_transport: Literal["udp", "serial"] = "udp"
     serial_port: str | None = None
     baudrate: int = 115200
-    retain_changes: bool = Field(default=True, description="GUI mode: revert on cleanup if False")
+    retain_changes: bool = Field(
+        default=True, description="GUI mode: revert on cleanup if False"
+    )
     children: dict[str, DBayChildParams] = Field(default_factory=dict)
 
     @property
@@ -59,49 +71,44 @@ class DBayParams(
     # -- Discovery ----------------------------------------------------------
 
     @classmethod
-    def discovery_actions(cls) -> list[dict[str, Any]]:
+    def discovery_actions(cls) -> list[DiscoveryAction[Any, Any]]:
         return [
-            {
-                "name": "populate_children",
-                "label": "Discover & Sync Modules",
-                "description": "Connect to DBay server and auto-populate child modules",
-                "inputs": [
-                    {"name": "ip_address", "type": "text", "label": "IP Address", "default": "127.0.0.1"},
-                    {"name": "ip_port", "type": "number", "label": "Port", "default": 8345},
-                ],
-                "result_type": "children",
-            },
+            DiscoveryAction(
+                name="populate_children",
+                label="Discover & Sync Modules",
+                description="Connect to DBay server and auto-populate child modules",
+                params_model=DBayDiscoverChildrenParams,
+                handler=cls._discover_children,
+            ),
         ]
 
     @classmethod
-    def run_discovery(cls, action: str, params: dict[str, Any]) -> dict[str, Any]:
-        if action == "populate_children":
-            return cls._discover_children(params["ip_address"], int(params["ip_port"]))
-        raise NotImplementedError(f"Unknown action: {action}")
-
-    @classmethod
-    def _discover_children(cls, ip_address: str, ip_port: int) -> dict[str, Any]:
+    def _discover_children(
+        cls, params: DBayDiscoverChildrenParams
+    ) -> ChildrenResult:
         import json
         import urllib.request
 
-        url = f"http://{ip_address}:{ip_port}/full-state"
+        url = f"http://{params.ip_address}:{params.ip_port}/full-state"
         with urllib.request.urlopen(url, timeout=5) as r:
             state = json.loads(r.read())
 
-        children: list[dict[str, Any]] = []
+        children: list[DiscoveredChild] = []
         for m in state.get("data", []):
             mtype = m.get("core", {}).get("type")
             slot = m.get("core", {}).get("slot")
             if mtype not in _CHILD_TYPE_MAP or slot is None:
                 continue
-            children.append({
-                "type": _CHILD_TYPE_MAP[mtype],
-                "key_fields": {"slot": str(slot)},
-            })
-        return {
-            "children": children,
-            "parent_key": f"{ip_address}:{ip_port}",
-        }
+            children.append(
+                DiscoveredChild(
+                    type=_CHILD_TYPE_MAP[mtype],
+                    key_fields={"slot": str(slot)},
+                )
+            )
+        return ChildrenResult(
+            children=children,
+            parent_key=f"{params.ip_address}:{params.ip_port}",
+        )
 
 
 class DBay(
@@ -156,6 +163,7 @@ class DBay(
             module = self.client.module(slot)
         else:
             from dbay import dac4D as dac4D_mod, dac16D as dac16D_mod
+
             if isinstance(params, Dac4DParams):
                 module = self.client.attach_module(slot, dac4D_mod)
             elif isinstance(params, Dac16DParams):

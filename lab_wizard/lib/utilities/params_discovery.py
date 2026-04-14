@@ -401,7 +401,9 @@ def get_instrument_metadata() -> dict[str, dict[str, Any]]:
             defaults = cls().model_dump()
             key_hint = getattr(cls, "key_hint", None)
             if hasattr(cls, "discovery_actions"):
-                discovery_actions = cls.discovery_actions()
+                discovery_actions = [
+                    a.to_spec().model_dump() for a in cls.discovery_actions()
+                ]
         except Exception:
             pass
 
