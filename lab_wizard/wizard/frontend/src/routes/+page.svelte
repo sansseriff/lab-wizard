@@ -12,6 +12,16 @@
 			description: 'Add, reset, or remove instrument configs for this workstation.'
 		},
 		{
+			href: '/manage_savers',
+			label: 'Manage Savers',
+			description: 'Configure database / file savers used by measurements.'
+		},
+		{
+			href: '/manage_plotters',
+			label: 'Manage Plotters',
+			description: 'Configure local or web plotters used by measurements.'
+		},
+		{
 			href: '/create_custom_resource',
 			label: 'Create Custom Resource',
 			description: 'Define a reusable instrument or component.'
@@ -22,7 +32,6 @@
 <section class="flex min-h-[60vh] items-center justify-center">
 	<div class="w-full max-w-2xl text-center">
 		<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">Lab Wizard</h1>
-		<p class="mt-2 text-sm text-gray-600 dark:text-gray-300">Choose what you want to do.</p>
 
 		<div class="mt-6 grid gap-3 sm:gap-4">
 			{#each buttons as b}

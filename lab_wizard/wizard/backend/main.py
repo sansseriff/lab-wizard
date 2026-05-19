@@ -20,7 +20,7 @@ import argparse
 from typing import Any
 from uvicorn import Config, Server
 from uuid import uuid4
-from lab_wizard.wizard.backend.models import Env, OutputReq
+from lab_wizard.wizard.backend.models import Env, OutputReq, ConfiguredResource
 from lab_wizard.wizard.backend.utils_runtime import (
     has_gui_context,
     green,
@@ -43,7 +43,16 @@ from lab_wizard.lib.utilities.config_io import (
     save_instruments_to_config,
     instrument_hash,
 )
-from lab_wizard.lib.utilities.params_discovery import get_instrument_metadata
+from lab_wizard.lib.utilities.flat_resource_io import (
+    add_resource as _flat_add_resource,
+    reset_resource as _flat_reset_resource,
+    remove_resource as _flat_remove_resource,
+    update_resource_fields as _flat_update_resource_fields,
+    get_configured_resources_tree,
+)
+from lab_wizard.lib.utilities.params_discovery import (
+    get_instrument_metadata, get_saver_metadata, get_plotter_metadata,
+)
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     generate_measurement_project,
@@ -161,21 +170,21 @@ def get_measurements_meta(env: Env = Depends(get_env), verbose: bool = False):
     return res
 
 
-@app.get("/api/get-instruments/{name}")
-def get_instruments(
+@app.get("/api/get-resources/{name}")
+def get_resources(
     name: str,
     env: Env = Depends(get_env),
     verbose: bool = False,
 ):
-    """Return required instrument role names for a given measurement name.
+    """Return all required resources (instruments, savers, plotters) for a measurement.
 
-    Example: /api/get-instruments/ivCurve
-    The function will resolve the MeasurementInfo using the same logic as get_measurements.
+    Each entry carries a ``resource_kind`` discriminator and the relevant
+    matching list — ``matching_instruments`` for instrument requirements
+    (populated by class-hierarchy discovery) or ``matching_resources`` for
+    saver/plotter requirements (populated from the configured registry).
     """
+    logger.info("Getting resources for measurement '%s'", name)
 
-    logger.info("Getting instruments for measurement '%s'", name)
-
-    # in order to keep pages stateless, we re-aquire all measurements and then select the requested one
     all_meas = get_measurements(env)
     if name not in all_meas:
         raise HTTPException(status_code=404, detail=f"Unknown measurement: {name}")
@@ -184,42 +193,59 @@ def get_instruments(
     if verbose:
         logger.debug("Measurement choice for '%s': %s", name, choice)
 
+    config_dir = _config_dir(env)
+
     try:
         reqs = reqs_from_measurement(choice)
 
+        # Pre-load saver/plotter registries once.
+        saver_tree = get_configured_resources_tree(config_dir, "saver")
+        plotter_tree = get_configured_resources_tree(config_dir, "plotter")
+
+        outputs: list[OutputReq] = []
         for req in reqs:
-            # Discover instruments implementing the required base type
-            base_type = req.base_type
-            # base_type may come as a typing alias; ensure we have a Type
-            try:
-                matches = discover_matching_instruments(env, base_type)
-            except Exception as e:
-                logger.exception(
-                    "Discovery error for requirement '%s': %s", req.variable_name, e
+            if req.resource_kind == "instrument":
+                try:
+                    matches = discover_matching_instruments(env, req.base_type)
+                except Exception as e:
+                    logger.exception(
+                        "Discovery error for requirement '%s': %s", req.variable_name, e
+                    )
+                    matches = []
+                outputs.append(
+                    OutputReq(
+                        variable_name=req.variable_name,
+                        base_type=str(req.base_type),
+                        resource_kind="instrument",
+                        is_list=req.is_list,
+                        matching_instruments=matches,
+                        matching_resources=[],
+                    )
                 )
-                matches = []
-
-            req.matching_instruments = matches
-
-        # convert reqs to OutputReq for JSON serialization
-        # must convert req.base_type from type to str
-        reqs = [
-            OutputReq(
-                variable_name=req.variable_name,
-                base_type=str(req.base_type),
-                matching_instruments=req.matching_instruments,
-            )
-            for req in reqs
-        ]
+            elif req.resource_kind in ("saver", "plotter"):
+                tree = saver_tree if req.resource_kind == "saver" else plotter_tree
+                outputs.append(
+                    OutputReq(
+                        variable_name=req.variable_name,
+                        base_type=str(req.base_type),
+                        resource_kind=req.resource_kind,
+                        is_list=req.is_list,
+                        matching_instruments=[],
+                        matching_resources=[
+                            ConfiguredResource(
+                                type=item["type"], key=item["key"], fields=item["fields"]
+                            )
+                            for item in tree
+                        ],
+                    )
+                )
 
         if verbose:
-            logger.debug("Final instrument requirements for '%s': %s", name, reqs)
-
-        return reqs
+            logger.debug("Final resource requirements for '%s': %s", name, outputs)
+        return outputs
 
     except Exception as e:
-        logger.exception("Error getting requirements for measurement '%s': %s", name, e)
-        # raise HTTPException(status_code=500, detail=f"Error getting requirements: {e}")
+        logger.exception("Error getting resources for measurement '%s': %s", name, e)
         return {"error": str(e)}
 
 
@@ -416,6 +442,82 @@ def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
     save_instruments_to_config(instruments, config_dir)
     logger.info("apply-children: added %d children to %s (%s)", len(added), body.parent_type, body.parent_key)
     return {"status": "ok", "added": added, "tree": get_configured_tree(config_dir)}
+
+
+# -------------------- Manage Savers / Plotters --------------------
+
+
+class _AddResourceBody(_BM):
+    type: str
+    key: str
+    fields: dict = _Field(default_factory=dict)
+
+
+class _ResourceTypeKeyBody(_BM):
+    type: str
+    key: str
+
+
+class _UpdateResourceBody(_BM):
+    type: str
+    key: str
+    fields: dict
+
+
+def _make_resource_endpoints(kind: str, metadata_fn):  # noqa: ANN001
+    """Register four CRUD endpoints for a flat resource registry under
+    /api/manage-{kind}s/...  ``metadata_fn`` returns the discovery metadata."""
+    plural = f"{kind}s"
+
+    @app.get(f"/api/manage-{plural}", name=f"api_manage_{plural}")
+    def _list(env: Env = Depends(get_env)):
+        config_dir = _config_dir(env)
+        return {
+            "tree": get_configured_resources_tree(config_dir, kind),  # type: ignore[arg-type]
+            "metadata": metadata_fn(),
+        }
+
+    @app.post(f"/api/manage-{plural}/add", name=f"api_add_{kind}")
+    def _add(body: _AddResourceBody, env: Env = Depends(get_env)):
+        config_dir = _config_dir(env)
+        try:
+            return _flat_add_resource(config_dir, kind, body.type, body.key, body.fields)  # type: ignore[arg-type]
+        except Exception as e:
+            logger.exception("Add %s API failed: %s", kind, e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post(f"/api/manage-{plural}/reset", name=f"api_reset_{kind}")
+    def _reset(body: _ResourceTypeKeyBody, env: Env = Depends(get_env)):
+        config_dir = _config_dir(env)
+        try:
+            return _flat_reset_resource(config_dir, kind, body.type, body.key)  # type: ignore[arg-type]
+        except Exception as e:
+            logger.exception("Reset %s API failed: %s", kind, e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post(f"/api/manage-{plural}/remove", name=f"api_remove_{kind}")
+    def _remove(body: _ResourceTypeKeyBody, env: Env = Depends(get_env)):
+        config_dir = _config_dir(env)
+        try:
+            return _flat_remove_resource(config_dir, kind, body.type, body.key)  # type: ignore[arg-type]
+        except Exception as e:
+            logger.exception("Remove %s API failed: %s", kind, e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @app.post(f"/api/manage-{plural}/update", name=f"api_update_{kind}")
+    def _update(body: _UpdateResourceBody, env: Env = Depends(get_env)):
+        config_dir = _config_dir(env)
+        try:
+            return _flat_update_resource_fields(
+                config_dir, kind, body.type, body.key, body.fields  # type: ignore[arg-type]
+            )
+        except Exception as e:
+            logger.exception("Update %s API failed: %s", kind, e)
+            raise HTTPException(status_code=400, detail=str(e))
+
+
+_make_resource_endpoints("saver", get_saver_metadata)
+_make_resource_endpoints("plotter", get_plotter_metadata)
 
 
 @app.post("/api/create-measurement-project")

@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import logging
 from textwrap import indent
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
@@ -15,10 +15,12 @@ from lab_wizard.lib.utilities.config_io import (
     to_commented_yaml_value,
     instrument_hash,
 )
+from lab_wizard.lib.utilities.flat_resource_io import load_resources
 from lab_wizard.wizard.backend.get_measurements import get_measurements, reqs_from_measurement
 from lab_wizard.wizard.backend.models import Env, FilledReq
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
+    SelectedNodeRef,
     _NodeRef,
     _build_subset_instruments_from_leaves,
     _create_unique_project_dir,
@@ -34,6 +36,16 @@ logger = logging.getLogger("lab_wizard.wizard.backend.project_generation")
 
 
 class SelectedResource(BaseSelection):
+    """A single user selection.
+
+    For ``resource_kind="instrument"`` the ``path`` and ``channel_index`` fields
+    are used as before.  For savers/plotters they are ignored — the lookup uses
+    just ``type`` + ``key`` against the global registry.  The same
+    ``variable_name`` may appear multiple times for list-typed fields like
+    ``savers: list[GenericSaver]`` (one entry per picked instance).
+    """
+
+    resource_kind: Literal["instrument", "saver", "plotter"] = "instrument"
     channel_index: int | None = None
 
 
@@ -124,23 +136,125 @@ def _existing_import_symbols(template_text: str) -> set[str]:
     return out
 
 
+def _split_requirements(reqs: list[FilledReq]) -> tuple[list[FilledReq], list[FilledReq], list[FilledReq]]:
+    instruments: list[FilledReq] = []
+    savers: list[FilledReq] = []
+    plotters: list[FilledReq] = []
+    for r in reqs:
+        if r.resource_kind == "saver":
+            savers.append(r)
+        elif r.resource_kind == "plotter":
+            plotters.append(r)
+        else:
+            instruments.append(r)
+    return instruments, savers, plotters
+
+
+def _split_selections(
+    sels: list[SelectedResource],
+) -> tuple[list[SelectedResource], list[SelectedResource], list[SelectedResource]]:
+    inst_sels: list[SelectedResource] = []
+    saver_sels: list[SelectedResource] = []
+    plotter_sels: list[SelectedResource] = []
+    for s in sels:
+        if s.resource_kind == "saver":
+            saver_sels.append(s)
+        elif s.resource_kind == "plotter":
+            plotter_sels.append(s)
+        else:
+            inst_sels.append(s)
+    return inst_sels, saver_sels, plotter_sels
+
+
+def _flat_subset(
+    selections: list[SelectedResource],
+    registry: dict[str, Any],
+    kind: str,
+) -> dict[str, Any]:
+    """Collect just the registry entries the user selected, by key."""
+    out: dict[str, Any] = {}
+    for sel in selections:
+        if sel.key not in registry:
+            raise ValueError(
+                f"Selected {kind} '{sel.key}' (type={sel.type}) is not configured. "
+                f"Available {kind}s: {sorted(registry.keys())}"
+            )
+        out[sel.key] = registry[sel.key]
+    return out
+
+
+def _saver_var_name(key: str) -> str:
+    return f"saver_{_sanitize_identifier(key).lower()}"
+
+
+def _plotter_var_name(key: str) -> str:
+    return f"plotter_{_sanitize_identifier(key).lower()}"
+
+
+def _flat_resource_codegen(
+    selections: list[SelectedResource],
+    kind: Literal["saver", "plotter"],
+) -> tuple[list[tuple[str, str]], list[str], dict[str, str]]:
+    """Generate import pairs, instantiation lines, and key-to-var-name map for
+    a list of saver or plotter selections."""
+    import_pairs: list[tuple[str, str]] = []
+    inst_lines: list[str] = []
+    var_names: dict[str, str] = {}
+    seen_imports: set[tuple[str, str]] = set()
+    var_alloc = _saver_var_name if kind == "saver" else _plotter_var_name
+
+    for sel in selections:
+        module, params_cls = _type_info(sel.type, kind=kind)
+        runtime_cls = params_cls[:-6] if params_cls.endswith("Params") else params_cls
+        if (module, runtime_cls) not in seen_imports:
+            import_pairs.append((module, runtime_cls))
+            seen_imports.add((module, runtime_cls))
+        var = var_alloc(sel.key)
+        var_names[sel.key] = var
+        inst_lines.append(
+            f"{var} = {runtime_cls}.from_config(exp, key={sel.key!r})"
+        )
+
+    return import_pairs, inst_lines, var_names
+
+
+def _format_resource_field_line(req: FilledReq) -> str:
+    base_name = _base_type_info(req.base_type)[1]
+    if req.is_list:
+        return f"{req.variable_name}: list[{base_name}]"
+    return f"{req.variable_name}: {base_name}"
+
+
+def _format_return_field_line(req: FilledReq, vars_: list[str]) -> str:
+    if req.is_list:
+        items = ", ".join(vars_)
+        return f"{req.variable_name}=[{items}],"
+    if not vars_:
+        raise ValueError(f"No selection provided for {req.variable_name}")
+    return f"{req.variable_name}={vars_[0]},"
+
+
 def _compose_setup(
     measurement_name: str,
-    selected_map: dict[str, _NodeRef],
-    selected_channels: dict[str, int | None],
-    requirements: list[FilledReq],
+    inst_selected_map: dict[str, _NodeRef],
+    inst_selected_channels: dict[str, int | None],
+    instrument_reqs: list[FilledReq],
+    saver_reqs: list[FilledReq],
+    plotter_reqs: list[FilledReq],
+    saver_selections: list[SelectedResource],
+    plotter_selections: list[SelectedResource],
     template_text: str,
 ) -> str:
-    if not requirements:
+    if not instrument_reqs and not saver_reqs and not plotter_reqs:
         raise ValueError(f"No requirements found for measurement '{measurement_name}'")
-    missing = [r.variable_name for r in requirements if r.variable_name not in selected_map]
+
+    missing = [r.variable_name for r in instrument_reqs if r.variable_name not in inst_selected_map]
     if missing:
         raise ValueError(f"Missing required selections: {missing}")
 
-    # Build unique creation steps per node path.
     created_inst: dict[tuple[tuple[str, str], ...], str] = {}
-    lines: list[str] = []
-    import_pairs: set[tuple[str, str]] = set()
+    instrument_lines: list[str] = []
+    instrument_import_pairs: set[tuple[str, str]] = set()
     used_names: dict[str, int] = {}
 
     def _alloc(base: str) -> str:
@@ -148,7 +262,7 @@ def _compose_setup(
         used_names[base] = count
         return base if count == 1 else f"{base}_{count}"
 
-    for leaf in selected_map.values():
+    for leaf in inst_selected_map.values():
         chain = list(reversed(_node_lineage_leaf_to_root(leaf)))  # root -> leaf
         lineage_id: list[tuple[str, str]] = []
         for idx, node in enumerate(chain):
@@ -159,42 +273,38 @@ def _compose_setup(
 
             module, params_cls = _type_info(node.type)
             inst_cls = params_cls[:-6] if params_cls.endswith("Params") else params_cls
-            import_pairs.add((module, inst_cls))
+            instrument_import_pairs.add((module, inst_cls))
 
             token = _short_type_token(node.type)
             var_inst = _alloc(f"{token}_i")
             created_inst[key_t] = var_inst
 
-            # Compute the hash key for this node from its params
             node_type = node.type
             node_key_fields = (
                 node.params.key_fields()
                 if hasattr(node.params, "key_fields")
                 else node.key
             )
-            node_hash = instrument_hash(node_type, node_key_fields) if node_key_fields else node.key
+            node_hash = (
+                instrument_hash(node_type, node_key_fields)
+                if node_key_fields else node.key
+            )
 
             if idx == 0:
-                lines.extend(
-                    [
-                        f"{var_inst} = {inst_cls}.from_config(exp, key={node_hash!r})",
-                        "",
-                    ]
+                instrument_lines.extend(
+                    [f"{var_inst} = {inst_cls}.from_config(exp, key={node_hash!r})", ""]
                 )
             else:
                 parent_id = tuple(lineage_id[:-1])
                 parent_inst = created_inst[parent_id]
-                lines.extend(
-                    [
-                        f"{var_inst} = {inst_cls}.from_config({parent_inst}, key={node_hash!r})",
-                        "",
-                    ]
+                instrument_lines.extend(
+                    [f"{var_inst} = {inst_cls}.from_config({parent_inst}, key={node_hash!r})", ""]
                 )
 
     def _final_expr(var_name: str, leaf: _NodeRef) -> str:
         chain = tuple((n.type, n.key) for n in reversed(_node_lineage_leaf_to_root(leaf)))
         base_inst = created_inst[chain]
-        ch_idx = selected_channels.get(var_name)
+        ch_idx = inst_selected_channels.get(var_name)
         ch_list = getattr(leaf.params, "channels", None)
         channels_list = cast(list[Any], ch_list) if isinstance(ch_list, list) else None
         if channels_list is not None and len(channels_list) > 1:
@@ -215,26 +325,61 @@ def _compose_setup(
             )
         return base_inst
 
-    assignment_lines: list[str] = []
+    # Saver / plotter codegen
+    saver_imports, saver_inst_lines, saver_vars = _flat_resource_codegen(saver_selections, "saver")
+    plotter_imports, plotter_inst_lines, plotter_vars = _flat_resource_codegen(plotter_selections, "plotter")
+
+    # Resource fields + return fields, in template field order
+    resource_field_lines: list[str] = []
     return_field_lines: list[str] = []
-    resources_field_lines: list[str] = []
-    for req in requirements:
-        base_name = _base_type_info(req.base_type)[1]
-        expr = _final_expr(req.variable_name, selected_map[req.variable_name])
+    instrument_assignments: list[str] = []
+
+    for req in instrument_reqs:
+        leaf = inst_selected_map[req.variable_name]
         local_name = f"{req.variable_name}_1"
-        assignment_lines.append(f"{local_name} = {expr}")
-        return_field_lines.append(f"{req.variable_name}={local_name},")
-        resources_field_lines.append(f"{req.variable_name}: {base_name}")
+        instrument_assignments.append(f"{local_name} = {_final_expr(req.variable_name, leaf)}")
+        resource_field_lines.append(_format_resource_field_line(req))
+        return_field_lines.append(_format_return_field_line(req, [local_name]))
+
+    for req in saver_reqs:
+        vars_ = [saver_vars[s.key] for s in saver_selections if s.variable_name == req.variable_name]
+        if req.is_list and not vars_:
+            return_field_lines.append(_format_return_field_line(req, []))
+            resource_field_lines.append(_format_resource_field_line(req))
+            continue
+        if not vars_:
+            raise ValueError(f"No saver selected for variable '{req.variable_name}'")
+        resource_field_lines.append(_format_resource_field_line(req))
+        return_field_lines.append(_format_return_field_line(req, vars_))
+
+    for req in plotter_reqs:
+        vars_ = [plotter_vars[s.key] for s in plotter_selections if s.variable_name == req.variable_name]
+        if req.is_list and not vars_:
+            return_field_lines.append(_format_return_field_line(req, []))
+            resource_field_lines.append(_format_resource_field_line(req))
+            continue
+        if not vars_:
+            raise ValueError(f"No plotter selected for variable '{req.variable_name}'")
+        resource_field_lines.append(_format_resource_field_line(req))
+        return_field_lines.append(_format_return_field_line(req, vars_))
 
     existing_symbols = _existing_import_symbols(template_text)
-    requirement_symbols = {_base_type_info(req.base_type)[1] for req in requirements}
 
     filtered_imports: list[str] = []
     seen_lines: set[str] = set()
-    for mod, cls in sorted(import_pairs):
-        if cls in requirement_symbols:
+    # Skip imports for symbols already in the template (e.g. base classes from
+    # the wizard:resource_fields annotations).
+    skip_names = set(existing_symbols)
+    for mod, cls in sorted(instrument_import_pairs):
+        if cls in skip_names:
             continue
-        if cls in existing_symbols:
+        line = f"from {mod} import {cls}"
+        if line in seen_lines:
+            continue
+        seen_lines.add(line)
+        filtered_imports.append(line)
+    for mod, cls in saver_imports + plotter_imports:
+        if cls in skip_names:
             continue
         line = f"from {mod} import {cls}"
         if line in seen_lines:
@@ -242,54 +387,56 @@ def _compose_setup(
         seen_lines.add(line)
         filtered_imports.append(line)
 
-    imports_lines: list[str] = []
-    imports_lines.extend(filtered_imports)
-    imports_block = "\n".join(imports_lines)
-    instantiation_block = "\n".join(lines + assignment_lines).rstrip()
+    imports_block = "\n".join(filtered_imports)
+    instantiation_lines = (
+        instrument_lines
+        + (["", "# savers"] if saver_inst_lines else [])
+        + saver_inst_lines
+        + (["", "# plotters"] if plotter_inst_lines else [])
+        + plotter_inst_lines
+        + (["", ""] if instrument_assignments else [])
+        + instrument_assignments
+    )
+    instantiation_block = "\n".join(instantiation_lines).rstrip()
 
     rendered = template_text
     rendered = _replace_wizard_block(rendered, "imports", imports_block)
-    rendered = _replace_wizard_block(
-        rendered, "resource_fields", "\n".join(resources_field_lines)
-    )
+    rendered = _replace_wizard_block(rendered, "resource_fields", "\n".join(resource_field_lines))
     rendered = _replace_wizard_block(rendered, "instantiation", instantiation_block)
-    rendered = _replace_wizard_block(
-        rendered, "return_fields", "\n".join(return_field_lines)
-    )
+    rendered = _replace_wizard_block(rendered, "return_fields", "\n".join(return_field_lines))
     return rendered
 
 
 def _compose_setup_from_attribute(
     measurement_name: str,
-    selected_map: dict[str, _NodeRef],
-    selected_channels: dict[str, int | None],
-    requirements: list[FilledReq],
+    inst_selected_map: dict[str, _NodeRef],
+    inst_selected_channels: dict[str, int | None],
+    instrument_reqs: list[FilledReq],
+    saver_reqs: list[FilledReq],
+    plotter_reqs: list[FilledReq],
+    saver_selections: list[SelectedResource],
+    plotter_selections: list[SelectedResource],
     template_text: str,
 ) -> str:
-    """Generate a setup file using Way 1 style: ``exp.from_attribute("name")``.
-
-    No instrument class imports are emitted.  Each resource is resolved by its
-    ``attribute_name`` param value, which is looked up in the project YAML at
-    runtime.  The user never needs to touch raw keys or hash values.
-    """
-    if not requirements:
+    """Generate setup using ``exp.from_attribute``.  Saver/plotter handling is the
+    same as in ``_compose_setup`` (they're keyed by user-given name, not by
+    attribute_name)."""
+    if not instrument_reqs and not saver_reqs and not plotter_reqs:
         raise ValueError(f"No requirements found for measurement '{measurement_name}'")
-    missing = [r.variable_name for r in requirements if r.variable_name not in selected_map]
+    missing = [r.variable_name for r in instrument_reqs if r.variable_name not in inst_selected_map]
     if missing:
         raise ValueError(f"Missing required selections: {missing}")
 
-    assignment_lines: list[str] = []
+    saver_imports, saver_inst_lines, saver_vars = _flat_resource_codegen(saver_selections, "saver")
+    plotter_imports, plotter_inst_lines, plotter_vars = _flat_resource_codegen(plotter_selections, "plotter")
+
+    resource_field_lines: list[str] = []
     return_field_lines: list[str] = []
-    resources_field_lines: list[str] = []
+    instrument_assignments: list[str] = []
 
-    for req in requirements:
-        base_name = _base_type_info(req.base_type)[1]
-        leaf = selected_map[req.variable_name]
-        ch_idx = selected_channels.get(req.variable_name)
-
-        # Determine which attribute_name to look up.
-        # If a channel_index is specified, use the channel's attribute_name;
-        # otherwise use the leaf instrument's attribute_name.
+    for req in instrument_reqs:
+        leaf = inst_selected_map[req.variable_name]
+        ch_idx = inst_selected_channels.get(req.variable_name)
         if ch_idx is not None:
             ch_list = getattr(leaf.params, "channels", None)
             if isinstance(ch_list, list) and ch_idx < len(ch_list):
@@ -307,64 +454,88 @@ def _compose_setup_from_attribute(
             )
 
         local_name = f"{req.variable_name}_1"
-        assignment_lines.append(
-            f"{local_name} = exp.from_attribute({attr_name!r})"
-        )
-        return_field_lines.append(f"{req.variable_name}={local_name},")
-        resources_field_lines.append(f"{req.variable_name}: {base_name}")
+        instrument_assignments.append(f"{local_name} = exp.from_attribute({attr_name!r})")
+        resource_field_lines.append(_format_resource_field_line(req))
+        return_field_lines.append(_format_return_field_line(req, [local_name]))
 
-    instantiation_block = "\n".join(assignment_lines)
+    for req in saver_reqs:
+        vars_ = [saver_vars[s.key] for s in saver_selections if s.variable_name == req.variable_name]
+        resource_field_lines.append(_format_resource_field_line(req))
+        return_field_lines.append(_format_return_field_line(req, vars_))
+
+    for req in plotter_reqs:
+        vars_ = [plotter_vars[s.key] for s in plotter_selections if s.variable_name == req.variable_name]
+        resource_field_lines.append(_format_resource_field_line(req))
+        return_field_lines.append(_format_return_field_line(req, vars_))
+
+    existing_symbols = _existing_import_symbols(template_text)
+    filtered_imports: list[str] = []
+    for mod, cls in saver_imports + plotter_imports:
+        if cls in existing_symbols:
+            continue
+        filtered_imports.append(f"from {mod} import {cls}")
+    imports_block = "\n".join(filtered_imports)
+
+    instantiation_lines = (
+        (["# savers"] if saver_inst_lines else [])
+        + saver_inst_lines
+        + (["", "# plotters"] if plotter_inst_lines else [])
+        + plotter_inst_lines
+        + (["", ""] if instrument_assignments else [])
+        + instrument_assignments
+    )
+    instantiation_block = "\n".join(instantiation_lines).rstrip()
 
     rendered = template_text
-    rendered = _replace_wizard_block(rendered, "imports", "")
-    rendered = _replace_wizard_block(
-        rendered, "resource_fields", "\n".join(resources_field_lines)
-    )
+    rendered = _replace_wizard_block(rendered, "imports", imports_block)
+    rendered = _replace_wizard_block(rendered, "resource_fields", "\n".join(resource_field_lines))
     rendered = _replace_wizard_block(rendered, "instantiation", instantiation_block)
-    rendered = _replace_wizard_block(
-        rendered, "return_fields", "\n".join(return_field_lines)
-    )
+    rendered = _replace_wizard_block(rendered, "return_fields", "\n".join(return_field_lines))
     return rendered
 
 
-def _default_project_yaml(measurement_name: str, instruments: dict[str, Any]) -> dict[str, Any]:
-    exp_defaults: dict[str, Any]
+def _exp_defaults(measurement_name: str) -> dict[str, Any]:
     if measurement_name == "iv_curve":
-        exp_defaults = {
+        return {
             "type": "iv_curve",
             "start_voltage": 0.0,
             "stop_voltage": 1.4,
             "step_voltage": 0.005,
             "num_points": 100,
         }
-    elif measurement_name == "pcr_curve":
-        exp_defaults = {
+    if measurement_name == "pcr_curve":
+        return {
             "type": "pcr_curve",
             "start_voltage": 0.0,
             "stop_voltage": 1.4,
             "step_voltage": 0.005,
             "photon_rate": 100000.0,
         }
-    else:
-        exp_defaults = {"type": measurement_name}
+    return {"type": measurement_name}
 
+
+def _default_project_yaml(
+    measurement_name: str,
+    instruments: dict[str, Any],
+    savers: dict[str, Any],
+    plotters: dict[str, Any],
+) -> dict[str, Any]:
     return {
-        "exp": exp_defaults,
+        "exp": _exp_defaults(measurement_name),
         "device": {
             "type": "device",
             "name": "generated_device",
             "model": "unknown",
             "description": "Generated by wizard",
         },
-        "saver": {
-            "default": {
-                "type": "file_saver",
-                "file_path": "data/output.csv",
-                "include_timestamp": True,
-                "include_metadata": True,
-            }
+        "savers": {
+            key: model_to_commented_map(value, exclude_none=True)
+            for key, value in savers.items()
         },
-        "plotter": {"default": {"type": "mpl_plotter", "figure_size": [8, 6], "dpi": 100}},
+        "plotters": {
+            key: model_to_commented_map(value, exclude_none=True)
+            for key, value in plotters.items()
+        },
         "instruments": {
             key: model_to_commented_map(value, exclude_none=True)
             for key, value in instruments.items()
@@ -379,29 +550,35 @@ def generate_measurement_project(
     req: GenerateProjectRequest,
 ) -> dict[str, Any]:
     logger.info("Generating project for measurement '%s'", req.measurement_name)
+
+    instrument_sels, saver_sels, plotter_sels = _split_selections(req.selected_resources)
     instruments = load_instruments(config_dir)
     all_nodes = _walk_tree(instruments)
 
-    selected_map: dict[str, _NodeRef] = {}
-    selected_channels: dict[str, int | None] = {}
-    for sel in req.selected_resources:
-        selected_map[sel.variable_name] = _resolve_selection_node(sel, all_nodes)
-        selected_channels[sel.variable_name] = sel.channel_index
-    logger.debug(
-        "Resolved %d selected resources for measurement '%s'",
-        len(selected_map),
-        req.measurement_name,
-    )
+    inst_selected_map: dict[str, _NodeRef] = {}
+    inst_selected_channels: dict[str, int | None] = {}
+    for sel in instrument_sels:
+        inst_selected_map[sel.variable_name] = _resolve_selection_node(sel, all_nodes)
+        inst_selected_channels[sel.variable_name] = sel.channel_index
+
     requirements = _requirements_for_measurement(config_dir, req.measurement_name)
+    instrument_reqs, saver_reqs, plotter_reqs = _split_requirements(requirements)
     template_text = _setup_template_text(config_dir, req.measurement_name)
 
-    subset = _build_subset_instruments_from_leaves(list(selected_map.values()))
+    instruments_subset = _build_subset_instruments_from_leaves(list(inst_selected_map.values()))
+
+    saver_registry = load_resources(config_dir, "saver")
+    plotter_registry = load_resources(config_dir, "plotter")
+    savers_subset = _flat_subset(saver_sels, saver_registry, "saver")
+    plotters_subset = _flat_subset(plotter_sels, plotter_registry, "plotter")
 
     prefix = req.project_prefix or _format_measurement_slug(req.measurement_name)
     project_dir = _create_unique_project_dir(projects_dir, prefix)
     logger.info("Created project directory %s", project_dir)
 
-    yaml_payload = _default_project_yaml(req.measurement_name, subset)
+    yaml_payload = _default_project_yaml(
+        req.measurement_name, instruments_subset, savers_subset, plotters_subset,
+    )
     yaml_path = project_dir / f"{project_dir.name}.yaml"
     y = YAML(typ="rt")
     y.default_flow_style = False
@@ -412,17 +589,25 @@ def generate_measurement_project(
     if req.generation_style == "from_attribute":
         setup_code = _compose_setup_from_attribute(
             req.measurement_name,
-            selected_map,
-            selected_channels,
-            requirements,
+            inst_selected_map,
+            inst_selected_channels,
+            instrument_reqs,
+            saver_reqs,
+            plotter_reqs,
+            saver_sels,
+            plotter_sels,
             template_text,
         )
     else:
         setup_code = _compose_setup(
             req.measurement_name,
-            selected_map,
-            selected_channels,
-            requirements,
+            inst_selected_map,
+            inst_selected_channels,
+            instrument_reqs,
+            saver_reqs,
+            plotter_reqs,
+            saver_sels,
+            plotter_sels,
             template_text,
         )
 
@@ -438,4 +623,3 @@ def generate_measurement_project(
         "yaml_file": str(yaml_path),
         "setup_file": str(setup_path),
     }
-

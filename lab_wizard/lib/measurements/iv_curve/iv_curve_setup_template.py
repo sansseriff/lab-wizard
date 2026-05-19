@@ -6,20 +6,19 @@ The wizard only modifies blocks between matching
 `# wizard:<name>:start` and `# wizard:<name>:end` markers.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-import yaml
 
 from pydantic import BaseModel
 
-from lab_wizard.lib.utilities.model_tree import Exp
+from lab_wizard.lib.utilities.model_tree import Exp, load_exp_from_yaml
 from lab_wizard.lib.instruments.general.vsense import VSense, StandInVSense
 from lab_wizard.lib.instruments.general.vsource import VSource, StandInVSource
-from lab_wizard.lib.plotters.plotter import GenericPlotter, StandInPlotter
-from lab_wizard.lib.savers.saver import GenericSaver, StandInSaver
+from lab_wizard.lib.plotters.plotter import GenericPlotter
+from lab_wizard.lib.savers.saver import GenericSaver
 
 # wizard:imports:start
-# wizard inserts concrete instrument imports here
+# wizard inserts concrete instrument / saver / plotter imports here
 # wizard:imports:end
 
 
@@ -32,37 +31,23 @@ class IVCurveParams(BaseModel):
 
 @dataclass
 class IVCurveResources:
-    saver: GenericSaver
-    plotter: GenericPlotter
     # wizard:resource_fields:start
-    voltage_source: VSource
-    voltage_sense: VSense
+    savers: list[GenericSaver] = field(default_factory=list)
+    plotters: list[GenericPlotter] = field(default_factory=list)
+    voltage_source: VSource = field(default_factory=StandInVSource)
+    voltage_sense: VSense = field(default_factory=StandInVSense)
     # wizard:resource_fields:end
-    params: IVCurveParams
-
-
-def load_exp_from_yaml(yaml_path: str | Path) -> Exp:
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return Exp.model_validate(data)
+    params: IVCurveParams = field(default_factory=IVCurveParams)
 
 
 def create_instrument_resources(exp: Exp) -> IVCurveResources:
-    saver_1 = StandInSaver()
-    plotter_1 = StandInPlotter()
-    voltage_source_1 = StandInVSource()
-    voltage_sense_1 = StandInVSense()
-
     # wizard:instantiation:start
-    # wizard inserts config-backed instrument construction here
+    # wizard inserts config-backed instrument / saver / plotter construction here
     # wizard:instantiation:end
 
     return IVCurveResources(
-        saver=saver_1,
-        plotter=plotter_1,
         # wizard:return_fields:start
-        voltage_source=voltage_source_1,
-        voltage_sense=voltage_sense_1,
+        # wizard inserts the resolved field values here
         # wizard:return_fields:end
         params=IVCurveParams(),
     )

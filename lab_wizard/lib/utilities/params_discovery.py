@@ -1,23 +1,21 @@
 """
-Auto-discovery of Params classes from the instruments folder.
+Auto-discovery of Params classes from lib/instruments/, lib/savers/, lib/plotters/.
 
-Uses a JSON cache for fast lookups, rebuilds cache only when folder changes.
-This avoids the need for a manually maintained TYPE_REGISTRY.
+Uses a JSON cache for fast lookups, rebuilds cache only when the relevant folder
+changes.  Supports three "kinds" of resource: ``"instrument"``, ``"saver"``,
+``"plotter"``.  Instruments use the parent/child hierarchy (CanInstantiate,
+ChildParams).  Savers and plotters are flat — anything inheriting SaverParams /
+PlotterParams with a ``type: Literal[...]`` field is registered.
 
 Usage:
-    from lab_wizard.lib.utilities.params_discovery import load_params_class, get_config_folder
-    
-    # Load a Params class by its type string
+    from lab_wizard.lib.utilities.params_discovery import (
+        load_params_class, load_saver_params_class, load_plotter_params_class,
+        get_instrument_metadata, get_saver_metadata, get_plotter_metadata,
+    )
+
+    # Load a Params class by its type string (kind defaults to instrument)
     params_cls = load_params_class("dbay")
-    
-    # Get the config folder for saving YAML
-    folder = get_config_folder(params_cls)  # Returns "dbay" or None for top-level
-
-    # Get rich metadata (parent chains, defaults, etc.) for all types
-    meta = get_instrument_metadata()
-
-    # Walk the parent chain for a child type
-    chain = get_parent_chain("sim928")  # → ["sim900", "prologix_gpib"]
+    saver_cls  = load_saver_params_class("database_saver")
 """
 from __future__ import annotations
 
@@ -26,10 +24,12 @@ import json
 import re
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
-# Files/folders to skip during scanning (utilities, not instrument definitions)
+Kind = Literal["instrument", "saver", "plotter"]
+
+# Files/folders to skip during scanning (utilities, not resource definitions)
 SKIP_NAMES = {
     "__init__.py",
     "comm.py",
@@ -39,27 +39,61 @@ SKIP_NAMES = {
     "__pycache__",
 }
 
-# Cache location
+# Cache locations — one per kind so they invalidate independently.
 CACHE_DIR = Path.home() / ".cache" / "lab_wizard"
-CACHE_FILE = CACHE_DIR / "params_cache.json"
 
-# In-memory caches
-_loaded_params: dict[str, type] = {}
-_type_to_module: dict[str, dict[str, Any]] | None = None
-_instrument_metadata: dict[str, dict[str, Any]] | None = None
+# (root_subpath_under_lib, kind_name, allowed_base_class_names)
+# A class is registered if it inherits from at least one of the listed bases AND
+# carries a ``type: Literal[...]`` field.  For instruments the base class also
+# tells us whether it is a top-level (CanInstantiate) or child (ChildParams).
+_KIND_SPECS: dict[str, dict[str, Any]] = {
+    "instrument": {
+        "subpath": "instruments",
+        "bases": ("CanInstantiate", "ChildParams"),
+        "has_hierarchy": True,
+    },
+    "saver": {
+        "subpath": "savers",
+        "bases": ("SaverParams",),
+        "has_hierarchy": False,
+    },
+    "plotter": {
+        "subpath": "plotters",
+        "bases": ("PlotterParams",),
+        "has_hierarchy": False,
+    },
+}
+
 logger = logging.getLogger("lab_wizard.lib.utilities.params_discovery")
 
+# In-memory caches keyed by kind.
+_loaded_params: dict[str, dict[str, type]] = {k: {} for k in _KIND_SPECS}
+_type_to_module: dict[str, dict[str, dict[str, Any]] | None] = {k: None for k in _KIND_SPECS}
+_metadata_cache: dict[str, dict[str, dict[str, Any]] | None] = {k: None for k in _KIND_SPECS}
 
-def _get_instruments_dir() -> Path:
-    """Get the instruments directory path."""
-    return (Path(__file__).parent.parent / "instruments").resolve()
+
+def _root_dir(kind: Kind) -> Path:
+    """Get the source root directory for a given kind (e.g. .../lib/instruments)."""
+    spec = _KIND_SPECS[kind]
+    return (Path(__file__).parent.parent / spec["subpath"]).resolve()
 
 
-def _get_folder_fingerprint(instruments_dir: Path) -> tuple[float, int]:
+def _cache_file(kind: Kind) -> Path:
+    return CACHE_DIR / f"params_cache_{kind}.json"
+
+
+def _module_prefix(kind: Kind) -> str:
+    spec = _KIND_SPECS[kind]
+    return f"lab_wizard.lib.{spec['subpath']}."
+
+
+def _get_folder_fingerprint(root_dir: Path) -> tuple[float, int]:
     """Get (max_mtime, file_count) for cache invalidation."""
-    max_mtime = instruments_dir.stat().st_mtime
+    if not root_dir.exists():
+        return 0.0, 0
+    max_mtime = root_dir.stat().st_mtime
     file_count = 0
-    for py_file in instruments_dir.rglob("*.py"):
+    for py_file in root_dir.rglob("*.py"):
         file_count += 1
         mtime = py_file.stat().st_mtime
         if mtime > max_mtime:
@@ -84,12 +118,14 @@ _PARENT_CLASS_RETURN = re.compile(
 
 
 def _scan_file_for_params(
-    path: Path, instruments_dir: Path
+    path: Path, root_dir: Path, kind: Kind
 ) -> list[dict[str, Any]]:
     """Scan a Python file for Params classes with type Literal fields.
 
     Returns list of dicts with keys:
         type_value, module, class_name, is_top_level, is_child, parent_module
+    For non-instrument kinds, is_top_level/is_child/parent_module are filled
+    with neutral defaults (True/False/None).
     """
     results: list[dict[str, Any]] = []
 
@@ -101,45 +137,54 @@ def _scan_file_for_params(
     if "Params" not in content:
         return results
 
-    # Find Params class definitions with their base classes
+    spec = _KIND_SPECS[kind]
+    base_names: tuple[str, ...] = spec["bases"]
+
     class_iter = list(_CLASS_WITH_BASES.finditer(content))
     if not class_iter:
         return results
 
     try:
-        rel_path = path.relative_to(instruments_dir)
-        module_parts = ["lab_wizard", "lib", "instruments"] + list(
-            rel_path.with_suffix("").parts
-        )
-        module_path = ".".join(module_parts)
+        rel_path = path.relative_to(root_dir)
+        prefix = _module_prefix(kind)
+        module_path = prefix + ".".join(rel_path.with_suffix("").parts)
     except ValueError:
         return results
 
-    # Detect parent_class return values (on Child instrument classes in same file)
     parent_module: str | None = None
-    parent_matches = _PARENT_CLASS_RETURN.findall(content)
-    if parent_matches:
-        raw = parent_matches[0]
-        if not raw.startswith("lab_wizard."):
-            raw = "lab_wizard." + raw
-        # "lab_wizard.lib.instruments.sim900.sim900.Sim900" → module part
-        parent_module = raw.rsplit(".", 1)[0]
+    if spec["has_hierarchy"]:
+        parent_matches = _PARENT_CLASS_RETURN.findall(content)
+        if parent_matches:
+            raw = parent_matches[0]
+            if not raw.startswith("lab_wizard."):
+                raw = "lab_wizard." + raw
+            parent_module = raw.rsplit(".", 1)[0]
 
     for i, match in enumerate(class_iter):
         class_name, bases_str = match.group(1), match.group(2)
-        is_top_level = bool(re.search(r'\bCanInstantiate\b', bases_str))
-        is_child = bool(re.search(r'\bChildParams\b', bases_str))
-        # Only register classes that are actual instrument params
-        if not is_top_level and not is_child:
-            # could be a channel params class.
-            continue
-        # Search for type literal in THIS class's body only
+        # Match by base-class name. For instruments this distinguishes
+        # CanInstantiate (top-level) from ChildParams (child); for savers/
+        # plotters we only check that SaverParams/PlotterParams is present.
+        if spec["has_hierarchy"]:
+            is_top_level = bool(re.search(r'\bCanInstantiate\b', bases_str))
+            is_child = bool(re.search(r'\bChildParams\b', bases_str))
+            if not is_top_level and not is_child:
+                continue
+        else:
+            matches_base = any(
+                re.search(rf'\b{re.escape(b)}\b', bases_str) for b in base_names
+            )
+            if not matches_base:
+                continue
+            is_top_level = True
+            is_child = False
+
         body_start = match.end()
         body_end = class_iter[i + 1].start() if i + 1 < len(class_iter) else len(content)
         class_body = content[body_start:body_end]
         type_match = _TYPE_LITERAL.search(class_body)
         if not type_match:
-            continue  # No type literal → not a registered instrument
+            continue
         results.append({
             "type_value": type_match.group(2),
             "module": module_path,
@@ -152,19 +197,23 @@ def _scan_file_for_params(
     return results
 
 
-def _scan_instruments_folder() -> dict[str, dict[str, Any]]:
-    """Scan instruments folder for all Params classes.
+def _scan_root(kind: Kind) -> dict[str, dict[str, Any]]:
+    """Scan the source root for a given kind for Params classes.
 
-    Returns mapping: type_string -> {module, class_name, is_top_level, is_child, parent_module}
+    Returns mapping: type_string -> {module, class_name, is_top_level,
+    is_child, parent_module, parent_type, kind}
     """
-    instruments_dir = _get_instruments_dir()
+    root_dir = _root_dir(kind)
     type_to_module: dict[str, dict[str, Any]] = {}
 
-    for py_file in instruments_dir.rglob("*.py"):
+    if not root_dir.exists():
+        return type_to_module
+
+    for py_file in root_dir.rglob("*.py"):
         if _should_skip(py_file):
             continue
 
-        found = _scan_file_for_params(py_file, instruments_dir)
+        found = _scan_file_for_params(py_file, root_dir, kind)
 
         for entry in found:
             tv = entry["type_value"]
@@ -172,7 +221,7 @@ def _scan_instruments_folder() -> dict[str, dict[str, Any]]:
                 existing = type_to_module[tv]
                 if existing["module"] != entry["module"] or existing["class_name"] != entry["class_name"]:
                     raise ValueError(
-                        f"Duplicate type '{tv}' found in "
+                        f"Duplicate type '{tv}' (kind={kind}) found in "
                         f"{existing['module']}.{existing['class_name']} and "
                         f"{entry['module']}.{entry['class_name']}"
                     )
@@ -182,109 +231,114 @@ def _scan_instruments_folder() -> dict[str, dict[str, Any]]:
                 "is_top_level": entry["is_top_level"],
                 "is_child": entry["is_child"],
                 "parent_module": entry["parent_module"],
+                "kind": kind,
             }
 
-    # Resolve parent_module → parent_type using reverse lookup
-    module_to_type: dict[str, str] = {
-        v["module"]: k for k, v in type_to_module.items()
-    }
-    for info in type_to_module.values():
-        pm = info.get("parent_module")
-        if pm and pm in module_to_type:
-            info["parent_type"] = module_to_type[pm]
-        else:
+    if _KIND_SPECS[kind]["has_hierarchy"]:
+        module_to_type: dict[str, str] = {
+            v["module"]: k for k, v in type_to_module.items()
+        }
+        for info in type_to_module.values():
+            pm = info.get("parent_module")
+            if pm and pm in module_to_type:
+                info["parent_type"] = module_to_type[pm]
+            else:
+                info["parent_type"] = None
+    else:
+        for info in type_to_module.values():
             info["parent_type"] = None
 
     return type_to_module
 
 
-def _load_cache() -> dict[str, Any] | None:
+def _load_cache(kind: Kind) -> dict[str, Any] | None:
     """Load cache from disk if it exists and is valid JSON."""
-    if not CACHE_FILE.exists():
+    cache_file = _cache_file(kind)
+    if not cache_file.exists():
         return None
     try:
-        return json.loads(CACHE_FILE.read_text(encoding="utf-8"))
+        return json.loads(cache_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
 
-def _save_cache(mtime: float, file_count: int, type_to_module: dict[str, dict[str, Any]]) -> None:
+def _save_cache(kind: Kind, mtime: float, file_count: int, type_to_module: dict[str, dict[str, Any]]) -> None:
     """Save cache to disk."""
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_data = {
-            "instruments_mtime": mtime,
+            "kind": kind,
+            "root_mtime": mtime,
             "file_count": file_count,
             "type_to_module": type_to_module,
         }
-        CACHE_FILE.write_text(json.dumps(cache_data, indent=2), encoding="utf-8")
+        _cache_file(kind).write_text(json.dumps(cache_data, indent=2), encoding="utf-8")
     except OSError:
         pass
 
 
-def get_type_to_module_map() -> dict[str, dict[str, Any]]:
-    """Get the type -> module mapping, using cache if valid.
+def get_type_to_module_map(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
+    """Get the type -> module mapping for a kind, using cache if valid."""
+    cached = _type_to_module[kind]
+    if cached is not None:
+        return cached
 
-    Returns dict mapping type_string -> {
-        "module": str, "class_name": str,
-        "is_top_level": bool, "is_child": bool,
-        "parent_type": str | None
-    }
-    """
-    global _type_to_module
+    root_dir = _root_dir(kind)
+    current_mtime, current_count = _get_folder_fingerprint(root_dir)
 
-    if _type_to_module is not None:
-        return _type_to_module
-
-    instruments_dir = _get_instruments_dir()
-    current_mtime, current_count = _get_folder_fingerprint(instruments_dir)
-
-    cache = _load_cache()
+    cache = _load_cache(kind)
     if cache is not None:
-        cached_mtime = cache.get("instruments_mtime", 0)
+        cached_mtime = cache.get("root_mtime", 0)
         cached_count = cache.get("file_count", 0)
         if cached_mtime == current_mtime and cached_count == current_count:
-            _type_to_module = cache["type_to_module"]
-            return _type_to_module  # type: ignore[return-value]
+            _type_to_module[kind] = cache["type_to_module"]
+            return _type_to_module[kind]  # type: ignore[return-value]
 
-    _type_to_module = _scan_instruments_folder()
-    _save_cache(current_mtime, current_count, _type_to_module)
-    return _type_to_module
+    scanned = _scan_root(kind)
+    _type_to_module[kind] = scanned
+    _save_cache(kind, current_mtime, current_count, scanned)
+    return scanned
 
 
-def load_params_class(type_str: str, verbose: bool = False) -> type:
-    """Lazily load and cache a Params class by its type string."""
-    if type_str in _loaded_params:
+def load_params_class(
+    type_str: str, kind: Kind = "instrument", verbose: bool = False
+) -> type:
+    """Lazily load and cache a Params class by its type string for the given kind."""
+    cache = _loaded_params[kind]
+    if type_str in cache:
         if verbose:
             logger.debug(
-                "[cache hit] '%s' -> %s",
-                type_str,
-                _loaded_params[type_str].__name__,
+                "[cache hit] %s '%s' -> %s",
+                kind, type_str, cache[type_str].__name__,
             )
-        return _loaded_params[type_str]
+        return cache[type_str]
 
-    type_map = get_type_to_module_map()
+    type_map = get_type_to_module_map(kind)
 
     if type_str not in type_map:
         available = ", ".join(sorted(type_map.keys()))
         raise ValueError(
-            f"Unknown instrument type '{type_str}'. Available types: {available}"
+            f"Unknown {kind} type '{type_str}'. Available {kind} types: {available}"
         )
 
     info = type_map[type_str]
-
     if verbose:
         logger.debug(
-            "[importing] '%s' from %s.%s",
-            type_str,
-            info["module"],
-            info["class_name"],
+            "[importing] %s '%s' from %s.%s",
+            kind, type_str, info["module"], info["class_name"],
         )
-
     module = importlib.import_module(info["module"])
     cls = getattr(module, info["class_name"])
-    _loaded_params[type_str] = cls
+    cache[type_str] = cls
     return cls
+
+
+def load_saver_params_class(type_str: str, verbose: bool = False) -> type:
+    return load_params_class(type_str, kind="saver", verbose=verbose)
+
+
+def load_plotter_params_class(type_str: str, verbose: bool = False) -> type:
+    return load_params_class(type_str, kind="plotter", verbose=verbose)
 
 
 def get_config_folder(params_cls: type) -> str | None:
@@ -311,35 +365,32 @@ def get_config_folder(params_cls: type) -> str | None:
 
 
 def clear_cache() -> None:
-    """Clear both in-memory and disk caches."""
-    global _type_to_module, _loaded_params, _instrument_metadata
-    _type_to_module = None
-    _loaded_params = {}
-    _instrument_metadata = None
-    if CACHE_FILE.exists():
-        try:
-            CACHE_FILE.unlink()
-        except OSError:
-            pass
+    """Clear in-memory and disk caches for ALL kinds."""
+    for k in list(_KIND_SPECS):
+        _type_to_module[k] = None
+        _loaded_params[k] = {}
+        _metadata_cache[k] = None
+        cache_file = _cache_file(k)  # type: ignore[arg-type]
+        if cache_file.exists():
+            try:
+                cache_file.unlink()
+            except OSError:
+                pass
 
 
-def list_available_types() -> list[str]:
-    """List all available instrument type strings (sorted)."""
-    return sorted(get_type_to_module_map().keys())
+def list_available_types(kind: Kind = "instrument") -> list[str]:
+    """List all available type strings for a kind (sorted)."""
+    return sorted(get_type_to_module_map(kind).keys())
 
 
 # --------------- Rich metadata & parent-chain helpers ---------------
 
 
-def get_parent_chain(type_str: str) -> list[str]:
-    """Walk up the parent chain for a type.
-
-    Returns list of ancestor type strings from immediate parent to root.
-    Top-level instruments return [].
-
-    Example: get_parent_chain("sim928") → ["sim900", "prologix_gpib"]
-    """
-    type_map = get_type_to_module_map()
+def get_parent_chain(type_str: str, kind: Kind = "instrument") -> list[str]:
+    """Walk up the parent chain for a type. Returns [] for non-hierarchical kinds."""
+    if not _KIND_SPECS[kind]["has_hierarchy"]:
+        return []
+    type_map = get_type_to_module_map(kind)
     chain: list[str] = []
     current = type_str
     seen: set[str] = set()
@@ -356,40 +407,26 @@ def get_parent_chain(type_str: str) -> list[str]:
     return chain
 
 
-def get_instrument_metadata() -> dict[str, dict[str, Any]]:
-    """Return rich metadata for every discoverable instrument type.
+def get_metadata(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
+    """Return rich metadata for every discoverable type of the given kind.
 
-    Each entry:
-        {
-            "type": str,
-            "class_name": str,
-            "module": str,
-            "is_top_level": bool,
-            "is_child": bool,
-            "parent_type": str | None,
-            "parent_chain": list[str],
-            "child_types": list[str],
-            "defaults": dict,
-        }
-
-    ``defaults`` is the model_dump() of a default-constructed Params instance.
-    Types whose Params class requires non-default arguments will have
-    defaults={} (construction failure is silently ignored).
-
-    Result is cached in-process; call clear_cache() to invalidate.
+    Each entry includes type, class_name, module, kind, is_top_level, is_child,
+    parent_type, parent_chain, child_types, defaults, key_hint, discovery_actions.
+    Non-hierarchical kinds (saver, plotter) always have parent_type=None,
+    parent_chain=[], child_types=[], discovery_actions=[].
     """
-    global _instrument_metadata
-    if _instrument_metadata is not None:
-        return _instrument_metadata
+    if _metadata_cache[kind] is not None:
+        return _metadata_cache[kind]  # type: ignore[return-value]
 
-    type_map = get_type_to_module_map()
+    type_map = get_type_to_module_map(kind)
+    has_hierarchy = _KIND_SPECS[kind]["has_hierarchy"]
 
-    # Build child_types (inverse of parent_type)
     children_of: dict[str, list[str]] = {}
-    for ts, info in type_map.items():
-        pt = info.get("parent_type")
-        if pt:
-            children_of.setdefault(pt, []).append(ts)
+    if has_hierarchy:
+        for ts, info in type_map.items():
+            pt = info.get("parent_type")
+            if pt:
+                children_of.setdefault(pt, []).append(ts)
 
     result: dict[str, dict[str, Any]] = {}
     for ts, info in type_map.items():
@@ -397,10 +434,10 @@ def get_instrument_metadata() -> dict[str, dict[str, Any]]:
         key_hint: str | None = None
         discovery_actions: list[dict[str, Any]] = []
         try:
-            cls = load_params_class(ts, verbose=False)
+            cls = load_params_class(ts, kind=kind, verbose=False)
             defaults = cls().model_dump()
             key_hint = getattr(cls, "key_hint", None)
-            if hasattr(cls, "discovery_actions"):
+            if has_hierarchy and hasattr(cls, "discovery_actions"):
                 discovery_actions = [
                     a.to_spec().model_dump() for a in cls.discovery_actions()
                 ]
@@ -411,16 +448,29 @@ def get_instrument_metadata() -> dict[str, dict[str, Any]]:
             "type": ts,
             "class_name": info["class_name"],
             "module": info["module"],
-            "is_top_level": info.get("is_top_level", False),
+            "kind": kind,
+            "is_top_level": info.get("is_top_level", True),
             "is_child": info.get("is_child", False),
             "parent_type": info.get("parent_type"),
-            "parent_chain": get_parent_chain(ts),
+            "parent_chain": get_parent_chain(ts, kind=kind),
             "child_types": sorted(children_of.get(ts, [])),
             "defaults": defaults,
             "key_hint": key_hint,
             "discovery_actions": discovery_actions,
         }
 
-    _instrument_metadata = result
+    _metadata_cache[kind] = result
     return result
 
+
+def get_instrument_metadata() -> dict[str, dict[str, Any]]:
+    """Backward-compatible wrapper around get_metadata("instrument")."""
+    return get_metadata("instrument")
+
+
+def get_saver_metadata() -> dict[str, dict[str, Any]]:
+    return get_metadata("saver")
+
+
+def get_plotter_metadata() -> dict[str, dict[str, Any]]:
+    return get_metadata("plotter")

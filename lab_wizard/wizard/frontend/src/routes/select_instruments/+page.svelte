@@ -15,10 +15,18 @@
 		friendly_name?: string;
 		file_path?: string;
 	};
-	type OutputReq = {
+	type ConfiguredResource = {
+		type: string;
+		key: string;
+		fields: Record<string, any>;
+	};
+	type ResourceReq = {
 		variable_name: string;
 		base_type: string;
+		resource_kind: 'instrument' | 'saver' | 'plotter';
+		is_list: boolean;
 		matching_instruments: MatchingReq[];
+		matching_resources: ConfiguredResource[];
 	};
 	type InstrumentMeta = {
 		type: string;
@@ -44,12 +52,25 @@
 
 	let { data } = $props();
 	const measurementName: string | null = data?.measurementName ?? null;
-	const reqs: OutputReq[] = (data?.instruments ?? []) as OutputReq[];
+	const reqs: ResourceReq[] = (data?.requirements ?? []) as ResourceReq[];
 	const tree: TreeItem[] = (data?.tree ?? []) as TreeItem[];
 	const metadata: Record<string, InstrumentMeta> = (data?.metadata ?? {}) as Record<string, InstrumentMeta>;
 
+	const instrumentReqs = $derived(reqs.filter((r) => r.resource_kind === 'instrument'));
+	const saverReqs = $derived(reqs.filter((r) => r.resource_kind === 'saver'));
+	const plotterReqs = $derived(reqs.filter((r) => r.resource_kind === 'plotter'));
+
+	// Instrument selection state (one per variable)
 	const selected: Record<string, SelectedChoice | null> = $state({});
-	for (const r of reqs) if (!(r.variable_name in selected)) selected[r.variable_name] = null;
+	for (const r of reqs) if (r.resource_kind === 'instrument' && !(r.variable_name in selected)) selected[r.variable_name] = null;
+
+	// Saver / plotter selection state — multi-select (set of "type:key" strings) per variable
+	const flatSelected: Record<string, Set<string>> = $state({});
+	for (const r of reqs) {
+		if (r.resource_kind !== 'instrument' && !(r.variable_name in flatSelected)) {
+			flatSelected[r.variable_name] = new Set();
+		}
+	}
 
 	let activeRequirement = $state<string | null>(null);
 	let projectPrefix = $state('');
@@ -78,11 +99,12 @@
 		const channels = node.fields?.channels;
 		return Array.isArray(channels) ? channels.length : 0;
 	}
-	function reqByVar(variableName: string | null): OutputReq | null {
+	function reqByVar(variableName: string | null): ResourceReq | null {
 		if (!variableName) return null;
 		return reqs.find((r) => r.variable_name === variableName) ?? null;
 	}
-	function reqMatchesType(req: OutputReq, type: string): boolean {
+	function reqMatchesType(req: ResourceReq, type: string): boolean {
+		if (req.resource_kind !== 'instrument') return false;
 		const meta = metadata[type];
 		if (!meta) return false;
 		const instClass = classNameNoParams(meta.class_name);
@@ -93,20 +115,35 @@
 				(m.class_name === instClass || m.class_name === meta.class_name || m.class_name === channelClass)
 		);
 	}
-	function isReqComplete(variableName: string): boolean {
-		const s = selected[variableName];
+	function isInstrumentReqComplete(req: ResourceReq): boolean {
+		const s = selected[req.variable_name];
 		if (!s) return false;
 		if (s.channelCount > 1 && s.channelIndex === null) return false;
 		return true;
 	}
+	function isFlatReqComplete(req: ResourceReq): boolean {
+		const set = flatSelected[req.variable_name];
+		if (!set) return false;
+		// list-typed savers/plotters can be empty (zero is allowed); single-valued require one.
+		if (req.is_list) return true;
+		return set.size === 1;
+	}
 	function allDone(): boolean {
-		return reqs.length > 0 && reqs.every((r) => isReqComplete(r.variable_name));
+		if (reqs.length === 0) return false;
+		for (const r of reqs) {
+			if (r.resource_kind === 'instrument') {
+				if (!isInstrumentReqComplete(r)) return false;
+			} else {
+				if (!isFlatReqComplete(r)) return false;
+			}
+		}
+		return true;
 	}
 	function nextIncompleteAfter(variableName: string): string | null {
-		const idx = reqs.findIndex((r) => r.variable_name === variableName);
+		const idx = instrumentReqs.findIndex((r) => r.variable_name === variableName);
 		if (idx < 0) return null;
-		for (const r of reqs.slice(idx + 1)) if (!isReqComplete(r.variable_name)) return r.variable_name;
-		for (const r of reqs) if (!isReqComplete(r.variable_name)) return r.variable_name;
+		for (const r of instrumentReqs.slice(idx + 1)) if (!isInstrumentReqComplete(r)) return r.variable_name;
+		for (const r of instrumentReqs) if (!isInstrumentReqComplete(r)) return r.variable_name;
 		return null;
 	}
 	function setActiveMode(variableName: string) {
@@ -115,7 +152,7 @@
 	function onSelectTreeNode(node: TreeItem, rootToNodePath: TreePathRef[]) {
 		if (!activeRequirement) return;
 		const req = reqByVar(activeRequirement);
-		if (!req) return;
+		if (!req || req.resource_kind !== 'instrument') return;
 		if (!reqMatchesType(req, node.type)) return;
 		const cc = channelCount(node);
 		selected[activeRequirement] = {
@@ -151,28 +188,68 @@
 	function selectionLabelForAny(_node: TreeItem, path: TreePathRef[]): string | null {
 		const labels: string[] = [];
 		const key = pathKey(path);
-		for (const r of reqs) {
+		for (const r of instrumentReqs) {
 			if (selected[r.variable_name]?.pathKey === key) labels.push(r.variable_name);
 		}
 		return labels.length ? labels.join(', ') : null;
 	}
+	function toggleFlatSelection(variableName: string, type: string, key: string, isList: boolean) {
+		const id = `${type}:${key}`;
+		const set = flatSelected[variableName];
+		if (set.has(id)) {
+			set.delete(id);
+		} else {
+			if (!isList) set.clear();
+			set.add(id);
+		}
+		flatSelected[variableName] = new Set(set); // trigger reactivity
+	}
+	function isFlatSelected(variableName: string, type: string, key: string): boolean {
+		return flatSelected[variableName]?.has(`${type}:${key}`) ?? false;
+	}
+
 	async function onCreateProject() {
 		if (!measurementName || !allDone()) return;
 		creatingProject = true;
 		createError = null;
 		createResult = null;
 		try {
-			const selected_resources = reqs.map((r) => {
+			const selected_resources: any[] = [];
+			for (const r of instrumentReqs) {
 				const c = selected[r.variable_name];
 				if (!c) throw new Error(`Missing selection for ${r.variable_name}`);
-				return {
+				selected_resources.push({
 					variable_name: r.variable_name,
+					resource_kind: 'instrument',
 					type: c.type,
 					key: c.key,
 					path: c.pathLeafToRoot,
 					channel_index: c.channelCount > 1 ? c.channelIndex : null
-				};
-			});
+				});
+			}
+			for (const r of saverReqs) {
+				for (const id of flatSelected[r.variable_name]) {
+					const [type, key] = id.split(':');
+					selected_resources.push({
+						variable_name: r.variable_name,
+						resource_kind: 'saver',
+						type,
+						key
+					});
+				}
+			}
+			for (const r of plotterReqs) {
+				for (const id of flatSelected[r.variable_name]) {
+					const [type, key] = id.split(':');
+					selected_resources.push({
+						variable_name: r.variable_name,
+						resource_kind: 'plotter',
+						type,
+						key
+					});
+				}
+			}
+
 			const body: Record<string, any> = { measurement_name: measurementName, selected_resources };
 			if (projectPrefix.trim()) body.project_prefix = projectPrefix.trim();
 			const res = await fetchWithConfig('/api/create-measurement-project', 'POST', body);
@@ -191,12 +268,10 @@
 </script>
 
 <section class="space-y-4">
-	<h1 class="text-2xl font-semibold">Select instruments</h1>
+	<h1 class="text-2xl font-semibold">Select resources</h1>
 	{#if !measurementName}
 		<div class="text-sm text-gray-600 dark:text-gray-300">
-			No measurement selected. <a class="text-indigo-600 underline" href="/get_measurements"
-				>Go back</a
-			>.
+			No measurement selected. <a class="text-indigo-600 underline" href="/get_measurements">Go back</a>.
 		</div>
 	{:else}
 		<p class="text-sm text-gray-600 dark:text-gray-300">
@@ -206,10 +281,8 @@
 
 	{#if measurementName}
 		{#if !reqs || reqs.length === 0}
-			<div
-				class="rounded-xl border border-gray-200 bg-white/70 p-4 text-sm text-gray-600 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-300"
-			>
-				No instrument roles detected for this measurement.
+			<div class="rounded-xl border border-gray-200 bg-white/70 p-4 text-sm text-gray-600 dark:border-white/10 dark:bg-gray-800/70 dark:text-gray-300">
+				No resource roles detected for this measurement.
 			</div>
 		{:else}
 			<div class="rounded-xl border border-gray-200 bg-white/70 p-3 dark:border-white/10 dark:bg-gray-800/70">
@@ -225,140 +298,227 @@
 				/>
 			</div>
 
-			<div class="space-y-4">
-				{#each reqs as r}
-					<section class="rounded-lg border border-gray-200 bg-white/70 p-3 dark:border-white/10 dark:bg-gray-800/70">
-						<div class="flex items-start justify-between gap-3">
-							<div>
-								<div class="font-medium">{r.variable_name}</div>
-								<div class="text-xs text-gray-600 dark:text-gray-300">
-									Requires {shortBaseName(r.base_type)}
-								</div>
-								{#if selected[r.variable_name]}
-									<div class="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
-										{selected[r.variable_name]?.pathDisplay}
-										{#if selected[r.variable_name]?.channelCount && selected[r.variable_name]!.channelCount > 1}
-											<span class="ml-1">
-												ch:
-												{selected[r.variable_name]?.channelIndex === null
-													? 'unset'
-													: selected[r.variable_name]?.channelIndex}
-											</span>
-										{/if}
+			{#if saverReqs.length > 0}
+				<section class="space-y-2">
+					<h2 class="text-lg font-medium">Savers</h2>
+					{#each saverReqs as r}
+						<div class="rounded-lg border border-gray-200 bg-white/70 p-3 dark:border-white/10 dark:bg-gray-800/70">
+							<div class="flex items-center justify-between">
+								<div>
+									<div class="font-medium">{r.variable_name}</div>
+									<div class="text-xs text-gray-600 dark:text-gray-300">
+										{r.is_list ? 'Pick one or more configured savers' : 'Pick one configured saver'}
 									</div>
+								</div>
+								<a class="text-xs text-indigo-600 hover:underline" href="/manage_savers"
+									>Manage configured savers →</a
+								>
+							</div>
+							{#if r.matching_resources.length === 0}
+								<div class="mt-3 rounded-md bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+									No savers configured. Add one in <a href="/manage_savers" class="underline">Manage Savers</a> first.
+								</div>
+							{:else}
+								<div class="mt-3 grid gap-2 sm:grid-cols-2">
+									{#each r.matching_resources as item}
+										<label class="flex items-start gap-2 rounded border border-gray-200 px-3 py-2 text-sm hover:border-indigo-300 dark:border-gray-600">
+											<input
+												type={r.is_list ? 'checkbox' : 'radio'}
+												name={`flat-${r.variable_name}`}
+												checked={isFlatSelected(r.variable_name, item.type, item.key)}
+												onchange={() => toggleFlatSelection(r.variable_name, item.type, item.key, r.is_list)}
+											/>
+											<div class="flex-1">
+												<div class="font-medium">{item.key}</div>
+												<div class="text-xs text-gray-500">type: {item.type}</div>
+											</div>
+										</label>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</section>
+			{/if}
+
+			{#if plotterReqs.length > 0}
+				<section class="space-y-2">
+					<h2 class="text-lg font-medium">Plotters</h2>
+					{#each plotterReqs as r}
+						<div class="rounded-lg border border-gray-200 bg-white/70 p-3 dark:border-white/10 dark:bg-gray-800/70">
+							<div class="flex items-center justify-between">
+								<div>
+									<div class="font-medium">{r.variable_name}</div>
+									<div class="text-xs text-gray-600 dark:text-gray-300">
+										{r.is_list ? 'Pick one or more configured plotters' : 'Pick one configured plotter'}
+									</div>
+								</div>
+								<a class="text-xs text-indigo-600 hover:underline" href="/manage_plotters"
+									>Manage configured plotters →</a
+								>
+							</div>
+							{#if r.matching_resources.length === 0}
+								<div class="mt-3 rounded-md bg-amber-50 p-2 text-sm text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+									No plotters configured. Add one in <a href="/manage_plotters" class="underline">Manage Plotters</a> first.
+								</div>
+							{:else}
+								<div class="mt-3 grid gap-2 sm:grid-cols-2">
+									{#each r.matching_resources as item}
+										<label class="flex items-start gap-2 rounded border border-gray-200 px-3 py-2 text-sm hover:border-indigo-300 dark:border-gray-600">
+											<input
+												type={r.is_list ? 'checkbox' : 'radio'}
+												name={`flat-${r.variable_name}`}
+												checked={isFlatSelected(r.variable_name, item.type, item.key)}
+												onchange={() => toggleFlatSelection(r.variable_name, item.type, item.key, r.is_list)}
+											/>
+											<div class="flex-1">
+												<div class="font-medium">{item.key}</div>
+												<div class="text-xs text-gray-500">type: {item.type}</div>
+											</div>
+										</label>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</section>
+			{/if}
+
+			{#if instrumentReqs.length > 0}
+				<section class="space-y-4">
+					<h2 class="text-lg font-medium">Instruments</h2>
+					{#each instrumentReqs as r}
+						<section class="rounded-lg border border-gray-200 bg-white/70 p-3 dark:border-white/10 dark:bg-gray-800/70">
+							<div class="flex items-start justify-between gap-3">
+								<div>
+									<div class="font-medium">{r.variable_name}</div>
+									<div class="text-xs text-gray-600 dark:text-gray-300">
+										Requires {shortBaseName(r.base_type)}
+									</div>
+									{#if selected[r.variable_name]}
+										<div class="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
+											{selected[r.variable_name]?.pathDisplay}
+											{#if selected[r.variable_name]?.channelCount && selected[r.variable_name]!.channelCount > 1}
+												<span class="ml-1">
+													ch:
+													{selected[r.variable_name]?.channelIndex === null
+														? 'unset'
+														: selected[r.variable_name]?.channelIndex}
+												</span>
+											{/if}
+										</div>
+									{/if}
+								</div>
+								<button
+									class="rounded-md px-3 py-1.5 text-sm {activeRequirement === r.variable_name
+										? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300'
+										: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'}"
+									onclick={() => setActiveMode(r.variable_name)}
+								>
+									{activeRequirement === r.variable_name
+										? 'Selecting...'
+										: selected[r.variable_name]
+											? 'Change'
+											: 'Select'}
+								</button>
+							</div>
+
+							{#if activeRequirement === r.variable_name && selected[r.variable_name] && selected[r.variable_name]!.channelCount > 1}
+								<div class="mt-2 rounded-md bg-indigo-50 p-2 text-sm dark:bg-indigo-950/30">
+									<label for={`${r.variable_name}-channel-trigger`} class="mb-1 block text-xs">Choose channel</label>
+									<Select.Root
+										type="single"
+										value={selected[r.variable_name]?.channelIndex === null
+											? ''
+											: String(selected[r.variable_name]?.channelIndex)}
+										onValueChange={(v) => setChannelForActive(v)}
+										items={Array.from(
+											{ length: selected[r.variable_name]!.channelCount },
+											(_, i) => ({ value: String(i), label: String(i) })
+										)}
+									>
+										<Select.Trigger
+											id={`${r.variable_name}-channel-trigger`}
+											class="inline-flex w-[260px] items-center justify-between rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-900"
+											aria-label="Select channel"
+										>
+											<span>
+												{selected[r.variable_name]?.channelIndex === null
+													? 'Choose channel'
+													: `Channel ${selected[r.variable_name]?.channelIndex}`}
+											</span>
+											<CaretUpDown class="ml-2 size-4 text-gray-500 dark:text-gray-300" />
+										</Select.Trigger>
+										<Select.Portal>
+											<Select.Content
+												side="bottom"
+												align="center"
+												sideOffset={6}
+												class="z-50 w-[260px] rounded border border-gray-300 bg-white p-1 shadow dark:border-gray-600 dark:bg-gray-900"
+											>
+												<Select.ScrollUpButton class="flex items-center justify-center py-1">
+													<CaretDoubleUp class="size-3 text-gray-500 dark:text-gray-300" />
+												</Select.ScrollUpButton>
+												<Select.Viewport>
+													{#each Array.from({ length: selected[r.variable_name]!.channelCount }, (_, i) => i) as i}
+														<Select.Item
+															value={String(i)}
+															label={`Channel ${i}`}
+															class="rounded px-2 py-1 text-xs data-highlighted:bg-indigo-100 dark:data-highlighted:bg-indigo-900/40"
+														>
+															{#snippet children()}
+																Channel {i}
+															{/snippet}
+														</Select.Item>
+													{/each}
+												</Select.Viewport>
+												<Select.ScrollDownButton class="flex items-center justify-center py-1">
+													<CaretDoubleDown class="size-3 text-gray-500 dark:text-gray-300" />
+												</Select.ScrollDownButton>
+											</Select.Content>
+										</Select.Portal>
+									</Select.Root>
+								</div>
+							{/if}
+						</section>
+					{/each}
+
+					<section class="space-y-2">
+						<div class="flex items-center justify-between">
+							<h3 class="text-md font-medium">Configured tree</h3>
+							<div class="text-xs text-gray-600 dark:text-gray-300">
+								{#if activeRequirement}
+									Selection mode: <span class="font-medium">{activeRequirement}</span>
+								{:else}
+									Pick a requirement above to start selecting
 								{/if}
 							</div>
-							<button
-								class="rounded-md px-3 py-1.5 text-sm {activeRequirement === r.variable_name
-									? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300'
-									: 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'}"
-								onclick={() => setActiveMode(r.variable_name)}
-							>
-								{activeRequirement === r.variable_name
-									? 'Selecting...'
-									: selected[r.variable_name]
-										? 'Change'
-										: 'Select'}
-							</button>
 						</div>
-
-						{#if activeRequirement === r.variable_name && selected[r.variable_name] && selected[r.variable_name]!.channelCount > 1}
-							<div class="mt-2 rounded-md bg-indigo-50 p-2 text-sm dark:bg-indigo-950/30">
-								<label for={`${r.variable_name}-channel-trigger`} class="mb-1 block text-xs"
-									>Choose channel</label
-								>
-								<Select.Root
-									type="single"
-									value={selected[r.variable_name]?.channelIndex === null
-										? ''
-										: String(selected[r.variable_name]?.channelIndex)}
-									onValueChange={(v) => setChannelForActive(v)}
-									items={Array.from(
-										{ length: selected[r.variable_name]!.channelCount },
-										(_, i) => ({ value: String(i), label: String(i) })
-									)}
-								>
-									<Select.Trigger
-										id={`${r.variable_name}-channel-trigger`}
-										class="inline-flex w-[260px] items-center justify-between rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-900"
-										aria-label="Select channel"
-									>
-										<span>
-											{selected[r.variable_name]?.channelIndex === null
-												? 'Choose channel'
-												: `Channel ${selected[r.variable_name]?.channelIndex}`}
-										</span>
-										<CaretUpDown class="ml-2 size-4 text-gray-500 dark:text-gray-300" />
-									</Select.Trigger>
-									<Select.Portal>
-										<Select.Content
-											side="bottom"
-											align="center"
-											sideOffset={6}
-											class="z-50 w-[260px] rounded border border-gray-300 bg-white p-1 shadow dark:border-gray-600 dark:bg-gray-900"
-										>
-											<Select.ScrollUpButton class="flex items-center justify-center py-1">
-												<CaretDoubleUp class="size-3 text-gray-500 dark:text-gray-300" />
-											</Select.ScrollUpButton>
-											<Select.Viewport>
-												{#each Array.from({ length: selected[r.variable_name]!.channelCount }, (_, i) => i) as i}
-													<Select.Item
-														value={String(i)}
-														label={`Channel ${i}`}
-														class="rounded px-2 py-1 text-xs data-highlighted:bg-indigo-100 dark:data-highlighted:bg-indigo-900/40"
-													>
-														{#snippet children()}
-															Channel {i}
-														{/snippet}
-													</Select.Item>
-												{/each}
-											</Select.Viewport>
-											<Select.ScrollDownButton class="flex items-center justify-center py-1">
-												<CaretDoubleDown class="size-3 text-gray-500 dark:text-gray-300" />
-											</Select.ScrollDownButton>
-										</Select.Content>
-									</Select.Portal>
-								</Select.Root>
-							</div>
-						{/if}
+						<ScrollArea
+							class="relative overflow-hidden rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm dark:border-white/10 dark:bg-gray-800/70"
+							orientation="vertical"
+							viewportClasses="h-full max-h-[360px] w-full"
+						>
+							{#if tree.length === 0}
+								<div class="px-2 py-3 text-sm text-gray-600 dark:text-gray-300">
+									No configured instruments found.
+								</div>
+							{:else}
+								{#each tree as node}
+									<TreeNode
+										{node}
+										isSelectable={Boolean(activeRequirement)}
+										isCompatible={(n) => isCompatibleForCurrent(n)}
+										isSelected={(n, p) => isNodeSelectedForCurrent(n, p)}
+										selectionLabel={(n, p) => selectionLabelForAny(n, p)}
+										onSelect={onSelectTreeNode}
+									/>
+								{/each}
+							{/if}
+						</ScrollArea>
 					</section>
-				{/each}
-			</div>
-
-			<section class="space-y-2">
-				<div class="flex items-center justify-between">
-					<h2 class="text-lg font-medium">Configured tree</h2>
-					<div class="text-xs text-gray-600 dark:text-gray-300">
-						{#if activeRequirement}
-							Selection mode: <span class="font-medium">{activeRequirement}</span>
-						{:else}
-							Pick a requirement above to start selecting
-						{/if}
-					</div>
-				</div>
-				<ScrollArea
-					class="relative overflow-hidden rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm dark:border-white/10 dark:bg-gray-800/70"
-					orientation="vertical"
-					viewportClasses="h-full max-h-[360px] w-full"
-				>
-					{#if tree.length === 0}
-						<div class="px-2 py-3 text-sm text-gray-600 dark:text-gray-300">
-							No configured instruments found.
-						</div>
-					{:else}
-						{#each tree as node}
-							<TreeNode
-								{node}
-								isSelectable={Boolean(activeRequirement)}
-								isCompatible={(n) => isCompatibleForCurrent(n)}
-								isSelected={(n, p) => isNodeSelectedForCurrent(n, p)}
-								selectionLabel={(n, p) => selectionLabelForAny(n, p)}
-								onSelect={onSelectTreeNode}
-							/>
-						{/each}
-					{/if}
-				</ScrollArea>
-			</section>
+				</section>
+			{/if}
 
 			{#if createResult}
 				<div class="rounded-lg bg-green-100 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
@@ -374,7 +534,7 @@
 			{#if createError}
 				<div class="rounded-lg bg-red-100 px-3 py-2 text-sm text-red-800 dark:bg-red-900/30 dark:text-red-300">
 					{createError}
-								</div>
+				</div>
 			{/if}
 		{/if}
 	{/if}

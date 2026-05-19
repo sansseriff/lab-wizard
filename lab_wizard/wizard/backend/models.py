@@ -1,8 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pydantic import BaseModel
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+
+ResourceKind = Literal["instrument", "saver", "plotter"]
 
 
 class MeasurementInfo(BaseModel):
@@ -10,7 +12,6 @@ class MeasurementInfo(BaseModel):
 
     name: str
     description: str
-    # required_instruments: dict[str, Any]
     measurement_dir: Path
 
 
@@ -29,24 +30,45 @@ class MatchingReq(BaseModel):
     Returned by discovery to populate UI choices.
     """
 
-    module: str               # e.g., "lib.instruments.sim900.modules.sim928"
-    class_name: str           # e.g., "Sim928"
-    qualname: str             # e.g., "lib.instruments.sim900.modules.sim928.Sim928"
-    file_path: Path           # absolute path to the defining file
-    friendly_name: str        # short human label (defaults to class_name)
+    module: str
+    class_name: str
+    qualname: str
+    file_path: Path
+    friendly_name: str
 
+
+class ConfiguredResource(BaseModel):
+    """A configured saver or plotter instance from the global registry."""
+
+    type: str
+    key: str
+    fields: dict[str, Any]
 
 
 @dataclass
 class FilledReq:
+    """In-memory requirement, populated by extraction and matching.
+
+    For instrument resources, ``base_type`` is the Python class object and
+    ``matching_instruments`` is filled by class-hierarchy discovery.
+    For saver/plotter resources, ``matching_resources`` is filled from the
+    configured registry.
+    """
 
     variable_name: str
     base_type: Any
-    matching_instruments: list[MatchingReq]
+    resource_kind: ResourceKind = "instrument"
+    is_list: bool = False
+    matching_instruments: list[MatchingReq] = field(default_factory=list)
+    matching_resources: list[ConfiguredResource] = field(default_factory=list)
 
 
 class OutputReq(BaseModel):
+    """JSON-serializable requirement returned to the frontend."""
 
     variable_name: str
     base_type: str
-    matching_instruments: list[MatchingReq]
+    resource_kind: ResourceKind = "instrument"
+    is_list: bool = False
+    matching_instruments: list[MatchingReq] = []
+    matching_resources: list[ConfiguredResource] = []

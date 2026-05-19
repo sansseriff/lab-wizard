@@ -1,0 +1,4 @@
+type: database_saver
+attribute_name: ''
+db_path: measurements.db  # Path to the SQLite file (relative to the project, or absolute).
+cryostat_name: default # Cryostat to associate runs with — auto-created if missing.

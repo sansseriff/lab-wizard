@@ -2,49 +2,51 @@ from __future__ import annotations
 
 """
 plotter.py
-Author: SNSPD Library Rewrite
-Date: June 4, 2025
 
 Abstract base class for plotters and a stand-in implementation.
 """
 
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from abc import ABC, abstractmethod
+
+if TYPE_CHECKING:
+    from lab_wizard.lib.plotters.base import PlotterParams
 
 
 class GenericPlotter(ABC):
-    """
-    Abstract base class for all plotters.
-
-    This class defines the unified interface that all plotter implementations must follow.
-    All public methods are abstract and must be implemented by subclasses.
-    """
+    """Abstract base class for all plotters."""
 
     @abstractmethod
     def plot(self, data: dict[str, Any]) -> None:
-        """
-        Plot the provided data.
-
-        Args:
-            data: Dictionary containing the data to be plotted
-        """
-        pass
+        """Render the provided data."""
+        ...
 
     @abstractmethod
     def save_plot(self, filename: str) -> None:
-        """
-        Save the current plot to a file.
+        """Persist the current plot to a file."""
+        ...
 
-        Args:
-            filename: Name of the file to save the plot
+    @classmethod
+    @abstractmethod
+    def from_params(cls, params: "PlotterParams") -> "GenericPlotter":
+        """Construct a runtime plotter from its Params object."""
+        ...
+
+    @classmethod
+    def from_config(cls, exp: Any, *, key: str) -> "GenericPlotter":
+        """Look up a plotter Params on ``exp.plotters`` by name and construct it.
+
+        Uses ``params.create_inst()`` for polymorphic dispatch so callers can
+        say ``MplPlotter.from_config(...)`` (concrete class) or
+        ``GenericPlotter.from_config(...)`` (base class) and get the right type.
         """
-        pass
+        params = exp.plotters[key]
+        return params.create_inst()
 
 
 class StandInPlotter(GenericPlotter):
-    """A no-op plotter that logs actions and stores the last payload in memory."""
+    """A no-op plotter. Stores last payload in memory; useful for tests."""
 
-    # Hide from CLI auto-discovery/selection menus
     ignore_in_cli = True
 
     def __init__(self) -> None:
@@ -54,13 +56,15 @@ class StandInPlotter(GenericPlotter):
         print("Stand-in plotter initialized.")
 
     def plot(self, data: dict[str, Any]) -> None:
-        """Pretend to plot the provided data; store it locally and print a message."""
         keys = list(data.keys())
         print(f"Stand-in: Plotting data (no-op). Keys: {keys}")
         self.last_data = data
         self.plotted_count += 1
 
     def save_plot(self, filename: str) -> None:
-        """Pretend to save a plot; record the filename and print a message."""
         print(f"Stand-in: Saving plot to '{filename}' (no-op)")
         self.last_saved_filename = filename
+
+    @classmethod
+    def from_params(cls, params: "PlotterParams") -> "StandInPlotter":
+        return cls()

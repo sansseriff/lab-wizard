@@ -21,6 +21,7 @@ dependencies = [
     "pyro5>=5.15",
     "dbay>=0.2.0",
     "pyvisa-py>=0.8.1",
+    "sqlalchemy>=2.0",
 ]
 
 [tool.uv.sources]

@@ -1,35 +1,71 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, get_args, get_origin
 from pathlib import Path
 import importlib
 import inspect
 import logging
 
-from lab_wizard.wizard.backend.models import FilledReq, MeasurementInfo, Env, MatchingReq
+from lab_wizard.lib.plotters.plotter import GenericPlotter
+from lab_wizard.lib.savers.saver import GenericSaver
+from lab_wizard.wizard.backend.models import (
+    FilledReq, MeasurementInfo, Env, MatchingReq,
+)
 
 logger = logging.getLogger("lab_wizard.wizard.backend.get_measurements")
 
 
-def _extract_instruments_from_template(env: Env, template_file: Path, verbose: bool = False) -> List[FilledReq]:
-    """Extract required instrument types from template file by importing it as a module."""
-    required_instruments: List[FilledReq] = []
+def _classify_field(field_type) -> tuple[str, bool, type | None]:
+    """Inspect a field annotation and classify it.
+
+    Returns ``(resource_kind, is_list, element_type)`` where ``element_type``
+    is the underlying class if ``field_type`` is a ``list[T]`` annotation, or
+    ``field_type`` itself otherwise. ``resource_kind`` is one of "instrument",
+    "saver", or "plotter"; "params" or "skip" indicates the field should be
+    ignored.
+    """
+    origin = get_origin(field_type)
+    is_list = origin in (list, tuple, set)
+    if is_list:
+        args = get_args(field_type)
+        element = args[0] if args else None
+    else:
+        element = field_type
+
+    if not isinstance(element, type):
+        return ("skip", is_list, None)
+
+    try:
+        if issubclass(element, GenericSaver):
+            return ("saver", is_list, element)
+        if issubclass(element, GenericPlotter):
+            return ("plotter", is_list, element)
+    except TypeError:
+        pass
+
+    return ("instrument", is_list, element)
+
+
+def _extract_resources_from_template(
+    env: Env, template_file: Path, verbose: bool = False
+) -> List[FilledReq]:
+    """Extract required resource types from a measurement's setup template.
+
+    Recognizes instrument fields (any class), saver fields (subclass of
+    GenericSaver), and plotter fields (subclass of GenericPlotter).  Both
+    plain (``saver: GenericSaver``) and list (``savers: list[GenericSaver]``)
+    annotations are supported.
+    """
+    required: List[FilledReq] = []
 
     if verbose:
-        logger.debug("Running template instrument extraction for %s", template_file)
+        logger.debug("Running template resource extraction for %s", template_file)
 
-    # Convert file path to module name relative to lib/, then prefix with lab_wizard.lib.
     rel_path = template_file.relative_to(env.base_dir)
-    if verbose:
-        logger.debug("Template relative path: %s", rel_path)
     module_name = "lab_wizard.lib." + str(rel_path.with_suffix("")).replace("/", ".")
     if verbose:
         logger.debug("Importing template module: %s", module_name)
 
-    # Import the module
     module = importlib.import_module(module_name)
-    if verbose:
-        logger.debug("Imported template module object: %s", module)
 
-    # Find the Resources dataclass
     resources_class = None
     for name, obj in inspect.getmembers(module, inspect.isclass):
         if (
@@ -42,27 +78,35 @@ def _extract_instruments_from_template(env: Env, template_file: Path, verbose: b
 
     if not resources_class:
         logger.warning("No Resources class found in %s", template_file)
-        return required_instruments
+        return required
 
-    # Extract type hints from the dataclass
     for field_name, field_type in resources_class.__annotations__.items():
-        # Skip non-instrument fields
-        if field_name in ["saver", "plotter", "params"]:
+        if field_name == "params":
             continue
-
+        kind, is_list, element = _classify_field(field_type)
+        if kind == "skip" or element is None:
+            if verbose:
+                logger.debug("Skipping field %s (unrecognized type %s)", field_name, field_type)
+            continue
         if verbose:
-            logger.debug("Resource field '%s' has type %s", field_name, field_type)
-        required_instruments.append(
+            logger.debug("Resource field '%s' kind=%s is_list=%s element=%s",
+                         field_name, kind, is_list, element)
+        required.append(
             FilledReq(
                 variable_name=field_name,
-                base_type=field_type,
-                matching_instruments=[],
-            ))
+                base_type=element,
+                resource_kind=kind,  # type: ignore[arg-type]
+                is_list=is_list,
+            )
+        )
 
     if verbose:
-        logger.debug("Required instruments from template: %s", required_instruments)
+        logger.debug("Required resources from template: %s", required)
+    return required
 
-    return required_instruments
+
+# Back-compat alias for any external callers
+_extract_instruments_from_template = _extract_resources_from_template
 
 
 def _template_file_for(measurement_dir: Path) -> Path:
@@ -79,7 +123,7 @@ def _find_lib_base(start: Path) -> Optional[Path]:
 
 
 def reqs_from_measurement(measurement: MeasurementInfo, verbose: bool = False) -> List[FilledReq]:
-    """Return a list of required instrument role names for a measurement."""
+    """Return a list of required resource roles (instruments, savers, plotters)."""
     measurement_dir = measurement.measurement_dir
     template_file = _template_file_for(measurement_dir)
     if verbose:
@@ -95,7 +139,7 @@ def reqs_from_measurement(measurement: MeasurementInfo, verbose: bool = False) -
         return []
 
     env = Env(base_dir=lib_base)
-    required = _extract_instruments_from_template(env, template_file)
+    required = _extract_resources_from_template(env, template_file)
     return required
 
 

@@ -60,12 +60,12 @@ class TestGetMeasurements:
             assert info["name"] == name
 
 
-class TestGetInstruments:
-    """Tests for /api/get-instruments/{name} endpoint."""
+class TestGetResources:
+    """Tests for /api/get-resources/{name} endpoint."""
 
     def test_iv_curve_instruments(self, client: TestClient):
         """iv_curve should require voltage_source and voltage_sense."""
-        response = client.get("/api/get-instruments/iv_curve")
+        response = client.get("/api/get-resources/iv_curve")
         assert response.status_code == 200
         data = response.json()
 
@@ -80,7 +80,7 @@ class TestGetInstruments:
 
     def test_instrument_req_structure(self, client: TestClient):
         """Each instrument requirement should have the expected fields."""
-        response = client.get("/api/get-instruments/iv_curve")
+        response = client.get("/api/get-resources/iv_curve")
         data = response.json()
 
         for req in data:
@@ -91,7 +91,7 @@ class TestGetInstruments:
 
     def test_matching_instruments_found(self, client: TestClient):
         """Instrument discovery should find matching implementations."""
-        response = client.get("/api/get-instruments/iv_curve")
+        response = client.get("/api/get-resources/iv_curve")
         data = response.json()
 
         # Find the voltage_source requirement
@@ -114,7 +114,7 @@ class TestGetInstruments:
 
     def test_voltage_source_includes_dbay_channels(self, client: TestClient):
         """VSource discovery should include DBay channel-level implementations."""
-        response = client.get("/api/get-instruments/iv_curve")
+        response = client.get("/api/get-resources/iv_curve")
         assert response.status_code == 200
         data = response.json()
         vsource_req = next((r for r in data if r["variable_name"] == "voltage_source"), None)
@@ -125,7 +125,7 @@ class TestGetInstruments:
 
     def test_voltage_sense_includes_sim970_channel(self, client: TestClient):
         """VSense discovery should include channel-level implementations like Sim970Channel."""
-        response = client.get("/api/get-instruments/iv_curve")
+        response = client.get("/api/get-resources/iv_curve")
         assert response.status_code == 200
         data = response.json()
         vsense_req = next((r for r in data if r["variable_name"] == "voltage_sense"), None)
@@ -135,7 +135,7 @@ class TestGetInstruments:
 
     def test_counter_includes_keysight_channel(self, client: TestClient):
         """Counter discovery should include Keysight channel implementation."""
-        response = client.get("/api/get-instruments/pcr_curve")
+        response = client.get("/api/get-resources/pcr_curve")
         assert response.status_code == 200
         data = response.json()
         counter_req = next((r for r in data if r["variable_name"] == "counter"), None)
@@ -145,20 +145,34 @@ class TestGetInstruments:
 
     def test_unknown_measurement_returns_404(self, client: TestClient):
         """Requesting instruments for unknown measurement should return 404."""
-        response = client.get("/api/get-instruments/nonexistent_measurement")
+        response = client.get("/api/get-resources/nonexistent_measurement")
         assert response.status_code == 404
 
 
-class TestResourcesMeta:
-    """Tests for /api/resources/meta endpoint."""
+class TestManageSaversMeta:
+    """Tests for /api/manage-savers endpoint metadata."""
 
     def test_returns_types(self, client: TestClient):
-        """Endpoint should return resource type options."""
-        response = client.get("/api/resources/meta")
+        """Endpoint should return the configured tree and discoverable types."""
+        response = client.get("/api/manage-savers")
         assert response.status_code == 200
         data = response.json()
-        assert "types" in data
-        assert isinstance(data["types"], list)
+        assert "tree" in data
+        assert "metadata" in data
+        # database_saver is the bundled implementation
+        assert "database_saver" in data["metadata"]
+
+
+class TestManagePlottersMeta:
+    """Tests for /api/manage-plotters endpoint metadata."""
+
+    def test_returns_types(self, client: TestClient):
+        response = client.get("/api/manage-plotters")
+        assert response.status_code == 200
+        data = response.json()
+        assert "tree" in data
+        assert "metadata" in data
+        assert "mpl_plotter" in data["metadata"]
 
 
 def _seed_config(config_dir: Path) -> None:

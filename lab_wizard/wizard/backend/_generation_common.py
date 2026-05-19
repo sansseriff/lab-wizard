@@ -16,7 +16,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from lab_wizard.lib.utilities.params_discovery import get_parent_chain, get_type_to_module_map
+from lab_wizard.lib.utilities.params_discovery import (
+    Kind, get_parent_chain, get_type_to_module_map,
+)
 
 
 class SelectedNodeRef(BaseModel):
@@ -179,10 +181,10 @@ def _short_type_token(type_str: str) -> str:
     return token or "node"
 
 
-def _type_info(type_str: str) -> tuple[str, str]:
-    m = get_type_to_module_map().get(type_str)
+def _type_info(type_str: str, kind: Kind = "instrument") -> tuple[str, str]:
+    m = get_type_to_module_map(kind).get(type_str)
     if m is None:
-        raise ValueError(f"Unknown instrument type '{type_str}'")
+        raise ValueError(f"Unknown {kind} type '{type_str}'")
     params_class = str(m["class_name"])
     inst_class = params_class[:-6] if params_class.endswith("Params") else params_class
     return str(m["module"]), params_class if params_class else inst_class

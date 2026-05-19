@@ -1,46 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, List, Annotated, Literal, Tuple, Optional
+from typing import Any, Literal, Tuple, Optional
 import yaml
 
 from pydantic import BaseModel, Field, SerializeAsAny, model_validator
 from ruamel.yaml import YAML as RuamelYAML
 
-from lab_wizard.lib.utilities.params_discovery import load_params_class
-
-
-class FileSaver(BaseModel):
-    type: Literal["file_saver"] = "file_saver"
-    file_path: str = Field(description="Path to save the file")
-    include_timestamp: bool = Field(
-        default=True, description="Include timestamp in the filename"
-    )
-    include_metadata: bool = Field(
-        default=True, description="Include metadata in the saved file"
-    )
-
-
-class DatabaseSaver(BaseModel):
-    type: Literal["database_saver"] = "database_saver"
-    db_url: str = Field(description="Database connection URL")
-    table_name: str = Field(description="Name of the table to save data")
-    include_metadata: bool = Field(
-        default=True, description="Include metadata in the saved data"
-    )
-
-
-class WebPlotter(BaseModel):
-    type: Literal["web_plotter"] = "web_plotter"
-    url: str = Field(description="URL of the web service to send plot data")
-
-
-class MplPlotter(BaseModel):
-    type: Literal["mpl_plotter"] = "mpl_plotter"
-    figure_size: List[int] = Field(
-        default=[10, 6], description="Size of the matplotlib figure in inches"
-    )
-    dpi: int = Field(default=100, description="DPI for the matplotlib figure")
+from lab_wizard.lib.utilities.params_discovery import (
+    load_params_class,
+    load_saver_params_class,
+    load_plotter_params_class,
+)
 
 
 class Device(BaseModel):
@@ -50,13 +21,8 @@ class Device(BaseModel):
     description: str = Field(description="Description of the device")
 
 
-SaverUnion = Annotated[FileSaver | DatabaseSaver, Field(discriminator="type")]
-PlotterUnion = Annotated[WebPlotter | MplPlotter, Field(discriminator="type")]
-
-
 def _parse_instrument_tree(data: dict[str, Any]) -> Any:
-    """
-    Recursively parse an instrument dict into the correct Params class.
+    """Recursively parse an instrument dict into the correct Params class.
 
     Uses dynamic discovery to find the right class based on the 'type' field.
     Handles nested 'children' dicts recursively.
@@ -66,15 +32,25 @@ def _parse_instrument_tree(data: dict[str, Any]) -> Any:
 
     type_str = data["type"]
 
-    # Parse children recursively first
     if "children" in data and isinstance(data["children"], dict):
         parsed_children = {}
         for key, child_data in data["children"].items():
             parsed_children[key] = _parse_instrument_tree(child_data)
         data = {**data, "children": parsed_children}
 
-    # Load the Params class and instantiate
     params_cls = load_params_class(type_str)
+    return params_cls(**data)
+
+
+def _parse_flat_resource(data: Any, kind: Literal["saver", "plotter"]) -> Any:
+    """Parse one entry of a flat resource dict (saver or plotter)."""
+    if not isinstance(data, dict) or "type" not in data:
+        return data
+    type_str = data["type"]
+    if kind == "saver":
+        params_cls = load_saver_params_class(type_str)
+    else:
+        params_cls = load_plotter_params_class(type_str)
     return params_cls(**data)
 
 
@@ -85,14 +61,7 @@ def _find_attribute_path(
     instruments: dict[str, Any],
     attribute_name: str,
 ) -> Optional[Tuple[list[Tuple[str, Any]], Optional[int]]]:
-    """Depth-first search for a node or channel with the given attribute_name.
-
-    Returns ``(path, channel_index)`` where:
-      - ``path`` is a list of ``(hash_key, params)`` tuples from root to leaf
-      - ``channel_index`` is ``None`` unless the match is a channel list item
-
-    Returns ``None`` if not found.
-    """
+    """Depth-first search for a node or channel with the given attribute_name."""
     for root_key, root_params in instruments.items():
         result = _search_node(
             key=root_key,
@@ -113,18 +82,15 @@ def _search_node(
 ) -> Optional[Tuple[list[Tuple[str, Any]], Optional[int]]]:
     path = ancestors + [(key, params)]
 
-    # Check this node's own attribute_name field
     if getattr(params, "attribute_name", None) == attribute_name:
         return path, None
 
-    # Check channel list items (for instruments like Keysight53220A, Sim970)
     channels = getattr(params, "channels", None)
     if isinstance(channels, list):
         for idx, ch_params in enumerate(channels):
             if getattr(ch_params, "attribute_name", None) == attribute_name:
                 return path, idx
 
-    # Recurse into children
     children = getattr(params, "children", None)
     if isinstance(children, dict):
         for child_key, child_params in children.items():
@@ -140,13 +106,7 @@ def _construct_from_path(
     exp: "Exp",
     channel_index: Optional[int],
 ) -> Any:
-    """Construct the full instrument chain for the given path and return the target.
-
-    ``path`` is a list of ``(hash_key, params)`` from root → leaf.
-    The root instrument is created via ``params.create_inst()`` (CanInstantiate).
-    Each subsequent level is created via ``parent_inst.make_child(key)``.
-    If ``channel_index`` is not None, returns ``leaf_inst.channels[channel_index]``.
-    """
+    """Construct the full instrument chain for the given path and return the target."""
     if not path:
         raise ValueError("Empty path — cannot construct instrument")
 
@@ -174,48 +134,47 @@ def _construct_from_path(
 
 
 class Exp(BaseModel):
+    """Project-level experiment configuration loaded from a project YAML.
+
+    The ``savers`` and ``plotters`` dicts are name -> Params and are populated
+    by auto-discovered Params classes; users can configure multiple of each.
+    """
+
     exp: SerializeAsAny[BaseModel]
-    device: Device
-    saver: dict[str, SaverUnion]
-    plotter: dict[str, PlotterUnion]
-    # Instruments are loaded dynamically via params_discovery - no static union needed
-    instruments: dict[str, SerializeAsAny[BaseModel]]
+    device: Device | None = None
+    savers: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
+    plotters: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
+    instruments: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
 
     @model_validator(mode="before")
     @classmethod
-    def _parse_instruments_dynamically(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Parse instruments using dynamic discovery before Pydantic validation.
-
-        This allows the YAML to contain any registered instrument type without
-        needing a static union that imports all Params classes upfront.
-        """
-        if "instruments" not in data or not isinstance(data["instruments"], dict):
+    def _parse_dynamic_resources(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Parse instruments / savers / plotters using dynamic discovery before validation."""
+        if not isinstance(data, dict):
             return data
 
-        parsed_instruments = {}
-        for key, inst_data in data["instruments"].items():
-            if isinstance(inst_data, dict) and "type" in inst_data:
-                parsed_instruments[key] = _parse_instrument_tree(inst_data)
-            else:
-                # Already parsed or not a dict - pass through
-                parsed_instruments[key] = inst_data
+        out = dict(data)
 
-        return {**data, "instruments": parsed_instruments}
+        if "instruments" in out and isinstance(out["instruments"], dict):
+            parsed = {}
+            for key, inst_data in out["instruments"].items():
+                if isinstance(inst_data, dict) and "type" in inst_data:
+                    parsed[key] = _parse_instrument_tree(inst_data)
+                else:
+                    parsed[key] = inst_data
+            out["instruments"] = parsed
+
+        for kind, key_name in (("saver", "savers"), ("plotter", "plotters")):
+            if key_name in out and isinstance(out[key_name], dict):
+                parsed = {}
+                for key, entry in out[key_name].items():
+                    parsed[key] = _parse_flat_resource(entry, kind)  # type: ignore[arg-type]
+                out[key_name] = parsed
+
+        return out
 
     def from_attribute(self, attribute_name: str) -> Any:
-        """Construct the instrument (or channel) that has the given attribute_name.
-
-        Walks the instruments tree depth-first, finds the node or channel
-        whose ``attribute_name`` param matches, then builds the full parent
-        chain top-down and returns the target instrument.
-
-        Example::
-
-            exp = load_exp_from_yaml("my_exp.yaml")
-            sim928 = exp.from_attribute("my_favorit_sim928")
-            counter_ch = exp.from_attribute("my_keysight53_channel")
-        """
+        """Construct the instrument (or channel) that has the given attribute_name."""
         result = _find_attribute_path(self.instruments, attribute_name)
         if result is None:
             raise ValueError(
@@ -224,19 +183,18 @@ class Exp(BaseModel):
         path, channel_index = result
         return _construct_from_path(path, self, channel_index)
 
+
 def _rewrite_exp_yaml(yaml_path: Path | str, exp: Exp) -> None:
     """Rewrite the project YAML with corrected hash keys (in-place)."""
-    import json
-
     y = RuamelYAML(typ="rt")
     y.default_flow_style = False
 
-    # Load original for round-trip preservation of non-instruments keys
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = y.load(f)
 
-    # Rebuild instruments section from repaired Exp
-    from lab_wizard.lib.utilities.config_io import to_commented_yaml_value, model_to_commented_map
+    from lab_wizard.lib.utilities.config_io import (
+        to_commented_yaml_value, model_to_commented_map,
+    )
 
     repaired_instruments = {}
     for k, v in exp.instruments.items():
@@ -254,10 +212,9 @@ def _rewrite_exp_yaml(yaml_path: Path | str, exp: Exp) -> None:
 def load_exp_from_yaml(yaml_path: str | Path) -> Exp:
     """Load an Exp object from a project YAML file.
 
-    After parsing, hash keys are validated against the params they represent.
-    If any key is stale (e.g. the user edited a ``slot`` or ``port`` field),
-    the key is recomputed and the YAML is rewritten in-place so future loads
-    are clean.
+    After parsing, instrument hash keys are validated against the params they
+    represent. If any key is stale (e.g. the user edited a ``slot`` or ``port``
+    field), the key is recomputed and the YAML is rewritten in-place.
     """
     from lab_wizard.lib.utilities.config_io import validate_and_repair_hashes
 
@@ -272,7 +229,6 @@ def load_exp_from_yaml(yaml_path: str | Path) -> Exp:
         try:
             _rewrite_exp_yaml(yaml_path, exp)
         except OSError:
-            # Read-only filesystem or test environment — skip rewrite
             pass
 
     return exp

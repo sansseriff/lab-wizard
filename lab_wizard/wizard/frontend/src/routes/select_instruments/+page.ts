@@ -27,11 +27,10 @@ type ManageData = {
 };
 
 export const load = async ({ fetch, url }: any) => {
-    // Ensure this only runs in the browser so the state module is available
     if (!browser) {
         return {
             measurementName: null,
-            instruments: [] as string[],
+            requirements: [] as any[],
             tree: [] as TreeItem[],
             metadata: {} as Record<string, InstrumentMeta>
         };
@@ -41,19 +40,19 @@ export const load = async ({ fetch, url }: any) => {
     if (!name) {
         return {
             measurementName: null,
-            instruments: [] as string[],
+            requirements: [] as any[],
             tree: [] as TreeItem[],
             metadata: {} as Record<string, InstrumentMeta>
         };
     }
 
-    let instruments = await fetchWithConfig(`/api/get-instruments/${encodeURIComponent(name)}`, 'GET');
-    instruments = Array.isArray(instruments) ? instruments : [];
+    let requirements = await fetchWithConfig(`/api/get-resources/${encodeURIComponent(name)}`, 'GET');
+    requirements = Array.isArray(requirements) ? requirements : [];
     const manageData = await fetchWithConfig<ManageData>('/api/manage-instruments', 'GET');
 
     return {
         measurementName: name,
-        instruments,
+        requirements,
         tree: manageData?.tree ?? [],
         metadata: manageData?.metadata ?? {}
     };
