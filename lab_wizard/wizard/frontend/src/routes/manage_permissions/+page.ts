@@ -70,6 +70,7 @@ export type PermissionsData = {
 	instruments: PermInstrument[];
 	permissions: Permissions;
 	serverStatus: ServerStatus | null;
+	suggestedBind: string;
 };
 
 export const load = async () => {
@@ -78,7 +79,8 @@ export const load = async () => {
 			tree: [],
 			instruments: [],
 			permissions: { rules: [] },
-			serverStatus: null
+			serverStatus: null,
+			suggestedBind: 'tcp://0.0.0.0:12300'
 		} as PermissionsData;
 	}
 	const data = await fetchWithConfig<PermissionsData>('/api/permissions', 'GET');
@@ -88,11 +90,24 @@ export const load = async () => {
 	} catch {
 		serverStatus = null;
 	}
+	// A known-good bind to pre-fill the "Configure" step (default port if free,
+	// otherwise an auto-picked free port).
+	let suggestedBind = 'tcp://0.0.0.0:12300';
+	try {
+		const r = await fetchWithConfig<{ bind: string }>(
+			'/api/server/suggest-port?prefer_default=true',
+			'GET'
+		);
+		suggestedBind = r.bind;
+	} catch {
+		/* keep fallback */
+	}
 	return {
 		tree: data?.tree ?? [],
 		instruments: data?.instruments ?? [],
 		permissions: data?.permissions ?? { rules: [] },
-		serverStatus
+		serverStatus,
+		suggestedBind
 	};
 };
 

@@ -10,10 +10,14 @@ logs/
 config/instruments/*
 config/measurements/*
 config/plotters/*
+config/savers/*
+config/server/*
 
 !config/instruments/.gitkeep
 !config/measurements/.gitkeep
 !config/plotters/.gitkeep
+!config/savers/.gitkeep
+!config/server/.gitkeep
 
 
 # ignore all __pycache__ directories

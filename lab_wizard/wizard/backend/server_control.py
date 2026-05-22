@@ -21,15 +21,21 @@ import json
 import logging
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import yaml
+from ruamel.yaml import YAML as RuamelYAML
 
 logger = logging.getLogger("lab_wizard.wizard.backend.server_control")
+
+# The conventional default bind port, offered first when it happens to be free.
+DEFAULT_PORT = 12300
 
 # Handles to servers we launched as children (managed mode), so the wizard can
 # terminate them on shutdown. Detached servers are intentionally not tracked.
@@ -58,6 +64,88 @@ def _read_server_yaml(config_dir: str | Path) -> dict[str, Any]:
 
 def _configured_bind(config_dir: str | Path) -> Optional[str]:
     return (_read_server_yaml(config_dir).get("server") or {}).get("bind")
+
+
+def _parse_bind(bind: Optional[str]) -> Optional[tuple[str, int]]:
+    """Extract (host, port) from a ``tcp://host:port`` bind, or None."""
+    if not bind:
+        return None
+    parsed = urlparse(bind)
+    if parsed.scheme != "tcp" or parsed.hostname is None or parsed.port is None:
+        return None
+    return parsed.hostname, parsed.port
+
+
+def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """True if something already accepts TCP connections on ``port``.
+
+    A ``0.0.0.0`` bind is reachable via ``127.0.0.1``, so we probe loopback.
+    """
+    probe = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.4)
+        try:
+            s.connect((probe, port))
+            return True
+        except OSError:
+            return False
+
+
+def _free_port() -> int:
+    """Ask the OS for an unused TCP port."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def suggest_free_bind(config_dir: str | Path, prefer_default: bool = False) -> str:
+    """Return a ``tcp://host:port`` bind on a currently-free port.
+
+    Keeps the host from the existing config (default ``0.0.0.0``) and only
+    swaps in a free port. Not persisted — the UI saves it via ``set_server_bind``.
+
+    With ``prefer_default=True`` (used for the initial suggestion on a not-yet
+    configured workstation), the existing/standard port is offered first *if it
+    is free*, so the user sees the familiar address rather than an arbitrary
+    one; only if that port is taken do we fall back to an OS-assigned free port.
+    """
+    current = _parse_bind(_configured_bind(config_dir))
+    host = current[0] if current else "0.0.0.0"
+    if prefer_default:
+        preferred_port = current[1] if current else DEFAULT_PORT
+        if not _port_in_use(preferred_port, host):
+            return f"tcp://{host}:{preferred_port}"
+    return f"tcp://{host}:{_free_port()}"
+
+
+def set_server_bind(config_dir: str | Path, bind: str) -> dict[str, Any]:
+    """Persist ``server.bind`` in server.yaml, preserving the rest of the file."""
+    bind = (bind or "").strip()
+    if _parse_bind(bind) is None:
+        raise ValueError(
+            f"Invalid bind {bind!r}; expected the form tcp://host:port "
+            "(e.g. tcp://0.0.0.0:12300)."
+        )
+    if server_status(config_dir)["running"]:
+        raise ValueError("Stop the server before changing its bind address.")
+
+    path = _server_yaml_path(config_dir)
+    yaml_rt = RuamelYAML(typ="rt")
+    yaml_rt.default_flow_style = False
+    if path.exists():
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml_rt.load(f) or {}
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+    server = data.get("server")
+    if not isinstance(server, dict):
+        server = {}
+        data["server"] = server
+    server["bind"] = bind
+    with open(path, "w", encoding="utf-8") as f:
+        yaml_rt.dump(data, f)
+    return server_status(config_dir)
 
 
 def _rule_count(config_dir: str | Path) -> int:
@@ -145,6 +233,18 @@ def start_server(config_dir: str | Path, detached: bool = False) -> dict[str, An
     if not config_path.exists():
         raise ValueError(
             f"No server config at {config_path}. Configure permissions/bind first."
+        )
+
+    # Collision guard: our pid file says we are not running, so if the bind port
+    # is already taken it belongs to *another* process (e.g. a second wizard
+    # instance, or a leftover daemon). Refuse rather than silently misroute
+    # clients to the wrong server.
+    hostport = _parse_bind(_configured_bind(config_dir))
+    if hostport is not None and _port_in_use(hostport[1], hostport[0]):
+        raise ValueError(
+            f"Something is already listening on {_configured_bind(config_dir)}. "
+            "Another wizard instance or server may be using this port. "
+            "Change this workstation's bind (Find free port) and try again."
         )
 
     cmd = [

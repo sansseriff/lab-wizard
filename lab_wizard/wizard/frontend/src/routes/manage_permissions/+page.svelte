@@ -30,6 +30,10 @@
 	let keepAsDaemon = $state(data.serverStatus?.detached ?? false);
 	let serverError: string | null = $state(null);
 
+	// Two-stage UI: until server.yaml exists, this workstation is "not configured"
+	// and we only show the configure step — no Stopped/Running state, no Start.
+	const configured = $derived(serverStatus?.has_config ?? false);
+
 	async function refreshServer() {
 		try {
 			serverStatus = await fetchWithConfig<ServerStatus>('/api/server/status', 'GET');
@@ -53,6 +57,57 @@
 	const startServer = () => serverAction('/api/server/start', { detached: keepAsDaemon });
 	const stopServer = () => serverAction('/api/server/stop');
 	const restartServer = () => serverAction('/api/server/restart', { detached: keepAsDaemon });
+
+	// Bind address: pre-filled with a known-good suggestion before configuring,
+	// or the configured bind afterwards.
+	let bindDraft = $state(
+		data.serverStatus?.has_config
+			? (data.serverStatus?.bind ?? data.suggestedBind)
+			: data.suggestedBind
+	);
+	let editingBind = $state(false);
+
+	async function findFreePort() {
+		try {
+			const res = await fetchWithConfig<{ bind: string }>('/api/server/suggest-port', 'GET');
+			bindDraft = res.bind;
+			editingBind = true;
+		} catch (e) {
+			serverError = e instanceof Error ? e.message : 'Could not find a free port.';
+		}
+	}
+
+	async function saveBind() {
+		serverBusy = true;
+		serverError = null;
+		try {
+			serverStatus = await fetchWithConfig<ServerStatus>('/api/server/bind', 'PUT', {
+				bind: bindDraft.trim()
+			});
+			editingBind = false;
+		} catch (e) {
+			serverError = e instanceof Error ? e.message : 'Could not save bind.';
+		} finally {
+			serverBusy = false;
+		}
+	}
+
+	// Stage 1 → Stage 2: writing the bind creates server.yaml, so `has_config`
+	// flips true and the control panel appears.
+	async function configureServer() {
+		serverBusy = true;
+		serverError = null;
+		try {
+			serverStatus = await fetchWithConfig<ServerStatus>('/api/server/bind', 'PUT', {
+				bind: bindDraft.trim()
+			});
+			editingBind = false;
+		} catch (e) {
+			serverError = e instanceof Error ? e.message : 'Could not configure server.';
+		} finally {
+			serverBusy = false;
+		}
+	}
 
 	// A friendly label + the reference handle to author rules with.
 	function instLabel(i: PermInstrument): string {
@@ -236,76 +291,158 @@
 	</p>
 
 	<!-- Server control panel -->
-	<section
-		class="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-white/10 dark:bg-gray-800/70"
-	>
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="flex items-center gap-3">
-				<span
-					class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium {serverStatus?.running
-						? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
-						: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}"
+	{#if !configured}
+		<!-- Stage 1: not configured yet — only the configure step is shown. -->
+		<section
+			class="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-white/10 dark:bg-gray-800/70"
+		>
+			<div>
+				<h2 class="text-base font-medium">Configure this workstation's server</h2>
+				<p class="text-xs text-gray-500 dark:text-gray-400">
+					Pick the address other machines will connect to. The default port is offered when free;
+					otherwise a free one is chosen for you. You can change it later.
+				</p>
+			</div>
+			<div class="flex flex-wrap items-center gap-2 text-sm">
+				<span class="text-xs text-gray-600 dark:text-gray-300">Bind address</span>
+				<input
+					type="text"
+					bind:value={bindDraft}
+					class="w-56 rounded-md border border-gray-300 px-2 py-1 font-mono text-xs dark:border-gray-600 dark:bg-gray-900"
+				/>
+				<button
+					class="rounded border border-gray-300 px-2 py-1 text-xs hover:border-indigo-300 disabled:opacity-50 dark:border-gray-600"
+					onclick={findFreePort}
+					disabled={serverBusy}
 				>
+					Find free port
+				</button>
+				<button
+					class="rounded-md bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+					onclick={configureServer}
+					disabled={serverBusy}
+				>
+					{serverBusy ? 'Configuring…' : 'Configure'}
+				</button>
+			</div>
+			{#if serverError}
+				<pre
+					class="overflow-x-auto rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-300">{serverError}</pre>
+			{/if}
+		</section>
+	{:else}
+		<!-- Stage 2: configured — full status + lifecycle controls. -->
+		<section
+			class="space-y-3 rounded-xl border border-gray-200 bg-white/70 p-4 dark:border-white/10 dark:bg-gray-800/70"
+		>
+			<div class="flex flex-wrap items-center justify-between gap-3">
+				<div class="flex items-center gap-3">
 					<span
-						class="h-2 w-2 rounded-full {serverStatus?.running ? 'bg-green-500' : 'bg-gray-400'}"
-					></span>
-					{serverStatus?.running ? 'Running' : 'Stopped'}
-				</span>
-				<div class="text-xs text-gray-600 dark:text-gray-300">
-					{#if serverStatus?.bind}
-						<span class="font-mono">{serverStatus.bind}</span>
-					{/if}
-					{#if serverStatus?.running}
-						<span class="text-gray-400">· pid {serverStatus.pid}</span>
-						{#if serverStatus.detached}
-							<span
-								class="ml-1 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"
-								>daemon</span
-							>
+						class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium {serverStatus?.running
+							? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
+							: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}"
+					>
+						<span
+							class="h-2 w-2 rounded-full {serverStatus?.running ? 'bg-green-500' : 'bg-gray-400'}"
+						></span>
+						{serverStatus?.running ? 'Running' : 'Stopped'}
+					</span>
+					<div class="text-xs text-gray-600 dark:text-gray-300">
+						{#if serverStatus?.bind}
+							<span class="font-mono">{serverStatus.bind}</span>
 						{/if}
+						{#if serverStatus?.running}
+							<span class="text-gray-400">· pid {serverStatus.pid}</span>
+							{#if serverStatus.detached}
+								<span
+									class="ml-1 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300"
+									>daemon</span
+								>
+							{/if}
+						{/if}
+						<span class="text-gray-400"
+							>· {serverStatus?.rule_count ?? rules.length} rule(s) loaded</span
+						>
+					</div>
+				</div>
+				<div class="flex items-center gap-2">
+					{#if serverStatus?.running}
+						<button
+							class="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+							onclick={restartServer}
+							disabled={serverBusy}
+							title="Stop and start to apply edited rules"
+						>
+							{serverBusy ? '…' : 'Restart'}
+						</button>
+						<button
+							class="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+							onclick={stopServer}
+							disabled={serverBusy}
+						>
+							Stop
+						</button>
+					{:else}
+						<button
+							class="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-500 disabled:opacity-50"
+							onclick={startServer}
+							disabled={serverBusy}
+						>
+							{serverBusy ? 'Starting…' : 'Start server'}
+						</button>
 					{/if}
-					<span class="text-gray-400">· {serverStatus?.rule_count ?? rules.length} rule(s) loaded</span>
 				</div>
 			</div>
-			<div class="flex items-center gap-2">
-				{#if serverStatus?.running}
+
+			<label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+				<input type="checkbox" bind:checked={keepAsDaemon} disabled={serverStatus?.running} />
+				Keep running after the wizard closes (run as a daemon)
+			</label>
+
+			<!-- Bind address: each workstation needs a distinct port so multiple
+			     wizards / servers on one machine don't collide. -->
+			<div class="flex flex-wrap items-center gap-2 text-xs">
+				<span class="text-gray-600 dark:text-gray-300">Bind address</span>
+				<input
+					type="text"
+					bind:value={bindDraft}
+					oninput={() => (editingBind = true)}
+					disabled={serverStatus?.running}
+					class="w-56 rounded-md border border-gray-300 px-2 py-1 font-mono text-xs disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900"
+				/>
+				<button
+					class="rounded border border-gray-300 px-2 py-1 hover:border-indigo-300 disabled:opacity-50 dark:border-gray-600"
+					onclick={findFreePort}
+					disabled={serverStatus?.running || serverBusy}
+				>
+					Find free port
+				</button>
+				{#if editingBind && !serverStatus?.running}
 					<button
-						class="rounded-md bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-50"
-						onclick={restartServer}
+						class="rounded bg-indigo-600 px-2 py-1 font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+						onclick={saveBind}
 						disabled={serverBusy}
-						title="Stop and start to apply edited rules"
 					>
-						{serverBusy ? '…' : 'Restart'}
-					</button>
-					<button
-						class="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
-						onclick={stopServer}
-						disabled={serverBusy}
-					>
-						Stop
-					</button>
-				{:else}
-					<button
-						class="rounded-md bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-500 disabled:opacity-50"
-						onclick={startServer}
-						disabled={serverBusy || !serverStatus?.has_config}
-					>
-						{serverBusy ? 'Starting…' : 'Start server'}
+						Save bind
 					</button>
 				{/if}
+				{#if serverStatus?.running}
+					<span class="text-gray-400">(stop the server to change)</span>
+				{/if}
 			</div>
-		</div>
+			<p class="text-[11px] text-gray-500">
+				Register this exact address in the client's <a
+					class="text-indigo-600 hover:underline"
+					href="/manage_remote_servers">Remote Servers</a
+				> page to connect.
+			</p>
 
-		<label class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
-			<input type="checkbox" bind:checked={keepAsDaemon} disabled={serverStatus?.running} />
-			Keep running after the wizard closes (run as a daemon)
-		</label>
-
-		{#if serverError}
-			<pre
-				class="overflow-x-auto rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-300">{serverError}</pre>
-		{/if}
-	</section>
+			{#if serverError}
+				<pre
+					class="overflow-x-auto rounded-md bg-red-50 p-2 text-xs text-red-800 dark:bg-red-900/30 dark:text-red-300">{serverError}</pre>
+			{/if}
+		</section>
+	{/if}
 
 	{#if statusMessage}
 		<div

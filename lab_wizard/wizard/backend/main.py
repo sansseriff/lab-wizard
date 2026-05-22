@@ -84,6 +84,8 @@ from lab_wizard.wizard.backend.server_control import (
     stop_server,
     restart_server,
     stop_managed_children,
+    set_server_bind,
+    suggest_free_bind,
 )
 from pydantic import BaseModel as _PermBM, Field as _PermField
 from pathlib import Path
@@ -413,6 +415,29 @@ def api_server_restart(req: _ServerStartRequest, env: Env = Depends(get_env)):
     """Restart the server — used to apply edited permission rules."""
     try:
         return restart_server(_config_dir(env), detached=req.detached)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class _ServerBindRequest(_PermBM):
+    bind: str
+
+
+@app.get("/api/server/suggest-port")
+def api_server_suggest_port(prefer_default: bool = False, env: Env = Depends(get_env)):
+    """Return a tcp://host:port bind on a currently-free port (not persisted).
+
+    ``prefer_default=true`` offers the standard/existing port first when free —
+    used for the initial suggestion before the server is configured.
+    """
+    return {"bind": suggest_free_bind(_config_dir(env), prefer_default=prefer_default)}
+
+
+@app.put("/api/server/bind")
+def api_server_set_bind(req: _ServerBindRequest, env: Env = Depends(get_env)):
+    """Persist this workstation's server bind address."""
+    try:
+        return set_server_bind(_config_dir(env), req.bind)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
