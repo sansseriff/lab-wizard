@@ -45,6 +45,21 @@ class ConfiguredResource(BaseModel):
     fields: dict[str, Any]
 
 
+class RemoteMatch(BaseModel):
+    """A named attribute on a registered remote server matching a requirement.
+
+    Matched to a measurement's required resource type by ``behavior_abc`` — the
+    same contract local discovery uses. Selecting one drives ``from_attribute``
+    generation against ``url`` (see the ``--remote`` flow in setup templates).
+    """
+
+    server_name: str
+    url: str
+    attribute: str
+    behavior_abc: str | None = None
+    type_hint: str | None = None
+
+
 @dataclass
 class FilledReq:
     """In-memory requirement, populated by extraction and matching.
@@ -72,3 +87,4 @@ class OutputReq(BaseModel):
     is_list: bool = False
     matching_instruments: list[MatchingReq] = []
     matching_resources: list[ConfiguredResource] = []
+    matching_remote: list[RemoteMatch] = []

@@ -4,6 +4,7 @@ import asyncio
 import multiprocessing
 import logging
 import os
+import sys
 from fastapi.staticfiles import StaticFiles
 from fastapi import Depends
 import time
@@ -20,7 +21,12 @@ import argparse
 from typing import Any
 from uvicorn import Config, Server
 from uuid import uuid4
-from lab_wizard.wizard.backend.models import Env, OutputReq, ConfiguredResource
+from lab_wizard.wizard.backend.models import (
+    Env,
+    OutputReq,
+    ConfiguredResource,
+    RemoteMatch,
+)
 from lab_wizard.wizard.backend.utils_runtime import (
     has_gui_context,
     green,
@@ -61,6 +67,25 @@ from lab_wizard.wizard.backend.custom_resource_generation import (
     GenerateCustomResourceRequest,
     generate_custom_resource_project,
 )
+from lab_wizard.wizard.backend.permissions_api import (
+    get_permissions_model,
+    save_permissions,
+)
+from lab_wizard.wizard.backend.remote_servers import (
+    load_remote_servers,
+    add_remote_server,
+    remove_remote_server,
+    test_connection as test_remote_connection,
+    list_remote_attributes,
+)
+from lab_wizard.wizard.backend.server_control import (
+    server_status,
+    start_server,
+    stop_server,
+    restart_server,
+    stop_managed_children,
+)
+from pydantic import BaseModel as _PermBM, Field as _PermField
 from pathlib import Path
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
 
@@ -68,7 +93,7 @@ from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
 from lab_wizard.wizard.backend.location import WEB_DIR, LOG_DIR
 
 FRAMELESS = False
-ICON_PATH = str(Path(__file__).parent / "static" / "icon.png")
+ICON_PATH = Path(WEB_DIR) / "icon.png"
 logger = logging.getLogger("lab_wizard.wizard.backend.main")
 
 
@@ -88,11 +113,10 @@ async def lifespan(app: FastAPI):
 
     yield
     # Code to run on shutdown (if any)
-    # print("Application shutting down.")
     try:
-        # run any shutdown actions here
-        # app.state.services.cryo.cleanup()
-        pass
+        # Stop any instrument server we launched in managed mode; detached
+        # (daemon) servers are intentionally left running.
+        stop_managed_children()
     except Exception as e:
         logger.exception("Unhandled shutdown error: %s", e)
 
@@ -202,6 +226,14 @@ def get_resources(
         saver_tree = get_configured_resources_tree(config_dir, "saver")
         plotter_tree = get_configured_resources_tree(config_dir, "plotter")
 
+        # Enumerate remote attributes once (best-effort; unreachable servers are
+        # skipped) so each instrument requirement can offer remote matches.
+        try:
+            remote_attrs = list_remote_attributes(config_dir)
+        except Exception as e:
+            logger.warning("Could not enumerate remote attributes: %s", e)
+            remote_attrs = []
+
         outputs: list[OutputReq] = []
         for req in reqs:
             if req.resource_kind == "instrument":
@@ -212,6 +244,12 @@ def get_resources(
                         "Discovery error for requirement '%s': %s", req.variable_name, e
                     )
                     matches = []
+                base_name = getattr(req.base_type, "__name__", str(req.base_type))
+                remote_matches = [
+                    RemoteMatch(**attr)
+                    for attr in remote_attrs
+                    if attr.get("behavior_abc") == base_name and attr.get("attribute")
+                ]
                 outputs.append(
                     OutputReq(
                         variable_name=req.variable_name,
@@ -220,6 +258,7 @@ def get_resources(
                         is_list=req.is_list,
                         matching_instruments=matches,
                         matching_resources=[],
+                        matching_remote=remote_matches,
                     )
                 )
             elif req.resource_kind in ("saver", "plotter"):
@@ -268,6 +307,114 @@ def api_manage_instruments(env: Env = Depends(get_env)):
     tree = get_configured_tree(config_dir)
     metadata = get_instrument_metadata()
     return {"tree": tree, "metadata": metadata}
+
+
+@app.get("/api/permissions")
+def api_get_permissions(env: Env = Depends(get_env)):
+    """Return the local instrument tree + permission vocabulary + current rules.
+
+    ``tree`` mirrors manage-instruments; ``instruments`` carries the state keys
+    and methods the rule builder offers per node; ``permissions`` is the current
+    ``permissions:`` block from server.yaml.
+    """
+    config_dir = _config_dir(env)
+    model = get_permissions_model(config_dir)
+    return {"tree": get_configured_tree(config_dir), **model}
+
+
+class _SavePermissionsRequest(_PermBM):
+    permissions: dict = _PermField(default_factory=dict)
+
+
+@app.put("/api/permissions")
+def api_save_permissions(
+    req: _SavePermissionsRequest, env: Env = Depends(get_env)
+):
+    """Validate and persist the ``permissions:`` block to server.yaml."""
+    config_dir = _config_dir(env)
+    try:
+        saved = save_permissions(config_dir, req.permissions)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "permissions": saved}
+
+
+# -------------------- Remote Servers (consuming side) --------------------
+
+
+class _RemoteServerRequest(_PermBM):
+    name: str
+    url: str
+
+
+class _RemoteTestRequest(_PermBM):
+    url: str
+
+
+@app.get("/api/remote-servers")
+def api_get_remote_servers(env: Env = Depends(get_env)):
+    """Return the registered remote servers (the client address book)."""
+    return {"servers": load_remote_servers(_config_dir(env))}
+
+
+@app.post("/api/remote-servers")
+def api_add_remote_server(req: _RemoteServerRequest, env: Env = Depends(get_env)):
+    """Add (or update by name) a remote server."""
+    try:
+        servers = add_remote_server(_config_dir(env), req.name.strip(), req.url.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "servers": servers}
+
+
+@app.delete("/api/remote-servers/{name}")
+def api_remove_remote_server(name: str, env: Env = Depends(get_env)):
+    """Remove a remote server by name."""
+    return {"status": "ok", "servers": remove_remote_server(_config_dir(env), name)}
+
+
+@app.post("/api/remote-servers/test")
+def api_test_remote_server(req: _RemoteTestRequest):
+    """Live-test a remote server URL and return its attributes (never errors)."""
+    return test_remote_connection(req.url.strip())
+
+
+# -------------------- Instrument Server lifecycle (hosting side) --------------------
+
+
+class _ServerStartRequest(_PermBM):
+    # When true, the server is detached and survives wizard close (daemon).
+    detached: bool = False
+
+
+@app.get("/api/server/status")
+def api_server_status(env: Env = Depends(get_env)):
+    """Return whether this workstation's instrument server is running."""
+    return server_status(_config_dir(env))
+
+
+@app.post("/api/server/start")
+def api_server_start(req: _ServerStartRequest, env: Env = Depends(get_env)):
+    """Start the instrument server (managed child or detached daemon)."""
+    try:
+        return start_server(_config_dir(env), detached=req.detached)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/server/stop")
+def api_server_stop(env: Env = Depends(get_env)):
+    """Stop the running instrument server (any mode)."""
+    return stop_server(_config_dir(env))
+
+
+@app.post("/api/server/restart")
+def api_server_restart(req: _ServerStartRequest, env: Env = Depends(get_env)):
+    """Restart the server — used to apply edited permission rules."""
+    try:
+        return restart_server(_config_dir(env), detached=req.detached)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 from pydantic import BaseModel as _BM, Field as _Field
@@ -571,6 +718,32 @@ def _wait_for_server(url: str, timeout: float = 15.0) -> bool:
     return False
 
 
+def _resolve_webview_icon_path(icon_path: Path, temp_dir: str) -> str | None:
+    """Return a pywebview-compatible icon path for the current platform."""
+    if not icon_path.is_file():
+        logger.warning("Wizard icon not found: %s", icon_path)
+        return None
+
+    if not sys.platform.startswith("win"):
+        return str(icon_path)
+
+    try:
+        from PIL import Image
+    except ImportError:
+        logger.warning("Pillow unavailable; using PNG icon path on Windows: %s", icon_path)
+        return str(icon_path)
+
+    ico_path = Path(temp_dir) / "icon.ico"
+    with Image.open(icon_path) as image:
+        image.convert("RGBA").save(
+            ico_path,
+            format="ICO",
+            sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+        )
+
+    return str(ico_path)
+
+
 def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
     if webview is None:
         raise RuntimeError("pywebview is not available; cannot start UI window")
@@ -597,10 +770,14 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
     # if FRAMELESS:
     #     win.events.before_load += add_buttons
     _win.events.closed += on_closed  # type: ignore[attr-defined]
-    webview.start(
-        storage_path=tempfile.mkdtemp(), debug=debug, icon="../static/icon.png"
-    )
-    _win.evaluate_js("window.special = 3")  # type: ignore[attr-defined]
+    with tempfile.TemporaryDirectory(prefix="lab-wizard-webview-") as storage_dir:
+        icon_path = _resolve_webview_icon_path(ICON_PATH, storage_dir)
+        webview.start(
+            storage_path=storage_dir,
+            debug=debug,
+            icon=icon_path,
+        )
+        _win.evaluate_js("window.special = 3")  # type: ignore[attr-defined]
 
 
 def parse_arguments():

@@ -23,6 +23,7 @@ dependencies = [
     "pyvisa-py>=0.8.1",
     "sqlalchemy>=2.0",
     "pyleco>=0.6.0.post1",
+    "coolname>=5.0.0",
 ]
 
 [tool.uv.sources]
@@ -35,9 +36,16 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["lab_wizard*"]
 
+[tool.setuptools.package-data]
+lab_wizard = [
+    "wizard/backend/static/*",
+    "wizard/backend/static/**/*",
+]
+
 [project.scripts]
 wizard = "lab_wizard.wizard.cli:main"
-
+lab_wizard_server = "lab_wizard.lib.server.server:main"
+lab_wizard_client = "lab_wizard.lib.server.demo_client:main"
 
 
 

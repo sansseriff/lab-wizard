@@ -3,7 +3,7 @@
 	import type { TreeItem as TreeNodeItem } from '$lib/components/TreeNode.svelte';
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import { fetchWithConfig } from '../../api';
-	import { PlusIcon, ArrowLeftIcon } from 'phosphor-svelte';
+	import { PlusIcon } from 'phosphor-svelte';
 	import type {
 		TreeItem,
 		InstrumentMeta,
@@ -424,12 +424,6 @@
 
 <section class="space-y-4">
 	<div class="flex items-center gap-3">
-		<a
-			href="/"
-			class="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-		>
-			<ArrowLeftIcon size={20} />
-		</a>
 		<h1 class="text-2xl font-semibold">Manage Instruments</h1>
 	</div>
 

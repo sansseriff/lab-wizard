@@ -8,17 +8,36 @@ unique identifier from the instrument type, checked for collisions
 against the *entire* configured instruments tree (``Exp.from_attribute``
 walks the whole tree and the first match wins, so global uniqueness is
 required).
+
+Default names use a hybrid ``{type}-{petname}`` form (e.g.
+``dac4d-vanilla-seafoam``):
+
+- the **type** prefix tells you what the instrument is at a glance, and
+- the **petname** suffix (a random adjective-noun slug from ``coolname``) is
+  globally unique and *stable*: it is generated once and stored in the YAML,
+  never derived from key fields, so it survives slot/port edits — unlike the
+  ``inst://`` hash and unlike a positional ``_ch{n}`` / ``_2`` suffix.
+
+This is a strong nudge to rename to something semantic; the petname is just a
+safe, memorable default.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
+
+import coolname
 
 from lab_wizard.wizard.backend._generation_common import (
     _NodeRef,
     _sanitize_identifier,
 )
+
+
+def _default_petname() -> str:
+    """Return a two-word slug like ``vanilla-seafoam``."""
+    return coolname.generate_slug(2)
 
 
 @dataclass
@@ -79,34 +98,56 @@ def _assign_name(leaf: _NodeRef, channel_index: int | None, name: str) -> None:
         leaf.params.attribute_name = name
 
 
-def _base_name(leaf: _NodeRef, channel_index: int | None) -> str:
-    type_token = _sanitize_identifier(leaf.type)
-    if channel_index is None:
-        return type_token
-    return f"{type_token}_ch{channel_index}"
+def _type_token(leaf: _NodeRef) -> str:
+    """Lowercased, identifier-safe instrument type, e.g. ``dac4d``."""
+    return _sanitize_identifier(leaf.type).lower()
 
 
-def _unique_name(base: str, taken: set[str]) -> str:
-    if base not in taken:
-        return base
+# How many fresh petnames to try before falling back to numeric suffixing.
+# coolname's space is enormous, so a collision essentially never happens; this
+# bound just guarantees termination if a caller injects a degenerate generator.
+_MAX_PETNAME_TRIES = 50
+
+
+def _unique_petname_name(
+    type_token: str,
+    taken: set[str],
+    petname_fn: Callable[[], str],
+) -> str:
+    """``{type}-{petname}`` not present in ``taken``.
+
+    Tries fresh petnames; if all collide (only possible with a degenerate
+    generator) falls back to ``{type}-{petname}-2``, ``-3``, … on the last one.
+    """
+    candidate = f"{type_token}-{petname_fn()}"
+    for _ in range(_MAX_PETNAME_TRIES):
+        if candidate not in taken:
+            return candidate
+        candidate = f"{type_token}-{petname_fn()}"
+    base = candidate
     n = 2
-    while f"{base}_{n}" in taken:
+    while f"{base}-{n}" in taken:
         n += 1
-    return f"{base}_{n}"
+    return f"{base}-{n}"
 
 
 def autogen_attribute_names(
     instruments: dict[str, Any],
     targets: list[tuple[_NodeRef, int | None]],
+    *,
+    petname_fn: Callable[[], str] = _default_petname,
 ) -> list[AutogenMutation]:
     """Fill in empty ``attribute_name`` fields for the given targets.
 
     ``targets`` is a list of ``(leaf, channel_index)`` tuples identifying
     each selection that needs a name. For targets that already have a
-    non-empty name, nothing happens. For empty ones, a unique name is
-    chosen from ``{type}`` (or ``{type}_ch{n}``) with ``_2``, ``_3``…
-    suffixing on collision against both the pre-existing tree and names
-    allocated earlier in this same call.
+    non-empty name, nothing happens. For empty ones, a unique
+    ``{type}-{petname}`` name is chosen (see module docstring), checked for
+    collisions against both the pre-existing tree and names allocated earlier
+    in this same call.
+
+    ``petname_fn`` is injectable for deterministic testing; it defaults to a
+    two-word ``coolname`` slug.
 
     Returns the list of mutations actually applied (empty if every target
     already had a name).
@@ -118,8 +159,7 @@ def autogen_attribute_names(
     for leaf, channel_index in targets:
         if _current_name(leaf, channel_index):
             continue
-        base = _base_name(leaf, channel_index)
-        chosen = _unique_name(base, taken)
+        chosen = _unique_petname_name(_type_token(leaf), taken, petname_fn)
         _assign_name(leaf, channel_index, chosen)
         taken.add(chosen)
         mutations.append(

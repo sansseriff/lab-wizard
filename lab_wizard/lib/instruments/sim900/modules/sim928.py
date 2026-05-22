@@ -31,6 +31,9 @@ class Sim928(Child[Any, Sim928Params], VSource):
     Voltage source
 
     from_config is inherited from Child base class — no override needed.
+
+    Safety-state declarations are inherited from VSource (set_voltage records
+    "voltage", turn_on/turn_off record "output").
     """
 
     @property

@@ -13,6 +13,14 @@ class Dac4DChannelParams(BaseModel):
 class Dac4DChannel(VSource):
     """Single output channel for Dac4D."""
 
+    # Override only what differs from VSource: this channel has no separate
+    # output enable — turn_on/turn_off both drive it to 0 V — so they record
+    # voltage=0.0. set_voltage is inherited from VSource (records "voltage").
+    _state_methods_ = {
+        "turn_on": ("voltage", 0.0),
+        "turn_off": ("voltage", 0.0),
+    }
+
     def __init__(self, module: Any, channel_index: int, params: Dac4DChannelParams):
         self.module = module
         self.channel_index = channel_index

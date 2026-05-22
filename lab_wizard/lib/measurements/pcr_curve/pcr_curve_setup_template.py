@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lab_wizard.lib.client.remote_exp import RemoteExp
 from lab_wizard.lib.utilities.model_tree import Exp, load_exp_from_yaml
 from lab_wizard.lib.instruments.general.counter import Counter, StandInCounter
 from lab_wizard.lib.instruments.general.vsource import VSource, StandInVSource
@@ -40,7 +41,7 @@ class PCRCurveResources:
     params: PCRCurveParams = field(default_factory=PCRCurveParams)
 
 
-def create_instrument_resources(exp: Exp) -> PCRCurveResources:
+def create_instrument_resources(exp: Exp | RemoteExp) -> PCRCurveResources:
     # wizard:instantiation:start
     # wizard inserts config-backed instrument / saver / plotter construction here
     # wizard:instantiation:end
@@ -54,11 +55,28 @@ def create_instrument_resources(exp: Exp) -> PCRCurveResources:
 
 
 if __name__ == "__main__":
+    import argparse
+
     from lab_wizard.lib.measurements.pcr_curve.pcr_curve import PCRCurve
 
-    this_file = Path(__file__).resolve()
-    project_yaml = this_file.with_suffix(".yaml")
-    exp = load_exp_from_yaml(project_yaml)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--remote",
+        default=None,
+        help="Connect to a remote lab_wizard server (e.g. tcp://lab-server:12300). "
+        "Requires this project's instruments to be named via attribute_name "
+        "and the server to have a matching loaded Exp.",
+    )
+    args = parser.parse_args()
+
+    exp: Exp | RemoteExp
+    if args.remote:
+        exp = RemoteExp.connect(args.remote)
+    else:
+        this_file = Path(__file__).resolve()
+        project_yaml = this_file.with_suffix(".yaml")
+        exp = load_exp_from_yaml(project_yaml)
+
     resources = create_instrument_resources(exp)
 
     measurement = PCRCurve(params=resources.params, output_dir=Path("./data"))

@@ -24,3 +24,8 @@ members = ["lab_wizard"]
 
 [tool.uv.sources]
 lab-wizard = { workspace = true, editable = true }
+
+[dependency-groups]
+dev = [
+    "zensical>=0.0.43",
+]

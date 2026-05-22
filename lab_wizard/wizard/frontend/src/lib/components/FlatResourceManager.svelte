@@ -164,7 +164,7 @@
 	}
 </script>
 
-<section class="mx-auto max-w-3xl space-y-6 p-6">
+<section class="space-y-4">
 	<header class="flex items-center justify-between">
 		<div>
 			<h1 class="text-2xl font-semibold">{label}</h1>
@@ -173,7 +173,6 @@
 			</p>
 		</div>
 		<div class="flex items-center gap-2">
-			<a href="/" class="text-sm text-indigo-600 hover:underline">← Home</a>
 			<button
 				onclick={startAdd}
 				class="rounded-md bg-indigo-600 px-3 py-1.5 text-sm text-white shadow hover:bg-indigo-500"

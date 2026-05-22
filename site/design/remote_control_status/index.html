@@ -1,0 +1,1274 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for the lab wizard app and associated library">
+      
+      
+        <meta name="author" content="Andrew Mueller, JPL SNSPD Group">
+      
+      
+      
+        <link rel="prev" href="../remote_control_and_permissions/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="zensical-0.0.43">
+    
+    
+      
+        <title>Status: Remote Instrument Control for lab_wizard - Lab Wizard Documentation</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.fba56155.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#status-remote-instrument-control-for-lab_wizard" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Lab Wizard Documentation" class="md-header__button md-logo" aria-label="Lab Wizard Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Lab Wizard Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Status: Remote Instrument Control for lab_wizard
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="none" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="none" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Lab Wizard Documentation" class="md-nav__button md-logo" aria-label="Lab Wizard Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-book-open" viewBox="0 0 24 24"><path d="M12 7v14M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
+
+    </a>
+    Lab Wizard Documentation
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-rocket" viewBox="0 0 24 24"><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"/><path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+  Get started
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../markdown/" class="md-nav__link">
+        
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M22.27 19.385H1.73A1.73 1.73 0 0 1 0 17.655V6.345a1.73 1.73 0 0 1 1.73-1.73h20.54A1.73 1.73 0 0 1 24 6.345v11.308a1.73 1.73 0 0 1-1.73 1.731zM5.769 15.923v-4.5l2.308 2.885 2.307-2.885v4.5h2.308V8.078h-2.308l-2.307 2.885-2.308-2.885H3.46v7.847zM21.232 12h-2.309V8.077h-2.307V12h-2.308l3.461 4.039z"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+  Markdown in 5min
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Design
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Design
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../remote_control_and_permissions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Design: Remote Instrument Control &amp; Permissions in the Wizard
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Status: Remote Instrument Control for lab_wizard
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Status: Remote Instrument Control for lab_wizard
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-feature-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What this feature is
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-as-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Architecture as built
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-built-phases-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What is built (Phases 1–3)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What is built (Phases 1–3)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-lab_wizardlibserver" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Server — <code>lab_wizard/lib/server/</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#client-lab_wizardlibclient" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Client — <code>lab_wizard/lib/client/</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instrument-layer-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Instrument-layer + config
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests-all-green-64-in-suite-1-standalone-smoke" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests (all green: 64 in suite + 1 standalone smoke)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deviations-from-the-original-plan-read-these-they-will-confuse-you-otherwise" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Deviations from the original plan (read these — they will confuse you otherwise)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-remains" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What remains
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What remains">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-original-phase-4-polish-not-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A. Original Phase 4 — "Polish" (not started)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-original-verification-items-still-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B. Original verification items still open
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-follow-ups-from-the-detour-designed-not-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C. Follow-ups from the detour (designed, not built)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#d-known-open-design-questions-not-blocking-decide-when-relevant" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D. Known open design questions (not blocking, decide when relevant)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suggested-next-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Suggested next step
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-this-feature-is" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What this feature is
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture-as-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Architecture as built
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-built-phases-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What is built (Phases 1–3)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What is built (Phases 1–3)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-lab_wizardlibserver" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Server — <code>lab_wizard/lib/server/</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#client-lab_wizardlibclient" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Client — <code>lab_wizard/lib/client/</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instrument-layer-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Instrument-layer + config
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tests-all-green-64-in-suite-1-standalone-smoke" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tests (all green: 64 in suite + 1 standalone smoke)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deviations-from-the-original-plan-read-these-they-will-confuse-you-otherwise" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Deviations from the original plan (read these — they will confuse you otherwise)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-remains" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What remains
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What remains">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a-original-phase-4-polish-not-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A. Original Phase 4 — "Polish" (not started)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b-original-verification-items-still-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B. Original verification items still open
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#c-follow-ups-from-the-detour-designed-not-built" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C. Follow-ups from the detour (designed, not built)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#d-known-open-design-questions-not-blocking-decide-when-relevant" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D. Known open design questions (not blocking, decide when relevant)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suggested-next-step" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Suggested next step
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  
+  <span class="md-ellipsis">
+    Get started
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+    
+      <li class="md-path__item">
+        <a href="../remote_control_and_permissions/" class="md-path__link">
+          
+  
+  <span class="md-ellipsis">
+    Design
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+<h1 id="status-remote-instrument-control-for-lab_wizard">Status: Remote Instrument Control for lab_wizard<a class="headerlink" href="#status-remote-instrument-control-for-lab_wizard" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> Phases 1–3 built and tested; Phase 4 + several follow-ups outstanding (2026-05-21)
+<strong>Audience:</strong> an engineer/agent picking up this work cold.
+<strong>Related docs:</strong>
+- Original plan: <code>~/.claude/plans/investigate-this-codebase-key-clever-llama.md</code>
+  (the "Remote Instrument Control for lab_wizard" plan — context, architecture, phases).
+- Wizard/permissions UI design: <code>docs/design/remote_control_and_permissions.md</code>.</p>
+<hr />
+<h2 id="what-this-feature-is">What this feature is<a class="headerlink" href="#what-this-feature-is" title="Permanent link">&para;</a></h2>
+<p>Run a measurement on machine B against instruments physically attached to
+machine A, with the user-facing API unchanged. Instead of tunneling raw
+SCPI/USB bytes, we do <strong>RPC at the user-API layer</strong>: a <strong>server</strong> on A hosts the
+real instrument tree and exposes every method (<code>set_voltage</code>, <code>get_voltage</code>, …)
+over ZMQ + JSON-RPC; a <strong>client</strong> on B holds typed proxies that forward calls.
+A <strong>permission state machine</strong> on the server blocks unsafe calls (e.g. "don't
+pulse while the cryo bias is on").</p>
+<p>Read the original plan for the full rationale (why not a wire-level transport
+swap, the asymmetric config-ownership model, the proxy strategy, etc.).</p>
+<hr />
+<h2 id="architecture-as-built">Architecture as built<a class="headerlink" href="#architecture-as-built" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>machine B (client / consumer)            machine A (server / host)
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>─────────────────────────────           ───────────────────────────────
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>RemoteExp.connect(url)                   WireServer (ZMQ ROUTER)
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  .from_attribute(&quot;bias&quot;, as_type=…)       ├─ InstrumentRegistry  (inst:// → live object,
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>     → describe_attribute RPC               │     attribute_name → path)
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>     → typed proxy (RemoteVSource/…)        ├─ PermissionGate      (rules + StateTracker)
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  proxy.set_voltage(0.5)                     └─ real instrument tree (Parent/Child/channels)
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>     → call(&quot;inst://…&quot;,&quot;set_voltage&quot;,[0.5])
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        ── ZMQ DEALER ──▶  ROUTER ──▶ gate.check ▶ getattr(obj,m)(*a) ▶ gate.record
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>        ◀── JSON-RPC result / error ──
+</span></code></pre></div>
+<ul>
+<li>Wire format = pyleco <code>Message</code> (multipart, conversation_id) + JSON-RPC 2.0 via
+  pyleco <code>RPCServer</code>. <strong>We do not use pyleco's <code>MessageHandler</code>/<code>Coordinator</code></strong>
+  (that's a Coordinator-client topology); we bind a ROUTER directly. Migrating
+  to a Coordinator later is additive (wire format is identical).</li>
+<li>Permission denials are JSON-RPC error <strong>code -32001</strong> carrying
+  <code>{rule_id, blocking_state}</code>; the client raises <code>PermissionDeniedError</code>.</li>
+</ul>
+<hr />
+<h2 id="what-is-built-phases-13">What is built (Phases 1–3)<a class="headerlink" href="#what-is-built-phases-13" title="Permanent link">&para;</a></h2>
+<h3 id="server-lab_wizardlibserver">Server — <code>lab_wizard/lib/server/</code><a class="headerlink" href="#server-lab_wizardlibserver" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>__init__.py</code></td>
+<td>package</td>
+<td></td>
+</tr>
+<tr>
+<td><code>registry.py</code></td>
+<td><code>InstrumentRegistry</code>: eager tree walk, <code>inst://</code> index, <code>attribute_name</code> index, <code>describe_path/attribute</code>, <code>list_*</code></td>
+<td>Built from an <strong><code>Exp</code></strong> today (see deviation #1). <code>_BEHAVIOR_ABCS</code> priority: VSource &gt; VSense &gt; ChannelProvider.</td>
+</tr>
+<tr>
+<td><code>wire.py</code></td>
+<td><code>WireServer</code>: ROUTER loop, pyleco framing, <code>RPCServer</code> dispatch, gate integration</td>
+<td>RPCs: <code>call</code>, <code>list_paths</code>, <code>list_attributes</code>, <code>describe_path</code>, <code>describe_attribute</code>, <code>list_descriptions</code>. <code>PERMISSION_DENIED_CODE = -32001</code>.</td>
+</tr>
+<tr>
+<td><code>permissions.py</code></td>
+<td><code>Condition</code>/<code>DenyClause</code>/<code>Rule</code>/<code>PermissionsConfig</code>, <code>StateTracker</code>, <code>PermissionGate</code>, <code>load_permissions</code></td>
+<td>Rule-list + declarative-state model (not an FSM).</td>
+</tr>
+<tr>
+<td><code>server.py</code></td>
+<td>CLI entry: load config → build registry + gate → serve; SIGINT/SIGTERM stop</td>
+<td>Run: <code>python -m lab_wizard.lib.server.server --config &lt;server.yaml&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>demo_client.py</code></td>
+<td>tiny DEALER client for manual poking</td>
+<td>Not part of the library surface; smoke-test aid.</td>
+</tr>
+<tr>
+<td><code>_smoke_test.py</code></td>
+<td>in-process server+client+proxies, no hardware</td>
+<td><code>python -m lab_wizard.lib.server._smoke_test</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="client-lab_wizardlibclient">Client — <code>lab_wizard/lib/client/</code><a class="headerlink" href="#client-lab_wizardlibclient" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Role</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>__init__.py</code></td>
+<td>exports <code>RemoteExp</code>, <code>Session</code>, <code>RemoteCallError</code>, <code>PermissionDeniedError</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>session.py</code></td>
+<td><code>Session</code>: sync DEALER, one-call-at-a-time lock, error→exception mapping</td>
+<td><code>PermissionDeniedError(RemoteCallError)</code> for code -32001. <strong>No reconnect yet.</strong></td>
+</tr>
+<tr>
+<td><code>remote_exp.py</code></td>
+<td><code>RemoteExp.connect(url)</code>, <code>from_attribute(name, as_type=…)</code> (typed overload), <code>list_attributes</code>/<code>describe_attribute</code>/<code>list_descriptions</code></td>
+<td>Proxies cached per name. <strong>No <code>from_config</code></strong> (remote uses <code>from_attribute</code> only — by design).</td>
+</tr>
+<tr>
+<td><code>proxies/base.py</code></td>
+<td><code>RemoteProxy</code> mixin: <code>__init_subclass__</code> auto-forwards every inherited abstract method + reflective <code>__getattr__</code> tail; <code>RemoteOpaque</code> fallback</td>
+<td>Auto-forwarding is <strong>beyond the original plan</strong> (deviation #3).</td>
+</tr>
+<tr>
+<td><code>proxies/vsource.py</code> / <code>vsense.py</code></td>
+<td><code>RemoteVSource(VSource, RemoteProxy)</code> / <code>RemoteVSense(VSense, RemoteProxy)</code></td>
+<td>One-liners thanks to auto-forwarding.</td>
+</tr>
+<tr>
+<td><code>proxies/registry.py</code></td>
+<td><code>behavior_abc</code> string → proxy class; <code>proxy_class_for(...)</code></td>
+<td>New ABC = one line here.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="instrument-layer-config">Instrument-layer + config<a class="headerlink" href="#instrument-layer-config" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>lab_wizard/lib/instruments/general/state_effects.py</code> — <strong>new.</strong> <code>Arg</code>/<code>Kwarg</code>/
+  <code>Result</code>/<code>resolve_state_value</code>/<code>collect_state_methods</code>. The <code>_state_methods_</code>
+  vocabulary lives here (instrument layer) so instruments never import server code.</li>
+<li><code>_state_methods_</code> declared on <strong><code>VSource</code></strong> (general case: <code>set_voltage</code>→voltage,
+  <code>turn_on/off</code>→output) and inherited by <code>Sim928</code>, <code>StandInVSource</code>.
+  <strong><code>Dac4DChannel</code></strong> overrides only <code>turn_on/off</code>→<code>voltage=0.0</code> (it has no separate
+  output enable). Merge is per-key across the MRO via <code>collect_state_methods</code>.</li>
+<li><code>lab_wizard/config/server/server.yaml</code> — bind + <code>exp_yaml</code> + a worked cryo-amp
+  <code>permissions:</code> block.</li>
+<li>Setup templates <code>iv_curve_setup_template.py</code> / <code>pcr_curve_setup_template.py</code>
+  gained a <code>--remote tcp://host:port</code> flag and an <code>Exp | RemoteExp</code> signature.</li>
+<li><code>lab_wizard/pyproject.toml</code> — added entry points <code>lab_wizard_server</code>,
+  <code>lab_wizard_client</code> (pyleco was already a dependency).</li>
+</ul>
+<h3 id="tests-all-green-64-in-suite-1-standalone-smoke">Tests (all green: 64 in suite + 1 standalone smoke)<a class="headerlink" href="#tests-all-green-64-in-suite-1-standalone-smoke" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>tests/test_remote_client_server.py</code> — typed <code>from_attribute</code>, isinstance,
+  round-trips, discovery, error cases (8).</li>
+<li><code>tests/test_permissions.py</code> — unit: conditions, deny clauses, StateTracker,
+  gate (16).</li>
+<li><code>tests/test_remote_permissions.py</code> — gate enforced over the live wire (5).</li>
+<li><code>tests/test_remote_end_to_end.py</code> — single narrative scenario; also runnable as
+  <code>python -m tests.test_remote_end_to_end</code> to watch it print each step (1).</li>
+<li><code>lab_wizard/lib/server/_smoke_test.py</code> — Phase 1+2+auto-forward smoke.</li>
+</ul>
+<p>Run everything: <code>python -m pytest tests/ -q</code>.</p>
+<hr />
+<h2 id="deviations-from-the-original-plan-read-these-they-will-confuse-you-otherwise">Deviations from the original plan (read these — they will confuse you otherwise)<a class="headerlink" href="#deviations-from-the-original-plan-read-these-they-will-confuse-you-otherwise" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Server hosts a project <code>Exp</code>, not <code>config/instruments</code>.</strong> The original plan
+   and Phase 1 load a project YAML via <code>server.yaml: exp_yaml</code>. We have since
+   <strong>decided</strong> (see <code>remote_control_and_permissions.md</code>) the server should host
+   the whole <code>config/instruments</code> tree. <strong>This change is not yet made.</strong> It is
+   build-order item #1 there.</li>
+<li><strong>No <code>MessageHandler</code>/<code>Coordinator</code>; no <code>introspect.py</code>.</strong> Wire is a raw
+   ROUTER + pyleco <code>Message</code> + <code>RPCServer</code>. The planned <code>introspect.py</code> was
+   folded into <code>registry.py</code> + <code>wire.py</code>.</li>
+<li><strong>Auto-forwarding proxies + <code>as_type</code>.</strong> Proxy classes are now empty
+   one-liners; <code>RemoteProxy.__init_subclass__</code> generates forwarders for inherited
+   abstract methods and clears <code>__abstractmethods__</code>. <code>from_attribute</code> has a typed
+   <code>as_type=</code> overload (a <code>typing.cast</code>-style static hint). Neither was in the
+   original plan; both came out of the detour discussion.</li>
+<li><strong><code>from_attribute</code> only on the client.</strong> No <code>RemoteExp.from_config</code> /
+   <code>RemoteChannelProvider</code>. Remote projects reference instruments by
+   <code>attribute_name</code>; channel access via <code>channels[i]</code> was intentionally dropped
+   (name the channel instead).</li>
+<li><strong><code>--remote</code> lives in the setup <em>templates</em>, not in wizard codegen.</strong> The
+   planned third <code>generation_style == "remote"</code> in
+   <code>wizard/backend/project_generation.py</code> was <strong>not</strong> added; instead the
+   templates' <code>__main__</code> blocks branch on a <code>--remote</code> CLI flag. Newly generated
+   projects inherit this automatically.</li>
+<li>⚠️ Gotcha already hit and fixed: do <strong>not</strong> add <code>from __future__ import
+     annotations</code> to a setup template — it stringifies the <code>Resources</code> dataclass
+     annotations and breaks <code>get_measurements._extract_resources_from_template</code>
+     (which reads <code>__annotations__</code> raw). See git history / that function.</li>
+<li><strong>CLI entry points, not a <code>lab_wizard server</code> subcommand.</strong> Use
+   <code>python -m lab_wizard.lib.server.server</code> or the <code>lab_wizard_server</code> script.</li>
+<li><strong><code>Sim970Channel</code> did not get <code>_state_methods_</code>.</strong> It's a <code>VSense</code>; reading a
+   voltage doesn't change state, so it has nothing to declare. (The plan listed
+   it; skipping was correct.)</li>
+</ol>
+<hr />
+<h2 id="what-remains">What remains<a class="headerlink" href="#what-remains" title="Permanent link">&para;</a></h2>
+<h3 id="a-original-phase-4-polish-not-started">A. Original Phase 4 — "Polish" (not started)<a class="headerlink" href="#a-original-phase-4-polish-not-started" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Concurrency</strong> (<code>lib/server/concurrency.py</code>, planned, not built). Today the
+   server is a single-threaded poll loop: one slow <code>set_voltage</code> blocks all RPCs.
+   Goal/contract: <strong>same connection → serialized in arrival order; different
+   connections → parallel.</strong> This is what enables the key use case of <em>one server
+   sharing a single VISA/serial connection across multiple client programs</em> (you
+   can't open two sessions to one VISA resource, so the server multiplexes it).</li>
+</ol>
+<p><strong>Critical: serialize per <em>shared connection</em>, not per leaf object.</strong> In
+   lab_wizard the hardware transport lives at the <strong>root</strong> instrument and is
+   shared down the subtree (Prologix root owns the serial port; DBay root owns
+   the HTTP client; all channels/modules under a root share it). So two channels
+   of one VISA instrument share ONE connection. Keying a lock per channel/leaf
+   would let them issue concurrent I/O on the same session → interleaved bytes,
+   misrouted responses, corruption. Key the serialization on the <strong>root path
+   segment</strong> (<code>inst://&lt;root_key&gt;</code>), i.e. the shared transport identity.</p>
+<p>The lock/serialization must wrap the <strong>entire method call</strong>, not each wire
+   write — a single operation can be a stateful multi-step SCPI sequence
+   (<code>INST:NSEL 1; VOLT 0.5</code>) that must be atomic w.r.t. other clients.</p>
+<p>Two valid implementations:
+   - <strong>(A) <code>ThreadPoolExecutor</code> + per-root <code>threading.Lock</code>.</strong> Simple. Caveats:
+     operations on one bus may hop pool threads (serialized, but not pinned), and
+     a plain <code>Lock</code> is <strong>not FIFO</strong> — a later command can overtake an earlier
+     waiter.
+   - <strong>(B) one dedicated worker thread + FIFO queue per root/connection</strong>
+     (recommended for instrument I/O). Gives same-thread affinity (safer for
+     finicky VISA backends) and arrival-order fairness for free; different buses'
+     workers still run in parallel. Map path → bus worker by root segment.</p>
+<p>Why the thread pool <em>helps</em> the multi-client case rather than hurting it:
+   without it, one client's long sweep on bus X freezes every client including
+   those targeting bus Y; with per-connection serialization + parallel buses, X's
+   clients serialize (unavoidable — one connection) while Y stays responsive.</p>
+<p>Wire whichever design into <code>WireServer._handle_one</code> / <code>call</code>. Re-entrancy is
+   not a concern: the lock is taken once per RPC in <code>call</code>; in-process
+   method→method calls don't pass back through <code>call</code>.
+2. <strong>Graceful shutdown ordering.</strong> <code>server.py</code> currently stops the loop and closes
+   the socket but does <strong>not</strong> close/disconnect instruments. Add ordered teardown
+   (children before parents; transports released last). Some instruments have
+   <code>disconnect()</code>; many rely on RAII (<code>__del__</code>/<code>atexit</code>).
+3. <strong>Client reconnect with backoff.</strong> <code>Session</code> is a one-shot connect that raises
+   <code>TimeoutError</code> on no reply. Add reconnect + exponential backoff; preserve
+   <code>inst_path</code> references and proxy cache across reconnects.
+4. <strong><code>reload-permissions</code> hot-swap.</strong> Re-read <code>server.yaml</code>'s <code>permissions:</code> and
+   replace the gate's <code>PermissionsConfig</code> without dropping connections or losing
+   <code>StateTracker</code> state. Expose as an RPC and/or CLI subcommand.
+5. <strong>Docs:</strong> one-page admin guide for <code>server.yaml</code>; one-page user guide for
+   <code>--remote</code>. (These two design docs partly cover it; user-facing how-tos still
+   needed.)</p>
+<h3 id="b-original-verification-items-still-open">B. Original verification items still open<a class="headerlink" href="#b-original-verification-items-still-open" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Bulk-data binary path.</strong> <code>wire.py</code> returns JSON only. The plan calls for big
+   array returns (e.g. a future <code>TimeTagger.get_counts()</code>) to ride pyleco's
+   <code>additional_payload</code> binary frames instead of base64-in-JSON. <code>Message</code>
+   supports it (<code>additional_payload=</code>); <code>RPCServer.register_binary_rpc_method</code>
+   exists. Wire a binary return path for large payloads.</li>
+<li><strong>API parity test.</strong> No automated test runs a real measurement (<code>iv_curve</code>)
+   both locally and via <code>--remote</code> and compares output. Would need a full
+   stand-in instrument tree wired through a project YAML.</li>
+<li><strong>Tree/attribute parity check.</strong> Original plan wanted the client to cross-check
+   the server's exposed set at session start and fail loudly on mismatch. In the
+   asymmetric model the natural form is: client verifies the <code>attribute_name</code>s it
+   needs exist (via <code>list_attributes</code>) before running. Not implemented.</li>
+<li><strong>Concurrency test</strong> (depends on #1): a slow call on bus X must not block a
+   call on bus Y; same-bus calls stay ordered.</li>
+</ol>
+<h3 id="c-follow-ups-from-the-detour-designed-not-built">C. Follow-ups from the detour (designed, not built)<a class="headerlink" href="#c-follow-ups-from-the-detour-designed-not-built" title="Permanent link">&para;</a></h3>
+<p>These are detailed in <code>docs/design/remote_control_and_permissions.md</code>; summary:
+10. <strong>Server hosts <code>config/instruments</code></strong> (deviation #1 above). Build-order #1 there.
+11. <strong>Rules reference <code>attribute_name</code></strong> (not raw <code>inst://</code> paths): add an
+    <code>attribute</code> field to <code>Condition</code>/<code>DenyClause</code>, resolve via the registry's
+    attribute index. Hashes are volatile (<code>validate_and_repair_hashes</code>,
+    <code>config_io.py:451</code> / <code>model_tree.py:226</code>); <code>attribute_name</code> is the stable
+    handle.
+12. <strong>Default attribute-name generation</strong> — hybrid <code>{type}-{petname}</code> (e.g. via
+    <code>coolname</code>) in <code>wizard/backend/attribute_name_autogen.py</code>.
+13. <strong>Manage Permissions wizard page</strong> + backend endpoints (list local
+    instruments with their <code>collect_state_methods</code> state keys + method lists;
+    read/write the <code>permissions:</code> block).
+14. <strong>Remote-server consuming flow</strong>: <code>config/remote/servers.yaml</code>, live
+    discovery during measurement creation, generated <code>RemoteExp.connect(...)</code>
+    setup. Independent track.</p>
+<h3 id="d-known-open-design-questions-not-blocking-decide-when-relevant">D. Known open design questions (not blocking, decide when relevant)<a class="headerlink" href="#d-known-open-design-questions-not-blocking-decide-when-relevant" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Unify the per-ABC proxies into one dynamic <code>RemoteInstrument</code>?</strong> Discussed and
+  shown feasible (server reports the list of behavior ABCs; client builds a class
+  with those bases on demand). Deferred — user chose to keep per-ABC proxies for
+  now. Revisit before adding the 3<sup>rd</sup>/4<sup>th</sup> behavior ABC.</li>
+<li><strong><code>RemoteCapable</code> opt-in marker</strong> on instruments (capability gate + metadata
+  home). Analyzed; not adopted. The mechanism does not require it.</li>
+<li><strong>Attribute access vs methods on proxies.</strong> <code>proxy.some_attr</code> returns a callable
+  forwarder (via <code>__getattr__</code>), not a value. Users must call getters. If this
+  bites, have <code>describe_attribute</code> distinguish methods from data attributes.</li>
+</ul>
+<hr />
+<h2 id="suggested-next-step">Suggested next step<a class="headerlink" href="#suggested-next-step" title="Permanent link">&para;</a></h2>
+<p>If continuing the <strong>hosting/server track</strong>: do C-10 (host <code>config/instruments</code>)
+first — it underpins the permissions UI and the "list all local instruments"
+behavior the user asked for — then C-11 (attribute-name rules) and C-12
+(petname defaults), then the UI (C-13).</p>
+<p>If continuing the <strong>runtime-robustness track</strong>: do A-1 (concurrency) and A-2
+(shutdown) — these matter as soon as the server drives real, slow hardware with
+more than one client.</p>
+<p>The two tracks are independent. Pick based on whether the immediate goal is
+"usable from the wizard" (hosting track) or "robust under real load"
+(robustness track).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../remote_control_and_permissions/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Design: Remote Instrument Control &amp;amp; Permissions in the Wizard">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Design: Remote Instrument Control &amp; Permissions in the Wizard
+              </div>
+            </div>
+          </a>
+        
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2026 The authors
+
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["announce.dismiss","content.code.annotate","content.code.copy","content.code.select","content.footnote.tooltips","content.tabs.link","content.tooltips","navigation.footer","navigation.indexes","navigation.instant","navigation.instant.prefetch","navigation.path","navigation.sections","navigation.top","navigation.tracking","search.highlight"],"search":"../../assets/javascripts/workers/search.e2d2d235.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.6e5f0216.min.js"></script>
+      
+    
+  </body>
+</html>

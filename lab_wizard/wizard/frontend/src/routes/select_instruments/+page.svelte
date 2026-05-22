@@ -20,6 +20,13 @@
 		key: string;
 		fields: Record<string, any>;
 	};
+	type RemoteMatch = {
+		server_name: string;
+		url: string;
+		attribute: string;
+		behavior_abc: string | null;
+		type_hint: string | null;
+	};
 	type ResourceReq = {
 		variable_name: string;
 		base_type: string;
@@ -27,6 +34,7 @@
 		is_list: boolean;
 		matching_instruments: MatchingReq[];
 		matching_resources: ConfiguredResource[];
+		matching_remote?: RemoteMatch[];
 	};
 	type InstrumentMeta = {
 		type: string;
@@ -478,6 +486,31 @@
 											</Select.Content>
 										</Select.Portal>
 									</Select.Root>
+								</div>
+							{/if}
+
+							{#if r.matching_remote && r.matching_remote.length > 0}
+								<div class="mt-3 rounded-md border border-indigo-200 bg-indigo-50/60 p-2 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+									<div class="text-xs font-medium text-indigo-800 dark:text-indigo-300">
+										Available on remote servers
+									</div>
+									<ul class="mt-1 space-y-0.5 text-xs text-gray-700 dark:text-gray-300">
+										{#each r.matching_remote as rm}
+											<li>
+												<span class="font-mono">{rm.attribute}</span>
+												<span class="text-gray-500">on {rm.server_name}</span>
+												<span class="text-gray-400">({rm.url})</span>
+											</li>
+										{/each}
+									</ul>
+									<div class="mt-1 text-[11px] text-gray-500">
+										To use a remote attribute, generate this measurement in
+										<code>from_attribute</code> style and run the project with
+										<code>--remote &lt;url&gt;</code>.
+										<a class="text-indigo-600 hover:underline" href="/manage_remote_servers"
+											>Manage servers →</a
+										>
+									</div>
 								</div>
 							{/if}
 						</section>

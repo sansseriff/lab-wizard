@@ -1,0 +1,37 @@
+# lab_wizard server configuration.
+#
+# Only `server.bind` is required. By default the server hosts the whole
+# `config/instruments` tree (this machine's instrument daemon): it indexes every
+# configured instrument at boot and opens hardware lazily, on first request.
+#
+#   - `config_dir` (optional): directory containing an `instruments/` tree,
+#     resolved relative to THIS file. Defaults to the parent dir (lab_wizard/config).
+#   - `exp_yaml` (optional): override — host a single project's Exp instead,
+#     eagerly instantiating it. Resolved relative to THIS file.
+#
+# The optional `permissions:` block enables the permission state machine:
+# instruments declare which methods influence safety state (via a
+# `_state_methods_` class attribute), the server records that state after each
+# call, and `rules` below block calls whose `when` condition is satisfied.
+# This is a blocklist model — calls are allowed unless a rule denies them.
+
+server:
+  bind: tcp://0.0.0.0:12300
+
+permissions:
+  # Seed initial state values (path -> {state_key: value}). Use this for
+  # safety-critical state whose default should be assumed before any call.
+  state_defaults:
+    inst://2da0863e/a0da5bfa/channel/0:
+      voltage: 0
+  rules:
+  - id: cryo_amp_safety
+    message: Cryo-amp bias is on, blocking pulses from generator
+    when:
+      path: inst://2da0863e/a0da5bfa/channel/0
+      key: voltage
+      greater_than: 0
+    deny:
+    - path: inst://b3c9ab43/5674e561
+      methods:
+      - set_position
