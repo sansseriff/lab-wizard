@@ -16,13 +16,19 @@ from lab_wizard.lib.utilities.config_io import (
     instrument_hash,
 )
 from lab_wizard.lib.utilities.flat_resource_io import load_resources
-from lab_wizard.wizard.backend.get_measurements import get_measurements, reqs_from_measurement
+from lab_wizard.wizard.backend.get_measurements import (
+    get_measurements,
+    reqs_from_measurement,
+)
 from lab_wizard.wizard.backend.models import Env, FilledReq
+from lab_wizard.wizard.backend.python_formatting import format_python_code
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
     SelectedNodeRef,
     _NodeRef,
-    _build_subset_instruments_from_leaves,
+    _build_subset_instruments_from_selected_nodes,
+    _compose_pedagogical_embedded,
+    _compose_pedagogical_yaml_expanded,
     _create_unique_project_dir,
     _node_lineage_leaf_to_root,
     _resolve_selection_node,
@@ -53,7 +59,7 @@ class GenerateProjectRequest(BaseModel):
     measurement_name: str
     selected_resources: list[SelectedResource] = Field(default_factory=list)
     project_prefix: str | None = None
-    generation_style: str = "explicit"  # "explicit" | "from_attribute"
+    generation_style: str = "production"
 
 
 def _format_measurement_slug(measurement_name: str) -> str:
@@ -63,7 +69,9 @@ def _format_measurement_slug(measurement_name: str) -> str:
 def _measurement_prefix(measurement_name: str) -> str:
     parts = [p for p in measurement_name.split("_") if p]
     acronyms = {"iv": "IV", "pcr": "PCR"}
-    return "".join(acronyms.get(p.lower(), p.capitalize()) for p in parts) or "Measurement"
+    return (
+        "".join(acronyms.get(p.lower(), p.capitalize()) for p in parts) or "Measurement"
+    )
 
 
 def _base_type_info(base_type: Any) -> tuple[str, str]:
@@ -79,7 +87,9 @@ def _base_type_info(base_type: Any) -> tuple[str, str]:
     raise ValueError(f"Could not resolve base type import for {base_type!r}")
 
 
-def _requirements_for_measurement(config_dir: Path, measurement_name: str) -> list[FilledReq]:
+def _requirements_for_measurement(
+    config_dir: Path, measurement_name: str
+) -> list[FilledReq]:
     lib_base = config_dir.resolve().parent / "lib"
     env = Env(base_dir=lib_base)
     all_meas = get_measurements(env)
@@ -136,7 +146,9 @@ def _existing_import_symbols(template_text: str) -> set[str]:
     return out
 
 
-def _split_requirements(reqs: list[FilledReq]) -> tuple[list[FilledReq], list[FilledReq], list[FilledReq]]:
+def _split_requirements(
+    reqs: list[FilledReq],
+) -> tuple[list[FilledReq], list[FilledReq], list[FilledReq]]:
     instruments: list[FilledReq] = []
     savers: list[FilledReq] = []
     plotters: list[FilledReq] = []
@@ -211,9 +223,7 @@ def _flat_resource_codegen(
             seen_imports.add((module, runtime_cls))
         var = var_alloc(sel.key)
         var_names[sel.key] = var
-        inst_lines.append(
-            f"{var} = {runtime_cls}.from_config(exp, key={sel.key!r})"
-        )
+        inst_lines.append(f"{var} = {runtime_cls}.from_config(resources, key={sel.key!r})")
 
     return import_pairs, inst_lines, var_names
 
@@ -244,105 +254,163 @@ def _compose_setup(
     saver_selections: list[SelectedResource],
     plotter_selections: list[SelectedResource],
     template_text: str,
+    generation_style: str = "production",
 ) -> str:
     if not instrument_reqs and not saver_reqs and not plotter_reqs:
         raise ValueError(f"No requirements found for measurement '{measurement_name}'")
 
-    missing = [r.variable_name for r in instrument_reqs if r.variable_name not in inst_selected_map]
+    missing = [
+        r.variable_name
+        for r in instrument_reqs
+        if r.variable_name not in inst_selected_map
+    ]
     if missing:
         raise ValueError(f"Missing required selections: {missing}")
 
-    created_inst: dict[tuple[tuple[str, str], ...], str] = {}
     instrument_lines: list[str] = []
     instrument_import_pairs: set[tuple[str, str]] = set()
-    used_names: dict[str, int] = {}
-
-    def _alloc(base: str) -> str:
-        count = used_names.get(base, 0) + 1
-        used_names[base] = count
-        return base if count == 1 else f"{base}_{count}"
-
-    for leaf in inst_selected_map.values():
-        chain = list(reversed(_node_lineage_leaf_to_root(leaf)))  # root -> leaf
-        lineage_id: list[tuple[str, str]] = []
-        for idx, node in enumerate(chain):
-            lineage_id.append((node.type, node.key))
-            key_t = tuple(lineage_id)
-            if key_t in created_inst:
-                continue
-
-            module, params_cls = _type_info(node.type)
-            inst_cls = params_cls[:-6] if params_cls.endswith("Params") else params_cls
-            instrument_import_pairs.add((module, inst_cls))
-
-            token = _short_type_token(node.type)
-            var_inst = _alloc(f"{token}_i")
-            created_inst[key_t] = var_inst
-
-            node_type = node.type
-            node_key_fields = (
-                node.params.key_fields()
-                if hasattr(node.params, "key_fields")
-                else node.key
-            )
-            node_hash = (
-                instrument_hash(node_type, node_key_fields)
-                if node_key_fields else node.key
-            )
-
-            if idx == 0:
-                instrument_lines.extend(
-                    [f"{var_inst} = {inst_cls}.from_config(exp, key={node_hash!r})", ""]
-                )
-            else:
-                parent_id = tuple(lineage_id[:-1])
-                parent_inst = created_inst[parent_id]
-                instrument_lines.extend(
-                    [f"{var_inst} = {inst_cls}.from_config({parent_inst}, key={node_hash!r})", ""]
-                )
-
-    def _final_expr(var_name: str, leaf: _NodeRef) -> str:
-        chain = tuple((n.type, n.key) for n in reversed(_node_lineage_leaf_to_root(leaf)))
-        base_inst = created_inst[chain]
-        ch_idx = inst_selected_channels.get(var_name)
-        ch_list = getattr(leaf.params, "channels", None)
-        channels_list = cast(list[Any], ch_list) if isinstance(ch_list, list) else None
-        if channels_list is not None and len(channels_list) > 1:
-            if ch_idx is None:
-                raise ValueError(
-                    f"Selection for {var_name} uses multi-channel instrument "
-                    f"{leaf.type}:{leaf.key}; channel_index is required"
-                )
-            if ch_idx < 0 or ch_idx >= len(channels_list):
-                raise ValueError(
-                    f"Invalid channel_index {ch_idx} for {leaf.type}:{leaf.key}; "
-                    f"valid range is 0..{len(channels_list) - 1}"
-                )
-            return f"{base_inst}.channels[{ch_idx}]"
-        if ch_idx is not None:
-            raise ValueError(
-                f"channel_index provided for {leaf.type}:{leaf.key}, but it is not multi-channel"
-            )
-        return base_inst
 
     # Saver / plotter codegen
-    saver_imports, saver_inst_lines, saver_vars = _flat_resource_codegen(saver_selections, "saver")
-    plotter_imports, plotter_inst_lines, plotter_vars = _flat_resource_codegen(plotter_selections, "plotter")
+    saver_imports, saver_inst_lines, saver_vars = _flat_resource_codegen(
+        saver_selections, "saver"
+    )
+    plotter_imports, plotter_inst_lines, plotter_vars = _flat_resource_codegen(
+        plotter_selections, "plotter"
+    )
 
     # Resource fields + return fields, in template field order
     resource_field_lines: list[str] = []
     return_field_lines: list[str] = []
     instrument_assignments: list[str] = []
 
-    for req in instrument_reqs:
-        leaf = inst_selected_map[req.variable_name]
-        local_name = f"{req.variable_name}_1"
-        instrument_assignments.append(f"{local_name} = {_final_expr(req.variable_name, leaf)}")
-        resource_field_lines.append(_format_resource_field_line(req))
-        return_field_lines.append(_format_return_field_line(req, [local_name]))
+    if generation_style in ("pedagogical_yaml_expanded", "pedagogical_embedded"):
+        leaves = [inst_selected_map[req.variable_name] for req in instrument_reqs]
+        selections = [
+            SelectedResource(
+                variable_name=req.variable_name,
+                type=inst_selected_map[req.variable_name].type,
+                key=inst_selected_map[req.variable_name].key,
+                channel_index=inst_selected_channels.get(req.variable_name),
+            )
+            for req in instrument_reqs
+        ]
+        if generation_style == "pedagogical_yaml_expanded":
+            instrument_lines, imports, final_exprs = _compose_pedagogical_yaml_expanded(
+                selections=selections,
+                var_names=[req.variable_name for req in instrument_reqs],
+                leaves=leaves,
+            )
+        else:
+            instrument_lines, imports, final_exprs = _compose_pedagogical_embedded(
+                selections=selections,
+                var_names=[req.variable_name for req in instrument_reqs],
+                leaves=leaves,
+            )
+        instrument_import_pairs.update(imports)
+        for req, expr in zip(instrument_reqs, final_exprs):
+            local_name = f"{req.variable_name}_1"
+            instrument_assignments.append(f"{local_name} = {expr}")
+            resource_field_lines.append(_format_resource_field_line(req))
+            return_field_lines.append(_format_return_field_line(req, [local_name]))
+    else:
+        created_inst: dict[tuple[tuple[str, str], ...], str] = {}
+        used_names: dict[str, int] = {}
+
+        def _alloc(base: str) -> str:
+            count = used_names.get(base, 0) + 1
+            used_names[base] = count
+            return base if count == 1 else f"{base}_{count}"
+
+        for leaf in inst_selected_map.values():
+            chain = list(reversed(_node_lineage_leaf_to_root(leaf)))  # root -> leaf
+            lineage_id: list[tuple[str, str]] = []
+            for idx, node in enumerate(chain):
+                lineage_id.append((node.type, node.key))
+                key_t = tuple(lineage_id)
+                if key_t in created_inst:
+                    continue
+
+                module, params_cls = _type_info(node.type)
+                inst_cls = (
+                    params_cls[:-6] if params_cls.endswith("Params") else params_cls
+                )
+                instrument_import_pairs.add((module, inst_cls))
+
+                token = _short_type_token(node.type)
+                var_inst = _alloc(f"{token}_i")
+                created_inst[key_t] = var_inst
+
+                node_key_fields = (
+                    node.params.key_fields()
+                    if hasattr(node.params, "key_fields")
+                    else node.key
+                )
+                node_hash = (
+                    instrument_hash(node.type, node_key_fields)
+                    if node_key_fields
+                    else node.key
+                )
+
+                if idx == 0:
+                    instrument_lines.extend(
+                        [
+                            f"{var_inst} = {inst_cls}.from_config(resources, key={node_hash!r})",
+                            "",
+                        ]
+                    )
+                else:
+                    parent_id = tuple(lineage_id[:-1])
+                    parent_inst = created_inst[parent_id]
+                    instrument_lines.extend(
+                        [
+                            f"{var_inst} = {inst_cls}.from_config({parent_inst}, key={node_hash!r})",
+                            "",
+                        ]
+                    )
+
+        def _final_expr(var_name: str, leaf: _NodeRef) -> str:
+            chain = tuple(
+                (n.type, n.key) for n in reversed(_node_lineage_leaf_to_root(leaf))
+            )
+            base_inst = created_inst[chain]
+            ch_idx = inst_selected_channels.get(var_name)
+            ch_list = getattr(leaf.params, "channels", None)
+            channels_list = (
+                cast(list[Any], ch_list) if isinstance(ch_list, list) else None
+            )
+            if channels_list is not None and len(channels_list) > 1:
+                if ch_idx is None:
+                    raise ValueError(
+                        f"Selection for {var_name} uses multi-channel instrument "
+                        f"{leaf.type}:{leaf.key}; channel_index is required"
+                    )
+                if ch_idx < 0 or ch_idx >= len(channels_list):
+                    raise ValueError(
+                        f"Invalid channel_index {ch_idx} for {leaf.type}:{leaf.key}; "
+                        f"valid range is 0..{len(channels_list) - 1}"
+                    )
+                return f"{base_inst}.channels[{ch_idx}]"
+            if ch_idx is not None:
+                raise ValueError(
+                    f"channel_index provided for {leaf.type}:{leaf.key}, but it is not multi-channel"
+                )
+            return base_inst
+
+        for req in instrument_reqs:
+            leaf = inst_selected_map[req.variable_name]
+            local_name = f"{req.variable_name}_1"
+            instrument_assignments.append(
+                f"{local_name} = {_final_expr(req.variable_name, leaf)}"
+            )
+            resource_field_lines.append(_format_resource_field_line(req))
+            return_field_lines.append(_format_return_field_line(req, [local_name]))
 
     for req in saver_reqs:
-        vars_ = [saver_vars[s.key] for s in saver_selections if s.variable_name == req.variable_name]
+        vars_ = [
+            saver_vars[s.key]
+            for s in saver_selections
+            if s.variable_name == req.variable_name
+        ]
         if req.is_list and not vars_:
             return_field_lines.append(_format_return_field_line(req, []))
             resource_field_lines.append(_format_resource_field_line(req))
@@ -353,7 +421,11 @@ def _compose_setup(
         return_field_lines.append(_format_return_field_line(req, vars_))
 
     for req in plotter_reqs:
-        vars_ = [plotter_vars[s.key] for s in plotter_selections if s.variable_name == req.variable_name]
+        vars_ = [
+            plotter_vars[s.key]
+            for s in plotter_selections
+            if s.variable_name == req.variable_name
+        ]
         if req.is_list and not vars_:
             return_field_lines.append(_format_return_field_line(req, []))
             resource_field_lines.append(_format_resource_field_line(req))
@@ -401,9 +473,13 @@ def _compose_setup(
 
     rendered = template_text
     rendered = _replace_wizard_block(rendered, "imports", imports_block)
-    rendered = _replace_wizard_block(rendered, "resource_fields", "\n".join(resource_field_lines))
+    rendered = _replace_wizard_block(
+        rendered, "resource_fields", "\n".join(resource_field_lines)
+    )
     rendered = _replace_wizard_block(rendered, "instantiation", instantiation_block)
-    rendered = _replace_wizard_block(rendered, "return_fields", "\n".join(return_field_lines))
+    rendered = _replace_wizard_block(
+        rendered, "return_fields", "\n".join(return_field_lines)
+    )
     return rendered
 
 
@@ -418,17 +494,25 @@ def _compose_setup_from_attribute(
     plotter_selections: list[SelectedResource],
     template_text: str,
 ) -> str:
-    """Generate setup using ``exp.from_attribute``.  Saver/plotter handling is the
+    """Generate setup using ``resources.from_attribute``.  Saver/plotter handling is the
     same as in ``_compose_setup`` (they're keyed by user-given name, not by
     attribute_name)."""
     if not instrument_reqs and not saver_reqs and not plotter_reqs:
         raise ValueError(f"No requirements found for measurement '{measurement_name}'")
-    missing = [r.variable_name for r in instrument_reqs if r.variable_name not in inst_selected_map]
+    missing = [
+        r.variable_name
+        for r in instrument_reqs
+        if r.variable_name not in inst_selected_map
+    ]
     if missing:
         raise ValueError(f"Missing required selections: {missing}")
 
-    saver_imports, saver_inst_lines, saver_vars = _flat_resource_codegen(saver_selections, "saver")
-    plotter_imports, plotter_inst_lines, plotter_vars = _flat_resource_codegen(plotter_selections, "plotter")
+    saver_imports, saver_inst_lines, saver_vars = _flat_resource_codegen(
+        saver_selections, "saver"
+    )
+    plotter_imports, plotter_inst_lines, plotter_vars = _flat_resource_codegen(
+        plotter_selections, "plotter"
+    )
 
     resource_field_lines: list[str] = []
     return_field_lines: list[str] = []
@@ -454,17 +538,27 @@ def _compose_setup_from_attribute(
             )
 
         local_name = f"{req.variable_name}_1"
-        instrument_assignments.append(f"{local_name} = exp.from_attribute({attr_name!r})")
+        instrument_assignments.append(
+            f"{local_name} = resources.from_attribute({attr_name!r})"
+        )
         resource_field_lines.append(_format_resource_field_line(req))
         return_field_lines.append(_format_return_field_line(req, [local_name]))
 
     for req in saver_reqs:
-        vars_ = [saver_vars[s.key] for s in saver_selections if s.variable_name == req.variable_name]
+        vars_ = [
+            saver_vars[s.key]
+            for s in saver_selections
+            if s.variable_name == req.variable_name
+        ]
         resource_field_lines.append(_format_resource_field_line(req))
         return_field_lines.append(_format_return_field_line(req, vars_))
 
     for req in plotter_reqs:
-        vars_ = [plotter_vars[s.key] for s in plotter_selections if s.variable_name == req.variable_name]
+        vars_ = [
+            plotter_vars[s.key]
+            for s in plotter_selections
+            if s.variable_name == req.variable_name
+        ]
         resource_field_lines.append(_format_resource_field_line(req))
         return_field_lines.append(_format_return_field_line(req, vars_))
 
@@ -488,30 +582,34 @@ def _compose_setup_from_attribute(
 
     rendered = template_text
     rendered = _replace_wizard_block(rendered, "imports", imports_block)
-    rendered = _replace_wizard_block(rendered, "resource_fields", "\n".join(resource_field_lines))
+    rendered = _replace_wizard_block(
+        rendered, "resource_fields", "\n".join(resource_field_lines)
+    )
     rendered = _replace_wizard_block(rendered, "instantiation", instantiation_block)
-    rendered = _replace_wizard_block(rendered, "return_fields", "\n".join(return_field_lines))
+    rendered = _replace_wizard_block(
+        rendered, "return_fields", "\n".join(return_field_lines)
+    )
     return rendered
 
 
-def _exp_defaults(measurement_name: str) -> dict[str, Any]:
-    if measurement_name == "iv_curve":
-        return {
-            "type": "iv_curve",
-            "start_voltage": 0.0,
-            "stop_voltage": 1.4,
-            "step_voltage": 0.005,
-            "num_points": 100,
-        }
-    if measurement_name == "pcr_curve":
-        return {
-            "type": "pcr_curve",
-            "start_voltage": 0.0,
-            "stop_voltage": 1.4,
-            "step_voltage": 0.005,
-            "photon_rate": 100000.0,
-        }
-    return {"type": measurement_name}
+def _measurement_param_defaults(measurement_name: str) -> dict[str, Any]:
+    """Default ``measurement.params`` for a measurement, derived from its typed
+    params model so the YAML and the schema can never drift.
+
+    Each entry constructs the model with no overrides and dumps it to plain
+    JSON-compatible values. ``model_validate`` on the same model round-trips it.
+    """
+    from lab_wizard.lib.measurements.iv_curve.iv_curve_params import IVCurveParams
+    from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
+
+    params_models: dict[str, type[BaseModel]] = {
+        "iv_curve": IVCurveParams,
+        "pcr_curve": PCRCurveParams,
+    }
+    model = params_models.get(measurement_name)
+    if model is None:
+        return {}
+    return model().model_dump(mode="json")
 
 
 def _default_project_yaml(
@@ -521,24 +619,40 @@ def _default_project_yaml(
     plotters: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "exp": _exp_defaults(measurement_name),
-        "device": {
-            "type": "device",
-            "name": "generated_device",
-            "model": "unknown",
-            "description": "Generated by wizard",
+        "project": {
+            "schema_version": 1,
+            "measurement_type": measurement_name,
+            "created_by": "lab_wizard",
         },
-        "savers": {
-            key: model_to_commented_map(value, exclude_none=True)
-            for key, value in savers.items()
+        "run": {
+            "device": {
+                "type": "device",
+                "name": "generated_device",
+                "model": "unknown",
+                "description": "Generated by wizard",
+            },
+            "metadata": {
+                "operator": None,
+                "description": None,
+                "tags": [],
+            },
         },
-        "plotters": {
-            key: model_to_commented_map(value, exclude_none=True)
-            for key, value in plotters.items()
+        "measurement": {
+            "params": _measurement_param_defaults(measurement_name),
         },
-        "instruments": {
-            key: model_to_commented_map(value, exclude_none=True)
-            for key, value in instruments.items()
+        "resources": {
+            "savers": {
+                key: model_to_commented_map(value, exclude_none=True)
+                for key, value in savers.items()
+            },
+            "plotters": {
+                key: model_to_commented_map(value, exclude_none=True)
+                for key, value in plotters.items()
+            },
+            "instruments": {
+                key: model_to_commented_map(value, exclude_none=True)
+                for key, value in instruments.items()
+            },
         },
     }
 
@@ -550,8 +664,20 @@ def generate_measurement_project(
     req: GenerateProjectRequest,
 ) -> dict[str, Any]:
     logger.info("Generating project for measurement '%s'", req.measurement_name)
+    if req.generation_style == "explicit":
+        req.generation_style = "production"
+    allowed_styles = {
+        "production",
+        "from_attribute",
+        "pedagogical_yaml_expanded",
+        "pedagogical_embedded",
+    }
+    if req.generation_style not in allowed_styles:
+        raise ValueError(f"Unknown generation_style: {req.generation_style}")
 
-    instrument_sels, saver_sels, plotter_sels = _split_selections(req.selected_resources)
+    instrument_sels, saver_sels, plotter_sels = _split_selections(
+        req.selected_resources
+    )
     instruments = load_instruments(config_dir)
     all_nodes = _walk_tree(instruments)
 
@@ -565,7 +691,12 @@ def generate_measurement_project(
     instrument_reqs, saver_reqs, plotter_reqs = _split_requirements(requirements)
     template_text = _setup_template_text(config_dir, req.measurement_name)
 
-    instruments_subset = _build_subset_instruments_from_leaves(list(inst_selected_map.values()))
+    instruments_subset = _build_subset_instruments_from_selected_nodes(
+        [
+            (leaf, inst_selected_channels.get(variable_name))
+            for variable_name, leaf in inst_selected_map.items()
+        ]
+    )
 
     saver_registry = load_resources(config_dir, "saver")
     plotter_registry = load_resources(config_dir, "plotter")
@@ -577,7 +708,10 @@ def generate_measurement_project(
     logger.info("Created project directory %s", project_dir)
 
     yaml_payload = _default_project_yaml(
-        req.measurement_name, instruments_subset, savers_subset, plotters_subset,
+        req.measurement_name,
+        instruments_subset,
+        savers_subset,
+        plotters_subset,
     )
     yaml_path = project_dir / f"{project_dir.name}.yaml"
     y = YAML(typ="rt")
@@ -609,9 +743,11 @@ def generate_measurement_project(
             saver_sels,
             plotter_sels,
             template_text,
+            generation_style=req.generation_style,
         )
 
     setup_path = project_dir / f"{req.measurement_name}_setup.py"
+    setup_code = format_python_code(setup_code)
     setup_path.write_text(setup_code, encoding="utf-8")
     logger.info("Generated project artifacts yaml=%s setup=%s", yaml_path, setup_path)
 

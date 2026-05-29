@@ -1,24 +1,26 @@
-"""RemoteExp — client-side mirror of ``Exp`` for remote projects.
+"""RemoteResources — client-side mirror of the local ``ResourceConfig``.
 
-A measurement setup file that wants to use a remote tree replaces
+It exposes the same ``from_attribute`` interface as ``project.resources`` so a
+measurement setup file can resolve resources from a remote server instead of
+the local config without any other changes:
 
-    exp = load_exp_from_yaml(project_yaml)
-    bias_vsource = exp.from_attribute("bias_vsource")     # VSource
+    resources = project.resources                          # local ResourceConfig
+    bias_vsource = resources.from_attribute("bias_vsource")     # VSource
 
 with
 
-    exp = RemoteExp.connect("tcp://lab-server:12300")
-    bias_vsource = exp.from_attribute("bias_vsource")     # RemoteVSource (a VSource)
+    resources = RemoteResources.connect("tcp://lab-server:12300")
+    bias_vsource = resources.from_attribute("bias_vsource")     # RemoteVSource (a VSource)
 
 Nothing else changes. The measurement class consumes objects via the behavior
 ABCs (``VSource``, ``VSense``) and proxies satisfy those.
 
-Phase 2 surface:
-    RemoteExp.connect(url) -> RemoteExp
-    RemoteExp.from_attribute(name) -> proxy
-    RemoteExp.list_attributes() -> list[str]
-    RemoteExp.describe_attribute(name) -> dict
-    RemoteExp.close()
+Surface:
+    RemoteResources.connect(url) -> RemoteResources
+    RemoteResources.from_attribute(name) -> proxy
+    RemoteResources.list_attributes() -> list[str]
+    RemoteResources.describe_attribute(name) -> dict
+    RemoteResources.close()
 
 There is no client-side YAML, no client-side instrument-config tree, and no
 ``from_config`` — the server owns config and addressing, the client only
@@ -37,7 +39,7 @@ from lab_wizard.lib.client.session import Session
 T = TypeVar("T")
 
 
-class RemoteExp:
+class RemoteResources:
     """Connection to a remote lab_wizard server."""
 
     def __init__(self, session: Session) -> None:
@@ -45,7 +47,7 @@ class RemoteExp:
         self._proxy_cache: dict[str, RemoteProxy] = {}
 
     @classmethod
-    def connect(cls, url: str, *, timeout_ms: int = 10_000) -> "RemoteExp":
+    def connect(cls, url: str, *, timeout_ms: int = 10_000) -> "RemoteResources":
         return cls(Session(url, timeout_ms=timeout_ms))
 
     # ------------------------- attribute API -------------------------
@@ -73,7 +75,7 @@ class RemoteExp:
 
         Example:
             from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928
-            bias = exp.from_attribute("bias", Sim928)
+            bias = resources.from_attribute("bias", Sim928)
             bias.set_voltage(0.5)   # ctrl-click jumps to Sim928.set_voltage
         """
         _ = as_type  # consumed only by the overload signatures
@@ -103,7 +105,7 @@ class RemoteExp:
     def close(self) -> None:
         self._session.close()
 
-    def __enter__(self) -> "RemoteExp":
+    def __enter__(self) -> "RemoteResources":
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:

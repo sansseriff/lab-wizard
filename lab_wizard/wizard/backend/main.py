@@ -48,6 +48,7 @@ from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     save_instruments_to_config,
     instrument_hash,
+    assign_missing_leaf_attribute_names,
 )
 from lab_wizard.lib.utilities.flat_resource_io import (
     add_resource as _flat_add_resource,
@@ -57,7 +58,9 @@ from lab_wizard.lib.utilities.flat_resource_io import (
     get_configured_resources_tree,
 )
 from lab_wizard.lib.utilities.params_discovery import (
-    get_instrument_metadata, get_saver_metadata, get_plotter_metadata,
+    get_instrument_metadata,
+    get_saver_metadata,
+    get_plotter_metadata,
 )
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
@@ -274,7 +277,9 @@ def get_resources(
                         matching_instruments=[],
                         matching_resources=[
                             ConfiguredResource(
-                                type=item["type"], key=item["key"], fields=item["fields"]
+                                type=item["type"],
+                                key=item["key"],
+                                fields=item["fields"],
                             )
                             for item in tree
                         ],
@@ -329,9 +334,7 @@ class _SavePermissionsRequest(_PermBM):
 
 
 @app.put("/api/permissions")
-def api_save_permissions(
-    req: _SavePermissionsRequest, env: Env = Depends(get_env)
-):
+def api_save_permissions(req: _SavePermissionsRequest, env: Env = Depends(get_env)):
     """Validate and persist the ``permissions:`` block to server.yaml."""
     config_dir = _config_dir(env)
     try:
@@ -528,7 +531,9 @@ def _walk_parent_chain(chain: list[dict], env: Env):
     root_key = chain[0]["key"]
     root_params = instruments.get(root_key)
     if root_params is None:
-        raise HTTPException(404, f"Top-level {chain[0]['type']} ({root_key}) not found in config")
+        raise HTTPException(
+            404, f"Top-level {chain[0]['type']} ({root_key}) not found in config"
+        )
 
     current_inst = root_params.create_inst()
     for step in chain[1:]:
@@ -560,14 +565,18 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
     except HTTPException:
         logger.exception(
             "Discovery action failed (HTTPException): %s/%s parent_chain=%s",
-            body.type, body.action, body.parent_chain,
+            body.type,
+            body.action,
+            body.parent_chain,
         )
         raise
     except Exception as e:
-        logger.exception("Discovery action failed: %s/%s — %s", body.type, body.action, e)
+        logger.exception(
+            "Discovery action failed: %s/%s — %s", body.type, body.action, e
+        )
         raise HTTPException(status_code=400, detail=str(e))
     finally:
-        if parent_inst is not None and hasattr(parent_inst, 'disconnect'):
+        if parent_inst is not None and hasattr(parent_inst, "disconnect"):
             parent_inst.disconnect()
 
 
@@ -594,7 +603,10 @@ def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
         None,
     )
     if parent is None:
-        raise HTTPException(status_code=404, detail=f"Parent {body.parent_type} ({body.parent_key}) not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Parent {body.parent_type} ({body.parent_key}) not found",
+        )
 
     added = []
     for child_spec in body.children:
@@ -611,8 +623,14 @@ def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
         parent.children[child_key] = child_params
         added.append({"type": child_type, **key_fields})
 
+    assign_missing_leaf_attribute_names(instruments)
     save_instruments_to_config(instruments, config_dir)
-    logger.info("apply-children: added %d children to %s (%s)", len(added), body.parent_type, body.parent_key)
+    logger.info(
+        "apply-children: added %d children to %s (%s)",
+        len(added),
+        body.parent_type,
+        body.parent_key,
+    )
     return {"status": "ok", "added": added, "tree": get_configured_tree(config_dir)}
 
 
@@ -755,7 +773,9 @@ def _resolve_webview_icon_path(icon_path: Path, temp_dir: str) -> str | None:
     try:
         from PIL import Image
     except ImportError:
-        logger.warning("Pillow unavailable; using PNG icon path on Windows: %s", icon_path)
+        logger.warning(
+            "Pillow unavailable; using PNG icon path on Windows: %s", icon_path
+        )
         return str(icon_path)
 
     ico_path = Path(temp_dir) / "icon.ico"
@@ -763,7 +783,15 @@ def _resolve_webview_icon_path(icon_path: Path, temp_dir: str) -> str | None:
         image.convert("RGBA").save(
             ico_path,
             format="ICO",
-            sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)],
+            sizes=[
+                (16, 16),
+                (24, 24),
+                (32, 32),
+                (48, 48),
+                (64, 64),
+                (128, 128),
+                (256, 256),
+            ],
         )
 
     return str(ico_path)

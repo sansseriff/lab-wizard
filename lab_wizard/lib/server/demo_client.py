@@ -1,6 +1,6 @@
 """Tiny smoke-test client for the Phase 1 wire.
 
-Phase 2 replaces this with the real client package (RemoteExp + typed proxies).
+Phase 2 replaces this with the real client package (RemoteResources + typed proxies).
 For now this is just enough to verify the wire moves real data.
 
 Examples:

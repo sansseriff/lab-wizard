@@ -9,7 +9,7 @@ from typing import Iterator
 
 import pytest
 
-from lab_wizard.lib.client.remote_exp import RemoteExp
+from lab_wizard.lib.client.remote_resources import RemoteResources
 from lab_wizard.lib.client.session import PermissionDeniedError, RemoteCallError
 from lab_wizard.lib.instruments.general.state_effects import Arg
 from lab_wizard.lib.instruments.general.vsource import StandInVSource
@@ -82,10 +82,10 @@ class _PermFixture:
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self._thread.start()
         time.sleep(0.3)
-        self.exp = RemoteExp.connect(self.bind, timeout_ms=3000)
+        self.resources = RemoteResources.connect(self.bind, timeout_ms=3000)
 
     def close(self) -> None:
-        self.exp.close()
+        self.resources.close()
         self.server.stop()
         self._thread.join(timeout=2)
 
@@ -100,14 +100,14 @@ def perm() -> Iterator[_PermFixture]:
 
 
 def test_pulse_allowed_when_bias_off(perm: _PermFixture) -> None:
-    fg = perm.exp.from_attribute("fg")
+    fg = perm.resources.from_attribute("fg")
     assert fg.pulse() == "pulsed"
     assert perm.funcgen.pulses == 1
 
 
 def test_pulse_denied_when_bias_on(perm: _PermFixture) -> None:
-    bias = perm.exp.from_attribute("bias", StandInVSource)
-    fg = perm.exp.from_attribute("fg")
+    bias = perm.resources.from_attribute("bias", StandInVSource)
+    fg = perm.resources.from_attribute("fg")
 
     # Energize the bias channel — the server records voltage state.
     bias.set_voltage(0.8)
@@ -124,8 +124,8 @@ def test_pulse_denied_when_bias_on(perm: _PermFixture) -> None:
 
 
 def test_permission_denied_is_remote_call_error(perm: _PermFixture) -> None:
-    bias = perm.exp.from_attribute("bias", StandInVSource)
-    fg = perm.exp.from_attribute("fg")
+    bias = perm.resources.from_attribute("bias", StandInVSource)
+    fg = perm.resources.from_attribute("fg")
     bias.set_voltage(0.8)
     # PermissionDeniedError subclasses RemoteCallError, so generic handlers work.
     with pytest.raises(RemoteCallError):
@@ -133,16 +133,16 @@ def test_permission_denied_is_remote_call_error(perm: _PermFixture) -> None:
 
 
 def test_unrelated_method_not_blocked(perm: _PermFixture) -> None:
-    bias = perm.exp.from_attribute("bias", StandInVSource)
-    fg = perm.exp.from_attribute("fg")
+    bias = perm.resources.from_attribute("bias", StandInVSource)
+    fg = perm.resources.from_attribute("fg")
     bias.set_voltage(0.8)
     # `configure` is not in the deny clause's methods, so it passes.
     assert fg.configure() == "configured"
 
 
 def test_reopens_after_bias_cleared(perm: _PermFixture) -> None:
-    bias = perm.exp.from_attribute("bias", StandInVSource)
-    fg = perm.exp.from_attribute("fg")
+    bias = perm.resources.from_attribute("bias", StandInVSource)
+    fg = perm.resources.from_attribute("fg")
 
     bias.set_voltage(0.8)
     with pytest.raises(PermissionDeniedError):

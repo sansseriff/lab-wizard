@@ -43,6 +43,7 @@ import hashlib
 import re
 import logging
 
+import coolname
 from pydantic import BaseModel
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
@@ -51,7 +52,12 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from lab_wizard.lib.utilities.params_discovery import load_params_class
 
 # KeyLike mixins — used for generic key derivation without hardcoding type strings
-from lab_wizard.lib.instruments.general.parent_child import USBLike, IPLike, SlotLike, GPIBAddressLike
+from lab_wizard.lib.instruments.general.parent_child import (
+    USBLike,
+    IPLike,
+    SlotLike,
+    GPIBAddressLike,
+)
 
 logger = logging.getLogger("lab_wizard.lib.utilities.config_io")
 
@@ -192,6 +198,7 @@ def instrument_hash(type_str: str, key_value: str) -> str:
 
 # ---------------------------- Loading ----------------------------
 
+
 def _resolve_child_file(base_dir: Path, ref: str) -> Path:
     # ref is relative to instruments dir
     return (base_dir / "instruments" / ref).resolve()
@@ -238,7 +245,9 @@ def _attach_children(
         type_str = cast(Optional[str], entry.get("type"))
         ref = cast(Optional[str], entry.get("ref"))
         if not (isinstance(type_str, str) and isinstance(ref, str)):
-            raise ValueError("child entry requires string fields: type, ref, and mapping key")
+            raise ValueError(
+                "child entry requires string fields: type, ref, and mapping key"
+            )
         child_path = _resolve_child_file(base_dir, ref)
         child_params, child_raw = _load_node(base_dir, child_path, visited_paths)
 
@@ -259,7 +268,9 @@ def _attach_children(
         # add to parent — use the hash key derived from child params, not the
         # raw YAML key, so the in-memory tree already has canonical keys.
         if not hasattr(parent_params, "children"):
-            raise ValueError(f"Parent type {type(parent_params).__name__} has no children field")
+            raise ValueError(
+                f"Parent type {type(parent_params).__name__} has no children field"
+            )
         child_type_str = str(getattr(child_params, "type", ""))
         child_key = _key_for_loaded_params(child_params, child_type_str)
         parent_params.children[child_key] = child_params  # type: ignore[attr-defined]
@@ -329,6 +340,7 @@ def load_instruments_with_paths(
 
 # ---------------------------- Merging ----------------------------
 
+
 def merge_parent_params(base_parent: Any, delta_parent: Any) -> Any:
     """Merge delta_parent into base_parent in-place, unioning children by key.
 
@@ -363,6 +375,7 @@ def merge_parent_params(base_parent: Any, delta_parent: Any) -> Any:
 
 # ---------------------------- Saving ----------------------------
 
+
 def _node_filename(type_str: str, key: Optional[str]) -> str:
     """Return the .yml filename for a node based on type and key.
 
@@ -374,7 +387,9 @@ def _node_filename(type_str: str, key: Optional[str]) -> str:
     return f"{type_str}.yml"
 
 
-def _dump_parent_to_dict(params: Any, child_refs: Dict[str, Dict[str, str]]) -> CommentedMap:
+def _dump_parent_to_dict(
+    params: Any, child_refs: Dict[str, Dict[str, str]]
+) -> CommentedMap:
     if not isinstance(params, BaseModel):
         raise TypeError(f"Expected BaseModel params, got {type(params).__name__}")
     cm = model_to_commented_map(
@@ -436,7 +451,9 @@ def _save_node_recursive(
     return target, cm
 
 
-def save_instruments_to_config(instruments: Dict[str, Any], config_dir: str | Path) -> None:
+def save_instruments_to_config(
+    instruments: Dict[str, Any], config_dir: str | Path
+) -> None:
     """Write the given instruments dict into config/instruments as multi-file YAML."""
     base_dir = Path(config_dir)
     inst_dir = (base_dir / "instruments").resolve()
@@ -477,7 +494,9 @@ def validate_and_repair_hashes(
             changed = True
         # Recurse into children
         if hasattr(params, "children") and params.children:
-            repaired_children, child_changed = validate_and_repair_hashes(params.children)
+            repaired_children, child_changed = validate_and_repair_hashes(
+                params.children
+            )
             if child_changed:
                 params.children = repaired_children  # type: ignore[attr-defined]
                 changed = True
@@ -486,6 +505,7 @@ def validate_and_repair_hashes(
 
 
 # ---------------------------- High-level workflows ----------------------------
+
 
 def merge_instruments(base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
     """Merge delta instruments dict into base dict (in place)."""
@@ -502,18 +522,22 @@ def merge_instruments(base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, 
     return base
 
 
-def load_merge_save_instruments(config_dir: str | Path, subset: Dict[str, Any]) -> Dict[str, Any]:
+def load_merge_save_instruments(
+    config_dir: str | Path, subset: Dict[str, Any]
+) -> Dict[str, Any]:
     """Load current instruments, merge the provided subset dict, and persist the result.
 
     Returns the merged instruments dict.
     """
     full = load_instruments(config_dir)
     merged = merge_instruments(full, subset)
+    assign_missing_leaf_attribute_names(merged)
     save_instruments_to_config(merged, config_dir)
     return merged
 
 
 # ---------------------------- Normalization ----------------------------
+
 
 def _iter_instrument_yaml_files(config_dir: Path) -> List[Path]:
     """Return a list of all YAML files under config/instruments.
@@ -546,6 +570,8 @@ def normalize_instruments(config_dir: str | Path) -> Dict[str, Any]:
 
     # Step 1: Load current tree (keys are recomputed as hashes from params).
     instruments = load_instruments(config_dir)
+
+    assign_missing_leaf_attribute_names(instruments)
 
     # Step 2: Compute which files the CURRENT tree will produce after saving.
     # We do this BEFORE writing so we can diff against what is currently on disk.
@@ -585,6 +611,99 @@ def _default_key_for_params(type_str: str, params: Any) -> str:
     Uses the KeyLike mixin when available; falls back to the type string.
     """
     return _key_for_loaded_params(params, type_str)
+
+
+def _attribute_type_token(type_str: str) -> str:
+    token = re.sub(r"[^0-9a-zA-Z_]", "_", type_str)
+    token = re.sub(r"_+", "_", token).strip("_").lower()
+    return token or "instrument"
+
+
+def _collect_attribute_names(instruments: Dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+
+    def _recurse(params: Any) -> None:
+        attr_name = getattr(params, "attribute_name", None)
+        if isinstance(attr_name, str) and attr_name:
+            names.add(attr_name)
+
+        channels = getattr(params, "channels", None)
+        if isinstance(channels, list):
+            for ch_params in channels:
+                ch_attr_name = getattr(ch_params, "attribute_name", None)
+                if isinstance(ch_attr_name, str) and ch_attr_name:
+                    names.add(ch_attr_name)
+
+        children = getattr(params, "children", None)
+        if isinstance(children, dict):
+            for child_params in children.values():
+                _recurse(child_params)
+
+    for params in instruments.values():
+        _recurse(params)
+    return names
+
+
+def _unique_attribute_name(type_str: str, taken: set[str]) -> str:
+    base = _attribute_type_token(type_str)
+    for _ in range(50):
+        candidate = f"{base}-{coolname.generate_slug(2)}"
+        if candidate not in taken:
+            return candidate
+    n = 2
+    candidate = f"{base}-{coolname.generate_slug(2)}"
+    while f"{candidate}-{n}" in taken:
+        n += 1
+    return f"{candidate}-{n}"
+
+
+def assign_missing_leaf_attribute_names(instruments: Dict[str, Any]) -> int:
+    """Assign unique names to terminal instruments or their channels.
+
+    The remote server exposes only params carrying ``attribute_name``. For a
+    terminal channel provider, the channels are the remotely useful objects; for
+    non-channel terminal instruments, the leaf node itself is named.
+
+    Existing names are preserved. Returns the number of names added.
+    """
+
+    taken = _collect_attribute_names(instruments)
+    added = 0
+
+    def _recurse(params: Any) -> None:
+        nonlocal added
+        children = getattr(params, "children", None)
+        has_children = isinstance(children, dict) and bool(children)
+        if has_children:
+            for child_params in children.values():
+                _recurse(child_params)
+            return
+
+        type_str = str(getattr(params, "type", "instrument"))
+        channels = getattr(params, "channels", None)
+        if isinstance(channels, list) and channels:
+            for ch_params in channels:
+                if not hasattr(ch_params, "attribute_name"):
+                    continue
+                if getattr(ch_params, "attribute_name", None):
+                    continue
+                chosen = _unique_attribute_name(type_str, taken)
+                ch_params.attribute_name = chosen
+                taken.add(chosen)
+                added += 1
+            return
+
+        if hasattr(params, "attribute_name") and not getattr(
+            params, "attribute_name", None
+        ):
+            chosen = _unique_attribute_name(type_str, taken)
+            params.attribute_name = chosen
+            taken.add(chosen)
+            added += 1
+
+    for params in instruments.values():
+        _recurse(params)
+    return added
 
 
 def _apply_key_to_params(type_str: str, params: Any, key: str) -> None:
@@ -641,6 +760,7 @@ def initialize_instrument(
         key = _default_key_for_params(type_str, params)
     else:
         _apply_key_to_params(type_str, params, key)
+    assign_missing_leaf_attribute_names({str(key): params})
     inst_dir = (Path(config_dir) / "instruments").resolve()
     target, _ = _save_node_recursive(inst_dir, inst_dir, params, here_key=key)
     logger.info("Initialized instrument type=%s key=%s at %s", type_str, key, target)
@@ -718,9 +838,14 @@ def add_instrument_chain(
 
             saved_keys.append({"type": ts, "key": hash_key})
 
+    assign_missing_leaf_attribute_names(instruments)
     save_instruments_to_config(instruments, config_dir)
     logger.info("Added/updated instrument chain with %d steps", len(chain))
-    return {"status": "ok", "tree": get_configured_tree(config_dir), "saved_keys": saved_keys}
+    return {
+        "status": "ok",
+        "tree": get_configured_tree(config_dir),
+        "saved_keys": saved_keys,
+    }
 
 
 def reinitialize_instrument(
@@ -748,6 +873,13 @@ def reinitialize_instrument(
         key_field_value = target.key_fields()
 
     existing_children = getattr(target, "children", None)
+    existing_attribute_name = getattr(target, "attribute_name", None)
+    existing_channel_attribute_names: list[str | None] = []
+    target_channels = getattr(target, "channels", None)
+    if isinstance(target_channels, list):
+        existing_channel_attribute_names = [
+            getattr(ch_params, "attribute_name", None) for ch_params in target_channels
+        ]
     for name in type(target).model_fields:
         if name == "children":
             continue
@@ -755,11 +887,29 @@ def reinitialize_instrument(
             setattr(target, name, getattr(default_params, name))
     if existing_children is not None and hasattr(target, "children"):
         target.children = existing_children  # type: ignore[attr-defined]
+    if (
+        isinstance(existing_attribute_name, str)
+        and existing_attribute_name
+        and hasattr(target, "attribute_name")
+    ):
+        target.attribute_name = existing_attribute_name
+    reset_channels = getattr(target, "channels", None)
+    if isinstance(reset_channels, list):
+        for ch_params, attr_name in zip(
+            reset_channels, existing_channel_attribute_names
+        ):
+            if (
+                isinstance(attr_name, str)
+                and attr_name
+                and hasattr(ch_params, "attribute_name")
+            ):
+                ch_params.attribute_name = attr_name
 
     # Re-apply the original key field so the hash is stable after save/reload.
     if key_field_value is not None and hasattr(target, "apply_key"):
         target.apply_key(key_field_value)
 
+    assign_missing_leaf_attribute_names(instruments)
     save_instruments_to_config(instruments, config_dir)
     logger.info("Reinitialized instrument type=%s key=%s", type_str, key)
     return {"status": "ok", "type": type_str, "key": key}
@@ -840,7 +990,9 @@ def _find_in_children(parent: Any, type_str: str, key: str) -> Any:
     return None
 
 
-def _remove_child_from_tree(instruments: Dict[str, Any], type_str: str, key: str) -> bool:
+def _remove_child_from_tree(
+    instruments: Dict[str, Any], type_str: str, key: str
+) -> bool:
     """Walk tree and remove the first child matching type + key."""
     for params in instruments.values():
         if _remove_child_recursive(params, type_str, key):

@@ -114,9 +114,13 @@ class Sim900(Parent[Sim900MainframeDep, Sim900ChildParams], Child[Any, Any]):
         if key in self.children:
             return self.children[key]
         params = self.params.children[key]
+        return self.instantiate_child(params, key=key)
+
+    def instantiate_child(self, params: Any, *, key: str | None = None) -> Child[Any, Any]:
         slot_dep = self._dep.slot(int(params.slot), offline=bool(getattr(params, "offline", False)))
         child = params.inst(slot_dep, params)  # type: ignore[arg-type]
-        self.children[key] = child
+        if key is not None:
+            self.children[key] = child
         return child
 
 

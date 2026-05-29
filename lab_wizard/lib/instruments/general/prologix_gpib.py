@@ -26,7 +26,6 @@ from lab_wizard.lib.instruments.general.discovery import (
 )
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixControllerDep
 from lab_wizard.lib.instruments.general.serial import SerialDep, LocalSerialDep
-from lab_wizard.lib.utilities.model_tree import Exp
 
 
 # Union of possible child param types on a serial bus (extend as needed)
@@ -128,9 +127,13 @@ class PrologixGPIB(
         if key in self.children:
             return self.children[key]
         child_params = self.params.children[key]
+        return self.instantiate_child(child_params, key=key)
+
+    def instantiate_child(self, child_params: Any, *, key: str | None = None) -> Child[Any, Any]:
         gpib_dep = self._dep.addressed(int(child_params.gpib_address))
         child = child_params.inst(gpib_dep, child_params)  # type: ignore[arg-type]
-        self.children[key] = child
+        if key is not None:
+            self.children[key] = child
         return child
 
     def disconnect(self):

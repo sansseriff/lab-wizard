@@ -255,6 +255,17 @@ class Parent(Instrument, ABC, Generic[R, P]):
         """
         pass
 
+    def instantiate_child(self, params: P, *, key: str | None = None) -> "Child[R, P]":
+        """Create a child instrument from an explicit Params object.
+
+        This is the pedagogical / hand-written-code API: the caller supplies
+        the params object to use. ``make_child(key)`` remains the config-tree
+        convenience API that looks up params from ``self.params.children``.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement instantiate_child(params)"
+        )
+
     def make_all_children(self) -> None:
         """Instantiate all children declared in params.children."""
         for key in list(self.params.children.keys()):  # type: ignore[attr-defined]
@@ -290,7 +301,7 @@ class ParentFactory(ABC, Generic[PP, PR]):
       Accepts a params instance (PP) and returns the constructed parent instrument.
 
     from_config:
-      Concrete default — looks up the params in exp.instruments[key] and
+      Concrete default — looks up the params in resources.instruments[key] and
       delegates to from_params. Root instrument classes do NOT need to
       override this.
     """
@@ -301,9 +312,9 @@ class ParentFactory(ABC, Generic[PP, PR]):
         pass
 
     @classmethod
-    def from_config(cls, exp: Any, *, key: str) -> PR:
-        """Look up hash key in exp.instruments and construct via from_params."""
-        params = exp.instruments[key]
+    def from_config(cls, resources: Any, *, key: str) -> PR:
+        """Look up hash key in resources.instruments and construct via from_params."""
+        params = resources.instruments[key]
         return cls.from_params(params)  # type: ignore[arg-type]
 
 
@@ -408,6 +419,17 @@ class Child(Instrument, ABC, Generic[R, P_child]):
         if not isinstance(child, cls):
             raise TypeError(
                 f"parent.make_child({key!r}) returned {type(child).__name__}, "
+                f"expected {cls.__name__}"
+            )
+        return child
+
+    @classmethod
+    def from_parent(cls: type[C], parent: Any, params: P_child, *, key: str | None = None) -> C:
+        """Construct this child from a live parent and explicit Params object."""
+        child = parent.instantiate_child(params, key=key)
+        if not isinstance(child, cls):
+            raise TypeError(
+                f"parent.instantiate_child(...) returned {type(child).__name__}, "
                 f"expected {cls.__name__}"
             )
         return child

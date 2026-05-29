@@ -1,6 +1,6 @@
-"""End-to-end smoke test: server + RemoteExp + typed proxies, no hardware.
+"""End-to-end smoke test: server + RemoteResources + typed proxies, no hardware.
 
-Covers both Phase 1 (raw wire RPCs) and Phase 2 (RemoteExp + typed proxies).
+Covers both Phase 1 (raw wire RPCs) and Phase 2 (RemoteResources + typed proxies).
 
 Run:
     python -m lab_wizard.lib.server._smoke_test
@@ -15,7 +15,7 @@ from typing import Any
 
 from lab_wizard.lib.client.proxies.vsense import RemoteVSense
 from lab_wizard.lib.client.proxies.vsource import RemoteVSource
-from lab_wizard.lib.client.remote_exp import RemoteExp
+from lab_wizard.lib.client.remote_resources import RemoteResources
 from lab_wizard.lib.client.session import RemoteCallError
 from lab_wizard.lib.instruments.general.vsense import StandInVSense, VSense
 from lab_wizard.lib.instruments.general.vsource import StandInVSource, VSource
@@ -83,11 +83,11 @@ def main() -> int:
     expect("describe_attribute behavior_abc", info.get("behavior_abc"), "VSource")
     expect("describe_attribute type_hint", info.get("type_hint"), "StandInVSource")
 
-    # ---------------- Phase 2: typed proxies via RemoteExp ----------------
-    print("[4] RemoteExp.from_attribute('bias') returns a VSource")
-    exp = RemoteExp.connect(bind, timeout_ms=3000)
+    # ---------------- Phase 2: typed proxies via RemoteResources ----------------
+    print("[4] RemoteResources.from_attribute('bias') returns a VSource")
+    resources = RemoteResources.connect(bind, timeout_ms=3000)
     try:
-        bias = exp.from_attribute("bias")
+        bias = resources.from_attribute("bias")
         expect("isinstance(bias, RemoteVSource)", isinstance(bias, RemoteVSource), True)
         expect("isinstance(bias, VSource)", isinstance(bias, VSource), True)
 
@@ -100,8 +100,8 @@ def main() -> int:
         bias.turn_on()
         expect("underlying output_enabled", vsource.output_enabled, True)
 
-        print("[7] RemoteExp.from_attribute('sense') returns a VSense")
-        sense = exp.from_attribute("sense")
+        print("[7] RemoteResources.from_attribute('sense') returns a VSense")
+        sense = resources.from_attribute("sense")
         expect("isinstance(sense, RemoteVSense)", isinstance(sense, RemoteVSense), True)
         expect("isinstance(sense, VSense)", isinstance(sense, VSense), True)
 
@@ -111,7 +111,7 @@ def main() -> int:
         expect("get_voltage", v, 2.345)
 
         print("[9] proxy caching: from_attribute returns same instance")
-        bias2 = exp.from_attribute("bias")
+        bias2 = resources.from_attribute("bias")
         expect("proxy identity", bias is bias2, True)
 
         print("[10] reflective fallback: unknown method becomes remote call")
@@ -125,22 +125,22 @@ def main() -> int:
 
         print("[11] error on unknown attribute name")
         try:
-            exp.from_attribute("not_a_real_name")
+            resources.from_attribute("not_a_real_name")
         except RemoteCallError as exc:
             print(f"  OK  unknown attribute -> RemoteCallError({exc.code})")
         else:
             failures.append("expected RemoteCallError on unknown attribute")
 
         print("[12] list_attributes and list_descriptions")
-        attrs = exp.list_attributes()
+        attrs = resources.list_attributes()
         expect("list_attributes", attrs, ["bias", "sense"])
-        descs = exp.list_descriptions()
+        descs = resources.list_descriptions()
         expect("list_descriptions count", len(descs), 2)
         # Order of list_descriptions follows sorted attribute names
         expect("list_descriptions[0].behavior_abc", descs[0]["behavior_abc"], "VSource")
         expect("list_descriptions[1].behavior_abc", descs[1]["behavior_abc"], "VSense")
     finally:
-        exp.close()
+        resources.close()
 
     # ---------------- Auto-forwarding regression check ----------------
     print("[13] auto-forwarder: brand-new ABC works without manual proxy methods")
@@ -200,14 +200,14 @@ def main() -> int:
         ("FakeBehavior", FakeBehavior),
     ) + _orig_behavior_abcs
 
-    exp2 = RemoteExp.connect(bind, timeout_ms=3000)
+    resources2 = RemoteResources.connect(bind, timeout_ms=3000)
     try:
         # ---- The ergonomic demo ----
         # Pyright treats `fake_proxy` as `FakeInstrument`: ctrl-click on
         # `do_thing` jumps to FakeInstrument.do_thing, arguments are checked
         # against its signature, autocomplete shows its methods. The runtime
         # object is still a RemoteFake proxy — `as_type` is a static hint.
-        fake_proxy = exp2.from_attribute("fake", FakeInstrument)
+        fake_proxy = resources2.from_attribute("fake", FakeInstrument)
         result = fake_proxy.do_thing(3.0, 4.0)
         expect("typed-as FakeInstrument: do_thing", result, 12.0)
         expect("server-side recorded args", fake.calls[-1], ("do_thing", 3.0, 4.0))
@@ -238,7 +238,7 @@ def main() -> int:
             False,
         )
     finally:
-        exp2.close()
+        resources2.close()
         _server_reg._BEHAVIOR_ABCS = _orig_behavior_abcs  # pyright: ignore[reportPrivateUsage]
         PROXY_BY_BEHAVIOR_ABC.pop("FakeBehavior", None)
 

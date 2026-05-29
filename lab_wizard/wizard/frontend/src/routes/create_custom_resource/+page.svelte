@@ -35,7 +35,9 @@
 
 	let projectPrefix = $state('custom_resource');
 	let resourceClassName = $state('CustomResources');
-	let generationStyle = $state<'explicit' | 'from_attribute'>('explicit');
+	let generationStyle = $state<
+		'production' | 'from_attribute' | 'pedagogical_yaml_expanded' | 'pedagogical_embedded'
+	>('production');
 	let fileStyle = $state<'dataclass' | 'simple'>('dataclass');
 	let persistAttributeNames = $state(false);
 
@@ -234,14 +236,34 @@
 
 		<div class="block">
 			<span class="text-xs text-gray-600 dark:text-gray-300">Codegen style</span>
-			<div class="mt-1 flex gap-3 text-sm">
-				<label class="flex items-center gap-1">
-					<input type="radio" bind:group={generationStyle} value="explicit" />
-					Explicit imports
+			<div class="mt-1 grid gap-2 text-sm">
+				<label class="flex items-start gap-2">
+					<input type="radio" bind:group={generationStyle} value="production" />
+					<span>
+						<span class="block font-medium">Production</span>
+						<span class="block text-xs text-gray-500">Short setup file using the project YAML.</span>
+					</span>
 				</label>
-				<label class="flex items-center gap-1">
+				<label class="flex items-start gap-2">
 					<input type="radio" bind:group={generationStyle} value="from_attribute" />
-					Attribute lookup
+					<span>
+						<span class="block font-medium">Remote attribute</span>
+						<span class="block text-xs text-gray-500">Look up named resources, useful with remote servers.</span>
+					</span>
+				</label>
+				<label class="flex items-start gap-2">
+					<input type="radio" bind:group={generationStyle} value="pedagogical_yaml_expanded" />
+					<span>
+						<span class="block font-medium">Teaching: YAML expanded</span>
+						<span class="block text-xs text-gray-500">Show hash-key traversal and parent/child creation.</span>
+					</span>
+				</label>
+				<label class="flex items-start gap-2">
+					<input type="radio" bind:group={generationStyle} value="pedagogical_embedded" />
+					<span>
+						<span class="block font-medium">Teaching: embedded params</span>
+						<span class="block text-xs text-gray-500">Generate a standalone Python example with params embedded.</span>
+					</span>
 				</label>
 			</div>
 		</div>

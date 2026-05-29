@@ -94,6 +94,7 @@ class Measurement(Base):
     delta_time = Column(Float)
     temperature = Column(Float)
 
+    data_json = Column("data", JSON)
     metadata_json = Column("metadata", JSON)
 
     run = relationship("Run", back_populates="measurements")

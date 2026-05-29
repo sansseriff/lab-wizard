@@ -4,6 +4,7 @@ version = "0.0.1"
 description = "A framework for easy setup and control of laboratory experiments."
 requires-python = ">=3.12"
 dependencies = [
+    "lab-procedure",
     "numpy",
     "matplotlib",
     "pyvisa",
@@ -24,6 +25,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "pyleco>=0.6.0.post1",
     "coolname>=5.0.0",
+    "black>=25.11.0",
 ]
 
 [tool.uv.sources]
@@ -46,8 +48,6 @@ lab_wizard = [
 wizard = "lab_wizard.wizard.cli:main"
 lab_wizard_server = "lab_wizard.lib.server.server:main"
 lab_wizard_client = "lab_wizard.lib.server.demo_client:main"
-
-
 
 
 

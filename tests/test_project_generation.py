@@ -10,12 +10,20 @@ from lab_wizard.lib.instruments.keysight53220A import Keysight53220AParams
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
 from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
-from lab_wizard.lib.utilities.config_io import instrument_hash, save_instruments_to_config
+from lab_wizard.lib.utilities.config_io import (
+    instrument_hash,
+    save_instruments_to_config,
+)
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
     SelectedResource,
     generate_measurement_project,
+)
+from lab_wizard.wizard.backend.custom_resource_generation import (
+    CustomResourceSelection,
+    GenerateCustomResourceRequest,
+    generate_custom_resource_project,
 )
 
 # Precomputed hash keys used throughout these tests
@@ -96,8 +104,9 @@ def test_generate_project_creates_subset_yaml_and_setup(tmp_path: Path) -> None:
     y = YAML(typ="safe")
     loader: Any = y
     payload = cast(dict[str, Any], loader.load(yaml_path.read_text(encoding="utf-8")))
-    assert _PROLOGIX_KEY in payload["instruments"]
-    root = cast(dict[str, Any], payload["instruments"][_PROLOGIX_KEY])
+    assert payload["project"]["measurement_type"] == "iv_curve"
+    assert _PROLOGIX_KEY in payload["resources"]["instruments"]
+    root = cast(dict[str, Any], payload["resources"]["instruments"][_PROLOGIX_KEY])
     assert root["type"] == "prologix_gpib"
     assert _SIM900_KEY in root["children"]
     sim900 = cast(dict[str, Any], root["children"][_SIM900_KEY])
@@ -106,14 +115,21 @@ def test_generate_project_creates_subset_yaml_and_setup(tmp_path: Path) -> None:
     assert _SIM970_KEY in sim900["children"]
     assert sim900["children"][_SIM928_KEY]["type"] == "sim928"
     assert sim900["children"][_SIM970_KEY]["type"] == "sim970"
+    assert len(sim900["children"][_SIM970_KEY]["channels"]) == 1
     yaml_text = yaml_path.read_text(encoding="utf-8")
     assert "# (seconds)" in yaml_text
 
     setup_text = setup_path.read_text(encoding="utf-8")
     ast.parse(setup_text)
-    assert "from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928" in setup_text
-    assert "from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970" in setup_text
-    assert f"PrologixGPIB.from_config(exp, key={_PROLOGIX_KEY!r})" in setup_text
+    assert (
+        "from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928"
+        in setup_text
+    )
+    assert (
+        "from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970"
+        in setup_text
+    )
+    assert f"PrologixGPIB.from_config(resources, key={_PROLOGIX_KEY!r})" in setup_text
     assert "Sim900.from_config(" in setup_text
     assert "Sim928.from_config(" in setup_text
     assert "Sim970.from_config(" in setup_text
@@ -214,12 +230,122 @@ def test_generate_pcr_project_uses_from_config_style(tmp_path: Path) -> None:
     )
 
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
+    y = YAML(typ="safe")
+    loader: Any = y
+    payload = cast(
+        dict[str, Any],
+        loader.load(Path(out["yaml_file"]).read_text(encoding="utf-8")),
+    )
+    counter = cast(dict[str, Any], payload["resources"]["instruments"][_KEYSIGHT_KEY])
+    assert len(counter["channels"]) == 2
     ast.parse(setup_text)
-    assert f"PrologixGPIB.from_config(exp, key={_PROLOGIX_KEY!r})" in setup_text
+    assert f"PrologixGPIB.from_config(resources, key={_PROLOGIX_KEY!r})" in setup_text
     assert "Sim900.from_config(" in setup_text
     assert "Sim928.from_config(" in setup_text
-    assert f"Keysight53220A.from_config(exp, key={_KEYSIGHT_KEY!r})" in setup_text
+    assert f"Keysight53220A.from_config(resources, key={_KEYSIGHT_KEY!r})" in setup_text
     assert ".add_child(" not in setup_text
     assert ".children[" not in setup_text
     assert "cast(" not in setup_text
     assert ".channels[1]" in setup_text
+
+
+def test_generate_custom_resource_pedagogical_yaml_expanded(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    projects_dir = tmp_path / "projects"
+    _write_test_config(config_dir)
+
+    out = generate_custom_resource_project(
+        config_dir=config_dir,
+        projects_dir=projects_dir,
+        req=GenerateCustomResourceRequest(
+            generation_style="pedagogical_yaml_expanded",
+            selections=[
+                CustomResourceSelection(
+                    variable_name="bias_source",
+                    type="sim928",
+                    key=_SIM928_KEY,
+                    path=[
+                        SelectedNodeRef(type="sim928", key=_SIM928_KEY),
+                        SelectedNodeRef(type="sim900", key=_SIM900_KEY),
+                        SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
+                    ],
+                )
+            ],
+        ),
+    )
+
+    setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
+    ast.parse(setup_text)
+    assert "resource_config = project.resources" in setup_text
+    assert ".from_config(" not in setup_text
+    assert ".create_inst()" in setup_text
+    assert ".from_parent(" in setup_text
+    assert _PROLOGIX_KEY in setup_text
+    assert _SIM900_KEY in setup_text
+    assert _SIM928_KEY in setup_text
+
+
+def test_generate_custom_resource_pedagogical_embedded(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    projects_dir = tmp_path / "projects"
+    _write_test_config(config_dir)
+
+    out = generate_custom_resource_project(
+        config_dir=config_dir,
+        projects_dir=projects_dir,
+        req=GenerateCustomResourceRequest(
+            generation_style="pedagogical_embedded",
+            selections=[
+                CustomResourceSelection(
+                    variable_name="bias_source",
+                    type="sim928",
+                    key=_SIM928_KEY,
+                    path=[
+                        SelectedNodeRef(type="sim928", key=_SIM928_KEY),
+                        SelectedNodeRef(type="sim900", key=_SIM900_KEY),
+                        SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
+                    ],
+                )
+            ],
+        ),
+    )
+
+    setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
+    ast.parse(setup_text)
+    assert "load_project_config" not in setup_text
+    assert "PrologixGPIBParams.model_validate(" in setup_text
+    assert "Sim900Params.model_validate(" in setup_text
+    assert "Sim928Params.model_validate(" in setup_text
+    assert ".from_config(" not in setup_text
+
+
+def test_pedagogical_embedded_trims_selected_channel_payload(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    projects_dir = tmp_path / "projects"
+    _write_test_config(config_dir)
+
+    out = generate_custom_resource_project(
+        config_dir=config_dir,
+        projects_dir=projects_dir,
+        req=GenerateCustomResourceRequest(
+            generation_style="pedagogical_embedded",
+            selections=[
+                CustomResourceSelection(
+                    variable_name="sense_ch1",
+                    type="sim970",
+                    key=_SIM970_KEY,
+                    channel_index=1,
+                    path=[
+                        SelectedNodeRef(type="sim970", key=_SIM970_KEY),
+                        SelectedNodeRef(type="sim900", key=_SIM900_KEY),
+                        SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
+                    ],
+                )
+            ],
+        ),
+    )
+
+    setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
+    ast.parse(setup_text)
+    assert ".channels[1]" in setup_text
+    assert setup_text.count("'settling_time': 0.1") == 2

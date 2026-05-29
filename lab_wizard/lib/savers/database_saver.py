@@ -129,6 +129,7 @@ class DatabaseSaver(GenericSaver):
     def write_measurement(
         self,
         *,
+        data: dict[str, Any] | None = None,
         counts: int | None = None,
         int_time: float | None = None,
         delta_time: float | None = None,
@@ -146,6 +147,7 @@ class DatabaseSaver(GenericSaver):
             int_time=int_time,
             delta_time=delta_time,
             temperature=temperature,
+            data_json=data or {},
             metadata_json=metadata or {},
         )
         self.session.add(m)

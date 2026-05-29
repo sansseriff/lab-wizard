@@ -21,7 +21,7 @@ import threading
 import time
 from typing import Callable
 
-from lab_wizard.lib.client.remote_exp import RemoteExp
+from lab_wizard.lib.client.remote_resources import RemoteResources
 from lab_wizard.lib.client.session import PermissionDeniedError
 from lab_wizard.lib.instruments.general.vsource import StandInVSource
 from lab_wizard.lib.server.permissions import PermissionGate, load_permissions
@@ -116,14 +116,14 @@ class Lab:
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self._thread.start()
         time.sleep(0.3)
-        self.exp = RemoteExp.connect(self.bind, timeout_ms=3000)
+        self.resources = RemoteResources.connect(self.bind, timeout_ms=3000)
 
     def server_state(self) -> dict:
         """Peek at what the server's state tracker currently believes."""
         return self.gate.tracker.snapshot()
 
     def close(self) -> None:
-        self.exp.close()
+        self.resources.close()
         self.server.stop()
         self._thread.join(timeout=2)
 
@@ -136,13 +136,13 @@ def run_scenario(say: Callable[[str], None] = lambda _msg: None) -> None:
     lab = Lab()
     try:
         say("\n== Client connects and discovers what's available ==")
-        attrs = lab.exp.list_attributes()
+        attrs = lab.resources.list_attributes()
         say(f"  available attributes: {attrs}")
         assert attrs == ["bias_source", "pulse_gen"]
 
         # Typed handle for the bias source; reflective handle for the funcgen.
-        bias = lab.exp.from_attribute("bias_source", StandInVSource)
-        pulse_gen = lab.exp.from_attribute("pulse_gen", PulseGenerator)
+        bias = lab.resources.from_attribute("bias_source", StandInVSource)
+        pulse_gen = lab.resources.from_attribute("pulse_gen", PulseGenerator)
 
         say("\n== Step 1: bias is off (0 V). Pulsing is safe. ==")
         say(f"  server state: {lab.server_state()}")

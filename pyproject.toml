@@ -3,7 +3,7 @@ name = "lab-wizard-repo"
 version = "0.1.0"
 description = "Main SNSPD wizard app"
 requires-python = ">=3.14"
-dependencies = ["lab-wizard", "ruamel-yaml>=0.18.16"]
+dependencies = ["lab-wizard", "lab-procedure", "ruamel-yaml>=0.18.16"]
 
 
 [build-system]
@@ -20,10 +20,11 @@ package = true
 wizard = "lab_wizard.wizard.cli:main"
 
 [tool.uv.workspace]
-members = ["lab_wizard"]
+members = ["lab_wizard", "procedure_framework"]
 
 [tool.uv.sources]
 lab-wizard = { workspace = true, editable = true }
+lab-procedure = { workspace = true, editable = true }
 
 [dependency-groups]
 dev = [

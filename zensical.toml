@@ -44,10 +44,30 @@ Copyright &copy; 2026 The authors
 # can be defined using TOML syntax.
 #
 # Read more: https://zensical.org/docs/setup/navigation/
-# nav = [
-#   { "Get started" = "index.md" },
-#   { "Markdown in 5min" = "markdown.md" },
-# ]
+nav = [
+  { "Home" = "index.md" },
+  { "Getting started" = "getting-started.md" },
+  { "Concepts" = [
+    { "Architecture" = "concepts/architecture.md" },
+    { "Instrument model" = "concepts/instrument-model.md" },
+    { "Config & discovery" = "concepts/config-and-discovery.md" },
+  ] },
+  { "The wizard GUI" = [
+    { "Overview" = "wizard/index.md" },
+    { "Managing instruments" = "wizard/managing-instruments.md" },
+    { "Creating measurements" = "wizard/creating-measurements.md" },
+    { "Savers & plotters" = "wizard/savers-and-plotters.md" },
+  ] },
+  { "Remote control" = [
+    { "Architecture" = "remote/architecture.md" },
+    { "Permissions & safety" = "remote/permissions.md" },
+    { "Running & consuming servers" = "remote/operations.md" },
+  ] },
+  { "Data" = [
+    { "Measurement database" = "data/database.md" },
+  ] },
+  { "Roadmap" = "roadmap.md" },
+]
 
 # With the "extra_css" option you can add your own CSS styling to customize
 # your Zensical project according to your needs. You can add any number of

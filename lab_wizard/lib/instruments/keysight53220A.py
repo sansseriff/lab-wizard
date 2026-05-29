@@ -24,7 +24,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
     ChannelProvider,
     IPLike,
 )
-from lab_wizard.lib.utilities.model_tree import Exp
+from lab_wizard.lib.utilities.model_tree import ResourceConfig
 
 
 class Keysight53220AChannelParams(BaseModel):
@@ -167,11 +167,11 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
         return cls(dep, params)
 
     @classmethod
-    def from_config(cls, exp: Exp, *, key: str) -> "Keysight53220A":
-        raw = exp.instruments[key]
+    def from_config(cls, resources: ResourceConfig, *, key: str) -> "Keysight53220A":
+        raw = resources.instruments[key]
         if not isinstance(raw, Keysight53220AParams):
             raise TypeError(
-                f"Expected Keysight53220AParams at exp.instruments[{key!r}]"
+                f"Expected Keysight53220AParams at resources.instruments[{key!r}]"
             )
         return cls.from_params(raw)
 

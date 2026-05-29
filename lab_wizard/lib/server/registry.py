@@ -11,9 +11,9 @@ Two construction modes:
   daemon (or merely listing/describing what it can provide) never opens a serial
   port or GPIB connection.
 
-- **Eager, single-``Exp`` hosting** (``InstrumentRegistry(exp)``): the original
-  Phase-1 behavior, kept for the optional per-project ``exp_yaml`` override and
-  for tests. It instantiates every instrument up front.
+- **Eager, single-``ResourceConfig`` hosting** (``InstrumentRegistry(resources)``):
+  the original Phase-1 behavior, kept for the optional per-project ``project_yaml``
+  override and for tests. It instantiates every instrument up front.
 
 Path scheme:
     inst://<root_key>[/<child_key>]*[/channel/<idx>]
@@ -33,7 +33,7 @@ from typing import Any, Callable, Optional, get_args, get_origin
 from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
-from lab_wizard.lib.utilities.model_tree import Exp
+from lab_wizard.lib.utilities.model_tree import ResourceConfig
 
 
 PATH_PREFIX = "inst://"
@@ -96,15 +96,16 @@ def _channel_class(parent_inst_cls: type | None) -> type | None:
 class InstrumentRegistry:
     """Index from ``inst://`` path to instrument object, with lazy hosting."""
 
-    def __init__(self, exp: Exp) -> None:
-        # Eager mode: instantiate the whole tree from a single Exp (override /
-        # tests). Lazy mode is built via the ``from_*`` classmethods below.
+    def __init__(self, resources: ResourceConfig) -> None:
+        # Eager mode: instantiate the whole tree from a single ResourceConfig
+        # (override / tests). Lazy mode is built via the ``from_*`` classmethods
+        # below.
         self._index: dict[str, Any] = {}
         self._attribute_index: dict[str, str] = {}
         self._descriptions: dict[str, dict[str, Any]] = {}
         self._factories: dict[str, Callable[[], Any]] = {}
         self._classes: dict[str, type] = {}
-        self._build_eager(exp.instruments)
+        self._build_eager(resources.instruments)
 
     # ------------------------- construction -------------------------
 

@@ -23,7 +23,10 @@ from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.measurements.general.genericMeasurement import GenericMeasurement
 
 if TYPE_CHECKING:
-    from iv_curve_setup_template import IVCurveResources, IVCurveParams
+    from lab_wizard.lib.measurements.iv_curve.iv_curve_params import IVCurveParams
+    from lab_wizard.lib.measurements.iv_curve.iv_curve_setup_template import (
+        IVCurveResources,
+    )
 
 
 

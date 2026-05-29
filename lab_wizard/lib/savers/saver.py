@@ -45,6 +45,7 @@ class GenericSaver(ABC):
     def write_measurement(
         self,
         *,
+        data: dict[str, Any] | None = None,
         counts: int | None = None,
         int_time: float | None = None,
         delta_time: float | None = None,
@@ -114,6 +115,7 @@ class StandInSaver(GenericSaver):
     def write_measurement(
         self,
         *,
+        data: dict[str, Any] | None = None,
         counts: int | None = None,
         int_time: float | None = None,
         delta_time: float | None = None,
@@ -122,6 +124,7 @@ class StandInSaver(GenericSaver):
         details: list[dict[str, Any]] | None = None,
     ) -> None:
         row = {
+            "data": data or {},
             "counts": counts,
             "int_time": int_time,
             "delta_time": delta_time,

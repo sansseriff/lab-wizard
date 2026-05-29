@@ -82,6 +82,9 @@
 
 	let activeRequirement = $state<string | null>(null);
 	let projectPrefix = $state('');
+	let generationStyle = $state<
+		'production' | 'from_attribute' | 'pedagogical_yaml_expanded' | 'pedagogical_embedded'
+	>('production');
 	let creatingProject = $state(false);
 	let createError: string | null = $state(null);
 	let createResult:
@@ -258,7 +261,11 @@
 				}
 			}
 
-			const body: Record<string, any> = { measurement_name: measurementName, selected_resources };
+			const body: Record<string, any> = {
+				measurement_name: measurementName,
+				selected_resources,
+				generation_style: generationStyle
+			};
 			if (projectPrefix.trim()) body.project_prefix = projectPrefix.trim();
 			const res = await fetchWithConfig('/api/create-measurement-project', 'POST', body);
 			createResult = {
@@ -304,6 +311,39 @@
 					placeholder="iv_curve_run"
 					class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
 				/>
+				<div class="mt-3">
+					<div class="mb-1 text-xs text-gray-600 dark:text-gray-300">Generated setup style</div>
+					<div class="grid gap-2 text-sm sm:grid-cols-2">
+						<label class="flex items-start gap-2 rounded border border-gray-200 px-3 py-2 dark:border-gray-600">
+							<input type="radio" bind:group={generationStyle} value="production" />
+							<span>
+								<span class="block font-medium">Production</span>
+								<span class="block text-xs text-gray-500">Short setup file; resolves selected resources from the project YAML.</span>
+							</span>
+						</label>
+						<label class="flex items-start gap-2 rounded border border-gray-200 px-3 py-2 dark:border-gray-600">
+							<input type="radio" bind:group={generationStyle} value="from_attribute" />
+							<span>
+								<span class="block font-medium">Remote attribute</span>
+								<span class="block text-xs text-gray-500">Looks up instruments by attribute name; use with remote servers.</span>
+							</span>
+						</label>
+						<label class="flex items-start gap-2 rounded border border-gray-200 px-3 py-2 dark:border-gray-600">
+							<input type="radio" bind:group={generationStyle} value="pedagogical_yaml_expanded" />
+							<span>
+								<span class="block font-medium">Teaching: YAML expanded</span>
+								<span class="block text-xs text-gray-500">Shows hash-key traversal and explicit parent/child creation.</span>
+							</span>
+						</label>
+						<label class="flex items-start gap-2 rounded border border-gray-200 px-3 py-2 dark:border-gray-600">
+							<input type="radio" bind:group={generationStyle} value="pedagogical_embedded" />
+							<span>
+								<span class="block font-medium">Teaching: embedded params</span>
+								<span class="block text-xs text-gray-500">Embeds selected instrument params directly in Python.</span>
+							</span>
+						</label>
+					</div>
+				</div>
 			</div>
 
 			{#if saverReqs.length > 0}

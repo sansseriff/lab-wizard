@@ -21,6 +21,52 @@ class Device(BaseModel):
     description: str = Field(description="Description of the device")
 
 
+class ProjectInfo(BaseModel):
+    schema_version: int = 1
+    measurement_type: str
+    created_by: str = "lab_wizard"
+
+
+class RunConfig(BaseModel):
+    device: Device | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MeasurementConfig(BaseModel):
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResourceConfig(BaseModel):
+    savers: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
+    plotters: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
+    instruments: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _parse_dynamic_resources(cls, data: dict[str, Any]) -> dict[str, Any]:
+        return _parse_resource_sections(data)
+
+    def from_attribute(self, attribute_name: str) -> Any:
+        result = _find_attribute_path(self.instruments, attribute_name)
+        if result is None:
+            raise ValueError(
+                f"No instrument with attribute_name={attribute_name!r} found in resources"
+            )
+        path, channel_index = result
+        return _construct_from_path(path, channel_index)
+
+
+class ProjectConfig(BaseModel):
+    project: ProjectInfo
+    run: RunConfig = Field(default_factory=RunConfig)
+    measurement: MeasurementConfig = Field(default_factory=MeasurementConfig)
+    resources: ResourceConfig = Field(default_factory=ResourceConfig)
+
+    @property
+    def measurement_type(self) -> str:
+        return self.project.measurement_type
+
+
 def _parse_instrument_tree(data: dict[str, Any]) -> Any:
     """Recursively parse an instrument dict into the correct Params class.
 
@@ -52,6 +98,31 @@ def _parse_flat_resource(data: Any, kind: Literal["saver", "plotter"]) -> Any:
     else:
         params_cls = load_plotter_params_class(type_str)
     return params_cls(**data)
+
+
+def _parse_resource_sections(data: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return data
+
+    out = dict(data)
+
+    if "instruments" in out and isinstance(out["instruments"], dict):
+        parsed = {}
+        for key, inst_data in out["instruments"].items():
+            if isinstance(inst_data, dict) and "type" in inst_data:
+                parsed[key] = _parse_instrument_tree(inst_data)
+            else:
+                parsed[key] = inst_data
+        out["instruments"] = parsed
+
+    for kind, key_name in (("saver", "savers"), ("plotter", "plotters")):
+        if key_name in out and isinstance(out[key_name], dict):
+            parsed = {}
+            for key, entry in out[key_name].items():
+                parsed[key] = _parse_flat_resource(entry, kind)  # type: ignore[arg-type]
+            out[key_name] = parsed
+
+    return out
 
 
 # --------------- attribute_name search helpers ---------------
@@ -103,7 +174,6 @@ def _search_node(
 
 def _construct_from_path(
     path: list[Tuple[str, Any]],
-    exp: "Exp",
     channel_index: Optional[int],
 ) -> Any:
     """Construct the full instrument chain for the given path and return the target."""
@@ -133,59 +203,7 @@ def _construct_from_path(
     return current_inst
 
 
-class Exp(BaseModel):
-    """Project-level experiment configuration loaded from a project YAML.
-
-    The ``savers`` and ``plotters`` dicts are name -> Params and are populated
-    by auto-discovered Params classes; users can configure multiple of each.
-    """
-
-    exp: SerializeAsAny[BaseModel]
-    device: Device | None = None
-    savers: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
-    plotters: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
-    instruments: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _parse_dynamic_resources(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Parse instruments / savers / plotters using dynamic discovery before validation."""
-        if not isinstance(data, dict):
-            return data
-
-        out = dict(data)
-
-        if "instruments" in out and isinstance(out["instruments"], dict):
-            parsed = {}
-            for key, inst_data in out["instruments"].items():
-                if isinstance(inst_data, dict) and "type" in inst_data:
-                    parsed[key] = _parse_instrument_tree(inst_data)
-                else:
-                    parsed[key] = inst_data
-            out["instruments"] = parsed
-
-        for kind, key_name in (("saver", "savers"), ("plotter", "plotters")):
-            if key_name in out and isinstance(out[key_name], dict):
-                parsed = {}
-                for key, entry in out[key_name].items():
-                    parsed[key] = _parse_flat_resource(entry, kind)  # type: ignore[arg-type]
-                out[key_name] = parsed
-
-        return out
-
-    def from_attribute(self, attribute_name: str) -> Any:
-        """Construct the instrument (or channel) that has the given attribute_name."""
-        result = _find_attribute_path(self.instruments, attribute_name)
-        if result is None:
-            raise ValueError(
-                f"No instrument with attribute_name={attribute_name!r} found in exp"
-            )
-        path, channel_index = result
-        return _construct_from_path(path, self, channel_index)
-
-
-def _rewrite_exp_yaml(yaml_path: Path | str, exp: Exp) -> None:
-    """Rewrite the project YAML with corrected hash keys (in-place)."""
+def _rewrite_project_yaml(yaml_path: Path | str, project: ProjectConfig) -> None:
     y = RuamelYAML(typ="rt")
     y.default_flow_style = False
 
@@ -197,38 +215,34 @@ def _rewrite_exp_yaml(yaml_path: Path | str, exp: Exp) -> None:
     )
 
     repaired_instruments = {}
-    for k, v in exp.instruments.items():
+    for k, v in project.resources.instruments.items():
         if isinstance(v, BaseModel):
             repaired_instruments[k] = model_to_commented_map(v, exclude_none=True)
         else:
             repaired_instruments[k] = v
 
-    data["instruments"] = to_commented_yaml_value(repaired_instruments)
+    data["resources"]["instruments"] = to_commented_yaml_value(repaired_instruments)
 
     with open(yaml_path, "w", encoding="utf-8") as f:
         y.dump(data, f)
 
 
-def load_exp_from_yaml(yaml_path: str | Path) -> Exp:
-    """Load an Exp object from a project YAML file.
-
-    After parsing, instrument hash keys are validated against the params they
-    represent. If any key is stale (e.g. the user edited a ``slot`` or ``port``
-    field), the key is recomputed and the YAML is rewritten in-place.
-    """
+def load_project_config(yaml_path: str | Path) -> ProjectConfig:
+    """Load the explicit project YAML shape used by generated projects."""
     from lab_wizard.lib.utilities.config_io import validate_and_repair_hashes
 
     yaml_path = Path(yaml_path)
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    exp = Exp.model_validate(data)
+    project = ProjectConfig.model_validate(data)
 
-    repaired, changed = validate_and_repair_hashes(exp.instruments)
+    repaired, changed = validate_and_repair_hashes(project.resources.instruments)
     if changed:
-        exp = exp.model_copy(update={"instruments": repaired})
+        resources = project.resources.model_copy(update={"instruments": repaired})
+        project = project.model_copy(update={"resources": resources})
         try:
-            _rewrite_exp_yaml(yaml_path, exp)
+            _rewrite_project_yaml(yaml_path, project)
         except OSError:
             pass
 
-    return exp
+    return project

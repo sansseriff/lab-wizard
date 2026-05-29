@@ -3,6 +3,7 @@
 These tests exercise the same functions called by the backend endpoints so
 the behaviour seen through the GUI is covered without spinning up HTTP.
 """
+
 import pathlib
 import pytest
 
@@ -15,10 +16,10 @@ from lab_wizard.lib.utilities.config_io import (
     load_instruments,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _chain(*steps):
     """Shorthand for building a chain list (leaf-first)."""
@@ -32,6 +33,7 @@ def _step(type_str, key, action="create_new"):
 # ---------------------------------------------------------------------------
 # Adding instruments
 # ---------------------------------------------------------------------------
+
 
 def test_add_top_level_usb_instrument(tmp_path):
     """Adding a prologix_gpib creates a hash-named YAML with the correct port field."""
@@ -83,6 +85,30 @@ def test_add_full_chain_prologix_sim900_sim928(tmp_path):
     assert sim928_hash in sim900.children
     sim928 = sim900.children[sim928_hash]
     assert sim928.slot == "2"
+    assert sim928.attribute_name.startswith("sim928-")
+
+
+def test_add_channelized_leaf_assigns_channel_attribute_names(tmp_path):
+    """Channel-provider leaves get unique names on each channel."""
+    cfg = tmp_path / "config"
+
+    add_instrument_chain(
+        cfg,
+        _chain(
+            _step("dac4D", "1"),
+            _step("dbay", "10.7.0.4:8345"),
+        ),
+    )
+
+    instruments = load_instruments(cfg)
+    dbay_hash = instrument_hash("dbay", "10.7.0.4:8345")
+    dac4d_hash = instrument_hash("dac4D", "1")
+    dac4d = instruments[dbay_hash].children[dac4d_hash]
+
+    names = [ch.attribute_name for ch in dac4d.channels]
+    assert len(names) == 4
+    assert all(name.startswith("dac4d-") for name in names)
+    assert len(set(names)) == 4
 
 
 def test_add_child_to_existing_parent(tmp_path):
@@ -90,21 +116,27 @@ def test_add_child_to_existing_parent(tmp_path):
     cfg = tmp_path / "config"
 
     # First: add prologix + sim900 + sim928 slot=1
-    add_instrument_chain(cfg, _chain(
-        _step("sim928", "1"),
-        _step("sim900", "4"),
-        _step("prologix_gpib", "/dev/ttyUSB0"),
-    ))
+    add_instrument_chain(
+        cfg,
+        _chain(
+            _step("sim928", "1"),
+            _step("sim900", "4"),
+            _step("prologix_gpib", "/dev/ttyUSB0"),
+        ),
+    )
 
     prologix_hash = instrument_hash("prologix_gpib", "/dev/ttyUSB0")
     sim900_hash = instrument_hash("sim900", "4")
 
     # Second: add sim928 slot=3 using existing prologix and sim900
-    add_instrument_chain(cfg, _chain(
-        _step("sim928", "3"),
-        _step("sim900", sim900_hash, action="use_existing"),
-        _step("prologix_gpib", prologix_hash, action="use_existing"),
-    ))
+    add_instrument_chain(
+        cfg,
+        _chain(
+            _step("sim928", "3"),
+            _step("sim900", sim900_hash, action="use_existing"),
+            _step("prologix_gpib", prologix_hash, action="use_existing"),
+        ),
+    )
 
     instruments = load_instruments(cfg)
     sim900 = instruments[prologix_hash].children[sim900_hash]
@@ -122,14 +154,18 @@ def test_add_child_to_existing_parent(tmp_path):
 # get_configured_tree
 # ---------------------------------------------------------------------------
 
+
 def test_get_configured_tree_structure(tmp_path):
     """get_configured_tree returns a JSON-friendly dict with type, key, children."""
     cfg = tmp_path / "config"
-    add_instrument_chain(cfg, _chain(
-        _step("sim928", "2"),
-        _step("sim900", "7"),
-        _step("prologix_gpib", "/dev/ttyUSB0"),
-    ))
+    add_instrument_chain(
+        cfg,
+        _chain(
+            _step("sim928", "2"),
+            _step("sim900", "7"),
+            _step("prologix_gpib", "/dev/ttyUSB0"),
+        ),
+    )
 
     tree = get_configured_tree(cfg)
     assert isinstance(tree, list)
@@ -163,14 +199,18 @@ def test_get_configured_tree_fields(tmp_path):
 # reinitialize_instrument
 # ---------------------------------------------------------------------------
 
+
 def test_reinitialize_preserves_children(tmp_path):
     """Resetting a sim900 restores default fields but keeps its sim928 children."""
     cfg = tmp_path / "config"
-    add_instrument_chain(cfg, _chain(
-        _step("sim928", "1"),
-        _step("sim900", "4"),
-        _step("prologix_gpib", "/dev/ttyUSB0"),
-    ))
+    add_instrument_chain(
+        cfg,
+        _chain(
+            _step("sim928", "1"),
+            _step("sim900", "4"),
+            _step("prologix_gpib", "/dev/ttyUSB0"),
+        ),
+    )
 
     sim900_hash = instrument_hash("sim900", "4")
     reinitialize_instrument(cfg, "sim900", sim900_hash)
@@ -194,6 +234,7 @@ def test_reinitialize_nonexistent_raises(tmp_path):
 # remove_instrument
 # ---------------------------------------------------------------------------
 
+
 def test_remove_top_level(tmp_path):
     """Removing a top-level instrument deletes it from config."""
     cfg = tmp_path / "config"
@@ -209,16 +250,26 @@ def test_remove_top_level(tmp_path):
 def test_remove_child(tmp_path):
     """Removing a child leaves the parent and sibling intact."""
     cfg = tmp_path / "config"
-    add_instrument_chain(cfg, _chain(
-        _step("sim928", "1"),
-        _step("sim900", "4"),
-        _step("prologix_gpib", "/dev/ttyUSB0"),
-    ))
-    add_instrument_chain(cfg, _chain(
-        _step("sim928", "3"),
-        _step("sim900", instrument_hash("sim900", "4"), action="use_existing"),
-        _step("prologix_gpib", instrument_hash("prologix_gpib", "/dev/ttyUSB0"), action="use_existing"),
-    ))
+    add_instrument_chain(
+        cfg,
+        _chain(
+            _step("sim928", "1"),
+            _step("sim900", "4"),
+            _step("prologix_gpib", "/dev/ttyUSB0"),
+        ),
+    )
+    add_instrument_chain(
+        cfg,
+        _chain(
+            _step("sim928", "3"),
+            _step("sim900", instrument_hash("sim900", "4"), action="use_existing"),
+            _step(
+                "prologix_gpib",
+                instrument_hash("prologix_gpib", "/dev/ttyUSB0"),
+                action="use_existing",
+            ),
+        ),
+    )
 
     sim928_hash_1 = instrument_hash("sim928", "1")
     sim928_hash_3 = instrument_hash("sim928", "3")

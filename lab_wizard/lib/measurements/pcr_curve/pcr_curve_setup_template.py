@@ -8,11 +8,11 @@ The wizard only modifies blocks between matching
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
-from pydantic import BaseModel
-
-from lab_wizard.lib.client.remote_exp import RemoteExp
-from lab_wizard.lib.utilities.model_tree import Exp, load_exp_from_yaml
+from lab_wizard.lib.client.remote_resources import RemoteResources
+from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
+from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
 from lab_wizard.lib.instruments.general.counter import Counter, StandInCounter
 from lab_wizard.lib.instruments.general.vsource import VSource, StandInVSource
 from lab_wizard.lib.plotters.plotter import GenericPlotter
@@ -21,13 +21,6 @@ from lab_wizard.lib.savers.saver import GenericSaver
 # wizard:imports:start
 # wizard inserts concrete instrument / saver / plotter imports here
 # wizard:imports:end
-
-
-class PCRCurveParams(BaseModel):
-    bias_start_V: float = 0.0
-    bias_end_V: float = 1.0
-    bias_step_V: float = 0.01
-    photon_rate: float = 100000.0
 
 
 @dataclass
@@ -41,7 +34,11 @@ class PCRCurveResources:
     params: PCRCurveParams = field(default_factory=PCRCurveParams)
 
 
-def create_instrument_resources(exp: Exp | RemoteExp) -> PCRCurveResources:
+def create_instrument_resources(
+    project: ProjectConfig,
+    resource_source: object | None = None,
+) -> PCRCurveResources:
+    resources = resource_source or project.resources
     # wizard:instantiation:start
     # wizard inserts config-backed instrument / saver / plotter construction here
     # wizard:instantiation:end
@@ -50,7 +47,7 @@ def create_instrument_resources(exp: Exp | RemoteExp) -> PCRCurveResources:
         # wizard:return_fields:start
         # wizard inserts the resolved field values here
         # wizard:return_fields:end
-        params=PCRCurveParams(),
+        params=PCRCurveParams.model_validate(project.measurement.params),
     )
 
 
@@ -65,19 +62,21 @@ if __name__ == "__main__":
         default=None,
         help="Connect to a remote lab_wizard server (e.g. tcp://lab-server:12300). "
         "Requires this project's instruments to be named via attribute_name "
-        "and the server to have a matching loaded Exp.",
+        "and the server to have a matching loaded project.",
     )
     args = parser.parse_args()
 
-    exp: Exp | RemoteExp
-    if args.remote:
-        exp = RemoteExp.connect(args.remote)
-    else:
-        this_file = Path(__file__).resolve()
-        project_yaml = this_file.with_suffix(".yaml")
-        exp = load_exp_from_yaml(project_yaml)
+    # Each generated project directory contains exactly one project YAML named
+    # after the directory; resolve it independently of this file's name.
+    project_dir = Path(__file__).resolve().parent
+    project_yaml = project_dir / f"{project_dir.name}.yaml"
+    project = load_project_config(project_yaml)
 
-    resources = create_instrument_resources(exp)
+    resource_source: object | None = None
+    if args.remote:
+        resource_source = RemoteResources.connect(args.remote)
+
+    resources = create_instrument_resources(project, resource_source)
 
     measurement = PCRCurve(params=resources.params, output_dir=Path("./data"))
     measurement.set_instruments(

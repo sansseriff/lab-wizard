@@ -63,9 +63,13 @@ class YokogawaAQ2212(
         if key in self.children:
             return self.children[key]
         params = self.params.children[key]
+        return self.instantiate_child(params, key=key)
+
+    def instantiate_child(self, params: Any, *, key: str | None = None) -> Child[Any, Any]:
         slot_dep = self.dep.slot(int(params.slot))
         child = params.inst(slot_dep, params)  # type: ignore[arg-type]
-        self.children[key] = child
+        if key is not None:
+            self.children[key] = child
         return child
 
     def set_date(self, year: int | None = None, month: int | None = None, day: int | None = None) -> None:

@@ -1,7 +1,12 @@
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from lab_wizard.lib.instruments.general.vsense import VSense
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import (
+    Child,
+    ChildParams,
+    ChannelProvider,
+    SlotLike,
+)
 from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 import time
 import numpy as np
@@ -31,9 +36,11 @@ class Sim970Params(SlotLike, ChildParams["Sim970"]):
     """
 
     type: Literal["sim970"] = "sim970"
-    attribute_name: str = "Sim970"
+    attribute_name: str = ""
     offline: bool | None = False
-    channels: list[Sim970ChannelParams] = Field(default_factory=lambda: [Sim970ChannelParams() for _ in range(4)])
+    channels: list[Sim970ChannelParams] = Field(
+        default_factory=lambda: [Sim970ChannelParams() for _ in range(4)]
+    )
 
     @property
     def inst(self):  # type: ignore[override]
@@ -81,9 +88,7 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
     from_config is inherited from Child base class — no override needed.
     """
 
-    def __init__(
-        self, dep: Sim900SlotDep, params: Sim970Params
-    ):
+    def __init__(self, dep: Sim900SlotDep, params: Sim970Params):
         self._dep = dep
         self.params = params
         self.slot = dep.slot

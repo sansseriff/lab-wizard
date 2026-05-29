@@ -2,7 +2,7 @@
 
 These spin up a real ``WireServer`` (ZMQ ROUTER + pyleco message framing) in a
 background thread, backed by stand-in instruments so no hardware is required,
-and drive it through ``RemoteExp`` + typed proxies — including the typed
+and drive it through ``RemoteResources`` + typed proxies — including the typed
 ``from_attribute(name, as_type=...)`` overload.
 
 The instruments used here (``StandInVSource`` / ``StandInVSense``) are ordinary
@@ -22,7 +22,7 @@ import pytest
 
 from lab_wizard.lib.client.proxies.vsense import RemoteVSense
 from lab_wizard.lib.client.proxies.vsource import RemoteVSource
-from lab_wizard.lib.client.remote_exp import RemoteExp
+from lab_wizard.lib.client.remote_resources import RemoteResources
 from lab_wizard.lib.client.session import RemoteCallError
 from lab_wizard.lib.instruments.general.vsense import StandInVSense, VSense
 from lab_wizard.lib.instruments.general.vsource import StandInVSource, VSource
@@ -54,7 +54,7 @@ def _build_registry() -> tuple[InstrumentRegistry, StandInVSource, StandInVSense
 
 
 class _RemoteFixture:
-    """Bundle of the live server, its backing instruments, and a client Exp."""
+    """Bundle of the live server, its backing instruments, and client resources."""
 
     def __init__(self) -> None:
         self.registry, self.vsource, self.vsense = _build_registry()
@@ -63,10 +63,10 @@ class _RemoteFixture:
         self._thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self._thread.start()
         time.sleep(0.3)  # let the ROUTER socket bind
-        self.exp = RemoteExp.connect(self.bind, timeout_ms=3000)
+        self.resources = RemoteResources.connect(self.bind, timeout_ms=3000)
 
     def close(self) -> None:
-        self.exp.close()
+        self.resources.close()
         self.server.stop()
         self._thread.join(timeout=2)
 
@@ -83,7 +83,7 @@ def remote() -> Iterator[_RemoteFixture]:
 def test_typed_vsource_round_trip(remote: _RemoteFixture) -> None:
     # Typed handle: pyright treats `bias` as StandInVSource (ctrl-click,
     # autocomplete, signature checks all point at the concrete class).
-    bias = remote.exp.from_attribute("bias", StandInVSource)
+    bias = remote.resources.from_attribute("bias", StandInVSource)
 
     # It satisfies the VSource ABC at runtime even though it's a proxy.
     assert isinstance(bias, VSource)
@@ -101,7 +101,7 @@ def test_typed_vsource_round_trip(remote: _RemoteFixture) -> None:
 
 
 def test_typed_vsense_round_trip(remote: _RemoteFixture) -> None:
-    sense = remote.exp.from_attribute("sense", StandInVSense)
+    sense = remote.resources.from_attribute("sense", StandInVSense)
     assert isinstance(sense, VSense)
     assert isinstance(sense, RemoteVSense)
 
@@ -116,34 +116,34 @@ def test_typed_vsense_round_trip(remote: _RemoteFixture) -> None:
 
 def test_untyped_from_attribute_still_works(remote: _RemoteFixture) -> None:
     # Without as_type, the proxy is selected from the server-reported ABC.
-    bias = remote.exp.from_attribute("bias")
+    bias = remote.resources.from_attribute("bias")
     assert isinstance(bias, RemoteVSource)
     assert bias.set_voltage(0.1) is True
     assert remote.vsource.voltage == 0.1
 
 
 def test_proxy_is_cached(remote: _RemoteFixture) -> None:
-    a = remote.exp.from_attribute("bias", StandInVSource)
-    b = remote.exp.from_attribute("bias", StandInVSource)
+    a = remote.resources.from_attribute("bias", StandInVSource)
+    b = remote.resources.from_attribute("bias", StandInVSource)
     assert a is b
 
 
 def test_as_type_is_static_only_lie(remote: _RemoteFixture) -> None:
     # The runtime object is the proxy, never the concrete server class.
-    bias = remote.exp.from_attribute("bias", StandInVSource)
+    bias = remote.resources.from_attribute("bias", StandInVSource)
     assert isinstance(bias, RemoteVSource)
     assert not isinstance(bias, StandInVSource)
 
 
 def test_discovery_apis(remote: _RemoteFixture) -> None:
-    assert remote.exp.list_attributes() == ["bias", "sense"]
+    assert remote.resources.list_attributes() == ["bias", "sense"]
 
-    info = remote.exp.describe_attribute("bias")
+    info = remote.resources.describe_attribute("bias")
     assert info["behavior_abc"] == "VSource"
     assert info["type_hint"] == "StandInVSource"
     assert info["path"] == f"{PATH_PREFIX}vsource"
 
-    descriptions = remote.exp.list_descriptions()
+    descriptions = remote.resources.list_descriptions()
     by_name = {d["attribute_name"]: d for d in descriptions}
     assert by_name["bias"]["behavior_abc"] == "VSource"
     assert by_name["sense"]["behavior_abc"] == "VSense"
@@ -151,11 +151,11 @@ def test_discovery_apis(remote: _RemoteFixture) -> None:
 
 def test_unknown_attribute_raises(remote: _RemoteFixture) -> None:
     with pytest.raises(RemoteCallError):
-        remote.exp.from_attribute("does_not_exist")
+        remote.resources.from_attribute("does_not_exist")
 
 
 def test_unknown_method_raises(remote: _RemoteFixture) -> None:
-    bias = remote.exp.from_attribute("bias", StandInVSource)
+    bias = remote.resources.from_attribute("bias", StandInVSource)
     # Reflective fallback forwards the call; the server has no such method,
     # so it comes back as a structured RemoteCallError.
     with pytest.raises(RemoteCallError):

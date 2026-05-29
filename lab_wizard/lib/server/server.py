@@ -11,8 +11,8 @@ The config file is a small YAML:
       # parent of this file's directory (i.e. lab_wizard/config). The server
       # hosts every configured instrument with an attribute_name.
       config_dir: ..
-      # Optional override: host a single project's Exp instead of config_dir.
-      # exp_yaml: ../../../projects/foo/foo.yaml
+      # Optional override: host a single project's resources instead of config_dir.
+      # project_yaml: ../../../projects/foo/foo.yaml
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import yaml
 from lab_wizard.lib.server.permissions import PermissionGate, load_permissions
 from lab_wizard.lib.server.registry import InstrumentRegistry
 from lab_wizard.lib.server.wire import WireServer
-from lab_wizard.lib.utilities.model_tree import load_exp_from_yaml
+from lab_wizard.lib.utilities.model_tree import load_project_config
 
 
 def _load_server_config(path: Path) -> dict[str, Any]:
@@ -76,13 +76,13 @@ def main(argv: list[str] | None = None) -> int:
     bind: str = cfg["server"]["bind"]
     server_cfg = cfg["server"]
 
-    if server_cfg.get("exp_yaml"):
-        # Override mode: host a single project's Exp (eager — opens hardware).
-        exp_yaml = (config_path.parent / server_cfg["exp_yaml"]).resolve()
-        log.info("Loading Exp from %s (override mode)", exp_yaml)
-        exp = load_exp_from_yaml(exp_yaml)
+    if server_cfg.get("project_yaml"):
+        # Override mode: host a single project's resources (eager — opens hardware).
+        project_yaml = (config_path.parent / server_cfg["project_yaml"]).resolve()
+        log.info("Loading project from %s (override mode)", project_yaml)
+        project = load_project_config(project_yaml)
         log.info("Instantiating instrument tree (this opens hardware connections)")
-        registry = InstrumentRegistry(exp)
+        registry = InstrumentRegistry(project.resources)
     else:
         # Default mode: host the whole config/instruments tree (lazy — hardware
         # opens on first request).

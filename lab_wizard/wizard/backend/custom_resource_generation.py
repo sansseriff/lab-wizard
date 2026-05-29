@@ -18,6 +18,7 @@ from typing import Any, cast
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
 
+from lab_wizard.wizard.backend.python_formatting import format_python_code
 from lab_wizard.lib.utilities.config_io import (
     instrument_hash,
     load_instruments,
@@ -29,11 +30,15 @@ from lab_wizard.wizard.backend.attribute_name_autogen import autogen_attribute_n
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
     _NodeRef,
-    _build_subset_instruments_from_leaves,
+    _build_subset_instruments_from_selected_nodes,
+    _compose_pedagogical_embedded,
+    _compose_pedagogical_yaml_expanded,
     _create_unique_project_dir,
     _node_lineage_leaf_to_root,
     _resolve_selection_node,
     _sanitize_identifier,
+    _selected_runtime_imports,
+    _selected_runtime_type,
     _short_type_token,
     _type_info,
     _walk_tree,
@@ -50,7 +55,7 @@ class CustomResourceSelection(BaseSelection):
 class GenerateCustomResourceRequest(BaseModel):
     selections: list[CustomResourceSelection] = Field(default_factory=list)
     project_prefix: str | None = None
-    generation_style: str = "explicit"  # "explicit" | "from_attribute"
+    generation_style: str = "production"
     file_style: str = "dataclass"  # "dataclass" | "simple"
     resource_class_name: str = "CustomResources"
     persist_attribute_names: bool = False
@@ -103,7 +108,7 @@ def _compose_explicit(
     selections: list[CustomResourceSelection],
     var_names: list[str],
     leaves: list[_NodeRef],
-) -> tuple[list[str], list[tuple[str, str]], list[str]]:
+) -> tuple[list[str], list[tuple[str, str]], list[str], list[str]]:
     """Build the instantiation lines, imports, and per-selection final exprs.
 
     Mirrors the logic in :func:`project_generation._compose_setup` but is
@@ -150,7 +155,7 @@ def _compose_explicit(
 
             if idx == 0:
                 instantiation_lines.append(
-                    f"{var_inst} = {inst_cls}.from_config(exp, key={node_hash!r})"
+                    f"{var_inst} = {inst_cls}.from_config(resource_config, key={node_hash!r})"
                 )
             else:
                 parent_id = tuple(lineage_id[:-1])
@@ -160,6 +165,7 @@ def _compose_explicit(
                 )
 
     final_exprs: list[str] = []
+    final_types: list[str] = []
     for sel, var_name, leaf in zip(selections, var_names, leaves):
         chain_key = tuple(
             (n.type, n.key) for n in reversed(_node_lineage_leaf_to_root(leaf))
@@ -170,19 +176,22 @@ def _compose_explicit(
             final_exprs.append(f"{base_inst}.channels[{sel.channel_index}]")
         else:
             final_exprs.append(base_inst)
+        final_types.append(_selected_runtime_type(leaf, sel.channel_index))
 
+    import_pairs.update(_selected_runtime_imports(selections=selections, leaves=leaves))
     sorted_imports = sorted(import_pairs)
-    return instantiation_lines, sorted_imports, final_exprs
+    return instantiation_lines, sorted_imports, final_exprs, final_types
 
 
 def _compose_from_attribute(
     selections: list[CustomResourceSelection],
     var_names: list[str],
     leaves: list[_NodeRef],
-) -> tuple[list[str], list[tuple[str, str]], list[str]]:
-    """``exp.from_attribute("name")`` based generation. No instrument imports."""
+) -> tuple[list[str], list[tuple[str, str]], list[str], list[str]]:
+    """``resource_config.from_attribute("name")`` based generation. No instrument imports."""
 
     final_exprs: list[str] = []
+    final_types: list[str] = []
     for sel, var_name, leaf in zip(selections, var_names, leaves):
         _validate_channel(leaf, sel.channel_index, var_name)
         attr_name = _channel_attribute_name(leaf, sel.channel_index)
@@ -197,9 +206,15 @@ def _compose_from_attribute(
                 f"{target} (resource '{var_name}'). Set it in the instrument config "
                 "and try again."
             )
-        final_exprs.append(f"exp.from_attribute({attr_name!r})")
+        final_exprs.append(f"resource_config.from_attribute({attr_name!r})")
+        final_types.append(_selected_runtime_type(leaf, sel.channel_index))
 
-    return [], [], final_exprs
+    return (
+        [],
+        sorted(_selected_runtime_imports(selections=selections, leaves=leaves)),
+        final_exprs,
+        final_types,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -219,62 +234,104 @@ def _indent_block(lines: list[str], spaces: int) -> str:
     return "\n".join(f"{pad}{ln}" for ln in lines)
 
 
+def _needs_resource_config_alias(body_lines: list[str]) -> bool:
+    """Whether to prepend ``resource_config = project.resources``.
+
+    Styles that reference ``resource_config`` but don't define it themselves
+    (production / from_attribute) need the alias prepended. The pedagogical
+    YAML-expanded style already emits its own ``resource_config = project.resources``
+    line, so we avoid inserting a duplicate.
+    """
+    references = any("resource_config" in line for line in body_lines)
+    already_defined = any(
+        line.lstrip().startswith("resource_config =") for line in body_lines
+    )
+    return references and not already_defined
+
+
 def _render_dataclass_file(
     *,
     class_name: str,
     var_names: list[str],
     instantiation_lines: list[str],
     final_exprs: list[str],
+    final_types: list[str],
     import_pairs: list[tuple[str, str]],
+    uses_project_yaml: bool = True,
+    uses_cast: bool = False,
 ) -> str:
     imports_block = _render_imports(import_pairs)
-    field_lines = [f"{name}: Any" for name in var_names]
-    assign_lines = [f"{name} = {expr}" for name, expr in zip(var_names, final_exprs)]
+    field_lines = [f"{name}: {typ}" for name, typ in zip(var_names, final_types)]
+    assign_lines = [
+        f"{name}: {typ} = {expr}"
+        for name, typ, expr in zip(var_names, final_types, final_exprs)
+    ]
     return_kwargs = [f"{name}={name}," for name in var_names]
 
     body_lines = instantiation_lines + assign_lines
 
-    parts = [
-        _HEADER,
-        "from dataclasses import dataclass",
-        "from pathlib import Path",
-        "from typing import Any",
-        "",
-        "import yaml",
-        "",
-        "from lab_wizard.lib.utilities.model_tree import Exp",
-    ]
+    typing_names: list[str] = []
+    if uses_cast:
+        typing_names.append("cast")
+    parts = [_HEADER, "from dataclasses import dataclass"]
+    if typing_names:
+        parts.append(f"from typing import {', '.join(typing_names)}")
+    if uses_project_yaml:
+        parts.extend(
+            [
+                "from pathlib import Path",
+                "",
+                "from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config",
+            ]
+        )
     if imports_block:
         parts.append(imports_block)
     parts.extend(
-        [
-            "",
-            "",
-            "@dataclass",
-            f"class {class_name}:",
-            _indent_block(field_lines, 4),
-            "",
-            "",
-            "def load_exp_from_yaml(yaml_path: str | Path):",
-            '    with open(yaml_path, "r", encoding="utf-8") as f:',
-            "        return Exp.model_validate(yaml.safe_load(f))",
-            "",
-            "",
-            f"def create_custom_resources(exp: Exp) -> {class_name}:",
-            _indent_block(body_lines, 4),
-            f"    return {class_name}(",
-            _indent_block(return_kwargs, 8),
-            "    )",
-            "",
-            "",
-            'if __name__ == "__main__":',
-            "    this_file = Path(__file__).resolve()",
-            '    exp = load_exp_from_yaml(this_file.with_suffix(".yaml"))',
-            "    resources = create_custom_resources(exp)",
-            "    print(resources)",
-            "",
-        ]
+        ["", "", "@dataclass", f"class {class_name}:", _indent_block(field_lines, 4)]
     )
+    if uses_project_yaml:
+        parts.extend(
+            [
+                "",
+                "",
+                f"def create_custom_resources(project: ProjectConfig) -> {class_name}:",
+            ]
+        )
+        if _needs_resource_config_alias(body_lines):
+            parts.append("    resource_config = project.resources")
+        parts.append(_indent_block(body_lines, 4))
+    else:
+        parts.extend(
+            [
+                "",
+                "",
+                f"def create_custom_resources() -> {class_name}:",
+                _indent_block(body_lines, 4),
+            ]
+        )
+    parts.extend(
+        [f"    return {class_name}(", _indent_block(return_kwargs, 8), "    )", "", ""]
+    )
+    if uses_project_yaml:
+        parts.extend(
+            [
+                'if __name__ == "__main__":',
+                "    this_file = Path(__file__).resolve()",
+                '    project = load_project_config(this_file.with_suffix(".yaml"))',
+                "    resources = create_custom_resources(project)",
+                "    print(resources)",
+                "",
+            ]
+        )
+    else:
+        parts.extend(
+            [
+                'if __name__ == "__main__":',
+                "    resources = create_custom_resources()",
+                "    print(resources)",
+                "",
+            ]
+        )
     return "\n".join(parts)
 
 
@@ -283,43 +340,63 @@ def _render_simple_file(
     var_name: str,
     instantiation_lines: list[str],
     final_expr: str,
+    final_type: str,
     import_pairs: list[tuple[str, str]],
+    uses_project_yaml: bool = True,
+    uses_cast: bool = False,
 ) -> str:
     imports_block = _render_imports(import_pairs)
-    body_lines = instantiation_lines + [f"{var_name} = {final_expr}"]
+    body_lines = instantiation_lines + [f"{var_name}: {final_type} = {final_expr}"]
 
-    parts = [
-        _HEADER,
-        "from pathlib import Path",
-        "",
-        "import yaml",
-        "",
-        "from lab_wizard.lib.utilities.model_tree import Exp",
-    ]
+    parts = [_HEADER]
+    if uses_cast:
+        parts.append("from typing import cast")
+    if uses_project_yaml:
+        parts.extend(
+            [
+                "from pathlib import Path",
+                "",
+                "from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config",
+            ]
+        )
     if imports_block:
         parts.append(imports_block)
-    parts.extend(
-        [
-            "",
-            "",
-            "def load_exp_from_yaml(yaml_path: str | Path):",
-            '    with open(yaml_path, "r", encoding="utf-8") as f:',
-            "        return Exp.model_validate(yaml.safe_load(f))",
-            "",
-            "",
-            "def create_custom_resource(exp: Exp):",
-            _indent_block(body_lines, 4),
-            f"    return {var_name}",
-            "",
-            "",
-            'if __name__ == "__main__":',
-            "    this_file = Path(__file__).resolve()",
-            '    exp = load_exp_from_yaml(this_file.with_suffix(".yaml"))',
-            "    resource = create_custom_resource(exp)",
-            "    print(resource)",
-            "",
-        ]
-    )
+    if uses_project_yaml:
+        parts.extend(
+            [
+                "",
+                "",
+                "def create_custom_resource(project: ProjectConfig):",
+            ]
+        )
+        if _needs_resource_config_alias(body_lines):
+            parts.append("    resource_config = project.resources")
+        parts.append(_indent_block(body_lines, 4))
+    else:
+        parts.extend(
+            ["", "", "def create_custom_resource():", _indent_block(body_lines, 4)]
+        )
+    parts.extend([f"    return {var_name}", "", ""])
+    if uses_project_yaml:
+        parts.extend(
+            [
+                'if __name__ == "__main__":',
+                "    this_file = Path(__file__).resolve()",
+                '    project = load_project_config(this_file.with_suffix(".yaml"))',
+                "    resource = create_custom_resource(project)",
+                "    print(resource)",
+                "",
+            ]
+        )
+    else:
+        parts.extend(
+            [
+                'if __name__ == "__main__":',
+                "    resource = create_custom_resource()",
+                "    print(resource)",
+                "",
+            ]
+        )
     return "\n".join(parts)
 
 
@@ -331,22 +408,32 @@ def _render_simple_file(
 def _custom_resource_yaml(instruments: dict[str, Any]) -> dict[str, Any]:
     """Minimal project YAML for a custom resource — only the instruments tree.
 
-    The ``Exp`` model still expects ``device``/``savers``/``plotters``/``exp``
-    sections, so we emit empty saver/plotter dicts alongside the instruments.
+    ``ResourceConfig`` defaults ``savers``/``plotters`` to empty dicts, so we
+    emit empty saver/plotter sections alongside the instruments.
     """
     return {
-        "exp": {"type": "custom_resource"},
-        "device": {
-            "type": "device",
-            "name": "custom_resource_device",
-            "model": "unknown",
-            "description": "Generated by wizard create_custom_resource",
+        "project": {
+            "schema_version": 1,
+            "measurement_type": "custom_resource",
+            "created_by": "lab_wizard",
         },
-        "savers": {},
-        "plotters": {},
-        "instruments": {
-            key: model_to_commented_map(value, exclude_none=True)
-            for key, value in instruments.items()
+        "run": {
+            "device": {
+                "type": "device",
+                "name": "custom_resource_device",
+                "model": "unknown",
+                "description": "Generated by wizard create_custom_resource",
+            },
+            "metadata": {},
+        },
+        "measurement": {"params": {}},
+        "resources": {
+            "savers": {},
+            "plotters": {},
+            "instruments": {
+                key: model_to_commented_map(value, exclude_none=True)
+                for key, value in instruments.items()
+            },
         },
     }
 
@@ -364,7 +451,15 @@ def generate_custom_resource_project(
 ) -> dict[str, Any]:
     if not req.selections:
         raise ValueError("At least one selection is required")
-    if req.generation_style not in ("explicit", "from_attribute"):
+    if req.generation_style == "explicit":
+        req.generation_style = "production"
+    allowed_styles = {
+        "production",
+        "from_attribute",
+        "pedagogical_yaml_expanded",
+        "pedagogical_embedded",
+    }
+    if req.generation_style not in allowed_styles:
         raise ValueError(f"Unknown generation_style: {req.generation_style}")
     if req.file_style not in ("dataclass", "simple"):
         raise ValueError(f"Unknown file_style: {req.file_style}")
@@ -386,11 +481,11 @@ def generate_custom_resource_project(
         req.file_style,
     )
 
-    if req.generation_style == "explicit":
-        instantiation_lines, import_pairs, final_exprs = _compose_explicit(
+    if req.generation_style == "production":
+        instantiation_lines, import_pairs, final_exprs, final_types = _compose_explicit(
             req.selections, var_names, leaves
         )
-    else:
+    elif req.generation_style == "from_attribute":
         mutations = autogen_attribute_names(
             instruments,
             [(leaf, sel.channel_index) for sel, leaf in zip(req.selections, leaves)],
@@ -405,9 +500,34 @@ def generate_custom_resource_project(
                 logger.info(
                     "Persisted auto-generated attribute_names to %s", config_dir
                 )
-        instantiation_lines, import_pairs, final_exprs = _compose_from_attribute(
-            req.selections, var_names, leaves
+        instantiation_lines, import_pairs, final_exprs, final_types = (
+            _compose_from_attribute(req.selections, var_names, leaves)
         )
+    elif req.generation_style == "pedagogical_yaml_expanded":
+        instantiation_lines, import_pairs, final_exprs = (
+            _compose_pedagogical_yaml_expanded(
+                selections=req.selections,
+                var_names=var_names,
+                leaves=leaves,
+            )
+        )
+        final_types = [
+            _selected_runtime_type(leaf, sel.channel_index)
+            for sel, leaf in zip(req.selections, leaves)
+        ]
+    else:
+        instantiation_lines, import_pairs, final_exprs = _compose_pedagogical_embedded(
+            selections=req.selections,
+            var_names=var_names,
+            leaves=leaves,
+        )
+        final_types = [
+            _selected_runtime_type(leaf, sel.channel_index)
+            for sel, leaf in zip(req.selections, leaves)
+        ]
+
+    uses_project_yaml = req.generation_style != "pedagogical_embedded"
+    uses_cast = False
 
     if req.file_style == "dataclass":
         class_name = _sanitize_identifier(req.resource_class_name) or "CustomResources"
@@ -416,17 +536,25 @@ def generate_custom_resource_project(
             var_names=var_names,
             instantiation_lines=instantiation_lines,
             final_exprs=final_exprs,
+            final_types=final_types,
             import_pairs=import_pairs,
+            uses_project_yaml=uses_project_yaml,
+            uses_cast=uses_cast,
         )
     else:
         setup_code = _render_simple_file(
             var_name=var_names[0],
             instantiation_lines=instantiation_lines,
             final_expr=final_exprs[0],
+            final_type=final_types[0],
             import_pairs=import_pairs,
+            uses_project_yaml=uses_project_yaml,
+            uses_cast=uses_cast,
         )
 
-    subset = _build_subset_instruments_from_leaves(leaves)
+    subset = _build_subset_instruments_from_selected_nodes(
+        [(leaf, sel.channel_index) for sel, leaf in zip(req.selections, leaves)]
+    )
     prefix = (
         _sanitize_identifier(req.project_prefix or "custom_resource")
         or "custom_resource"
@@ -443,6 +571,7 @@ def generate_custom_resource_project(
         y_writer.dump(to_commented_yaml_value(yaml_payload), f)
 
     setup_path = project_dir / f"{project_dir.name}.py"
+    setup_code = format_python_code(setup_code)
     setup_path.write_text(setup_code, encoding="utf-8")
     logger.info(
         "Generated custom resource artifacts yaml=%s setup=%s", yaml_path, setup_path

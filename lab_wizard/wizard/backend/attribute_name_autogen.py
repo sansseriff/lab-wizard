@@ -2,10 +2,10 @@
 
 When the wizard's *Create Custom Resource* feature generates code in
 ``from_attribute`` style, every selected leaf (or channel) must have a
-non-empty ``attribute_name`` so that ``Exp.from_attribute(...)`` can find
-it at runtime. This module fills in any missing names by deriving a
+non-empty ``attribute_name`` so that ``ResourceConfig.from_attribute(...)`` can
+find it at runtime. This module fills in any missing names by deriving a
 unique identifier from the instrument type, checked for collisions
-against the *entire* configured instruments tree (``Exp.from_attribute``
+against the *entire* configured instruments tree (``ResourceConfig.from_attribute``
 walks the whole tree and the first match wins, so global uniqueness is
 required).
 

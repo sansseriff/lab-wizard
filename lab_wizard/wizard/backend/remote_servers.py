@@ -9,7 +9,7 @@ measurements. This module owns ``config/remote/servers.yaml``:
 
 and provides:
   * CRUD over that file,
-  * a live connection test (``RemoteExp.connect`` + ``list_descriptions``),
+  * a live connection test (``RemoteResources.connect`` + ``list_descriptions``),
   * aggregation of every reachable server's named attributes, each tagged with
     its ``behavior_abc`` so measurement creation can match remote attributes to
     a measurement's required resource types exactly like local instruments.
@@ -26,7 +26,7 @@ from typing import Any
 
 from ruamel.yaml import YAML as RuamelYAML
 
-from lab_wizard.lib.client.remote_exp import RemoteExp
+from lab_wizard.lib.client.remote_resources import RemoteResources
 
 logger = logging.getLogger("lab_wizard.wizard.backend.remote_servers")
 
@@ -101,11 +101,11 @@ def test_connection(url: str, *, timeout_ms: int = 3000) -> dict[str, Any]:
     friendly status for an unreachable server.
     """
     try:
-        exp = RemoteExp.connect(url, timeout_ms=timeout_ms)
+        resources = RemoteResources.connect(url, timeout_ms=timeout_ms)
         try:
-            descriptions = exp.list_descriptions()
+            descriptions = resources.list_descriptions()
         finally:
-            exp.close()
+            resources.close()
         return {"ok": True, "attributes": descriptions}
     except Exception as e:  # noqa: BLE001 - surfaced to the UI as a status
         logger.warning("Remote server test failed for %s: %s", url, e)

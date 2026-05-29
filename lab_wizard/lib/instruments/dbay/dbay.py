@@ -158,6 +158,9 @@ class DBay(
             return self.children[key]
 
         params = self.params.children[key]
+        return self.instantiate_child(params, key=key)
+
+    def instantiate_child(self, params: Any, *, key: str | None = None) -> Child[DBayClient, Any]:
         slot = int(params.slot)
         if self.params.mode == "gui":
             module = self.client.module(slot)
@@ -171,5 +174,6 @@ class DBay(
             else:
                 module = None
         child = params.inst(module, params)
-        self.children[key] = child
+        if key is not None:
+            self.children[key] = child
         return child
