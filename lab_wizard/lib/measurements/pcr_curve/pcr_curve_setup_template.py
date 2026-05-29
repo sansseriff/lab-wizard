@@ -78,9 +78,5 @@ if __name__ == "__main__":
 
     resources = create_instrument_resources(project, resource_source)
 
-    measurement = PCRCurve(params=resources.params, output_dir=Path("./data"))
-    measurement.set_instruments(
-        voltage_source=resources.voltage_source,
-        voltmeter=resources.voltage_source,
-        counter=resources.counter,
-    )
+    measurement = PCRCurve(resources)
+    measurement.run_measurement()
