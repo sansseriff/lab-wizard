@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import logging
 from textwrap import indent
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
@@ -374,20 +374,21 @@ def _compose_setup(
             )
             base_inst = created_inst[chain]
             ch_idx = inst_selected_channels.get(var_name)
-            ch_list = getattr(leaf.params, "channels", None)
-            channels_list = (
-                cast(list[Any], ch_list) if isinstance(ch_list, list) else None
+            num_channels = (
+                int(getattr(type(leaf.params), "num_channels", 0) or 0)
+                if isinstance(getattr(leaf.params, "channels", None), dict)
+                else 0
             )
-            if channels_list is not None and len(channels_list) > 1:
+            if num_channels > 1:
                 if ch_idx is None:
                     raise ValueError(
                         f"Selection for {var_name} uses multi-channel instrument "
                         f"{leaf.type}:{leaf.key}; channel_index is required"
                     )
-                if ch_idx < 0 or ch_idx >= len(channels_list):
+                if ch_idx < 0 or ch_idx >= num_channels:
                     raise ValueError(
                         f"Invalid channel_index {ch_idx} for {leaf.type}:{leaf.key}; "
-                        f"valid range is 0..{len(channels_list) - 1}"
+                        f"valid range is 0..{num_channels - 1}"
                     )
                 return f"{base_inst}.channels[{ch_idx}]"
             if ch_idx is not None:
@@ -522,9 +523,9 @@ def _compose_setup_from_attribute(
         leaf = inst_selected_map[req.variable_name]
         ch_idx = inst_selected_channels.get(req.variable_name)
         if ch_idx is not None:
-            ch_list = getattr(leaf.params, "channels", None)
-            if isinstance(ch_list, list) and ch_idx < len(ch_list):
-                attr_name = getattr(ch_list[ch_idx], "attribute_name", "") or ""
+            ch_map = getattr(leaf.params, "channels", None)
+            if isinstance(ch_map, dict) and ch_idx in ch_map:
+                attr_name = getattr(ch_map[ch_idx], "attribute_name", "") or ""
             else:
                 attr_name = ""
         else:

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import logging
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
@@ -80,27 +80,27 @@ def _unique_var_names(raw_names: list[str]) -> list[str]:
 
 def _channel_attribute_name(leaf: _NodeRef, channel_index: int | None) -> str:
     if channel_index is not None:
-        ch_list = getattr(leaf.params, "channels", None)
-        if isinstance(ch_list, list) and 0 <= channel_index < len(ch_list):
-            return getattr(ch_list[channel_index], "attribute_name", "") or ""
+        ch_map = getattr(leaf.params, "channels", None)
+        if isinstance(ch_map, dict) and channel_index in ch_map:
+            return getattr(ch_map[channel_index], "attribute_name", "") or ""
         return ""
     return getattr(leaf.params, "attribute_name", "") or ""
 
 
 def _validate_channel(leaf: _NodeRef, channel_index: int | None, var_name: str) -> None:
-    ch_list = getattr(leaf.params, "channels", None)
-    channels_list = cast(list[Any], ch_list) if isinstance(ch_list, list) else None
     if channel_index is None:
         return
-    if channels_list is None:
+    ch_map = getattr(leaf.params, "channels", None)
+    if not isinstance(ch_map, dict):
         raise ValueError(
             f"channel_index provided for {leaf.type}:{leaf.key} (resource '{var_name}'), "
             "but the instrument has no channels."
         )
-    if channel_index < 0 or channel_index >= len(channels_list):
+    num_channels = int(getattr(type(leaf.params), "num_channels", 0) or 0)
+    if channel_index < 0 or channel_index >= num_channels:
         raise ValueError(
             f"Invalid channel_index {channel_index} for {leaf.type}:{leaf.key} "
-            f"(resource '{var_name}'); valid range is 0..{len(channels_list) - 1}"
+            f"(resource '{var_name}'); valid range is 0..{num_channels - 1}"
         )
 
 

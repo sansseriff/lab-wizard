@@ -12,7 +12,7 @@ Structured as:
 from __future__ import annotations
 
 import random
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
     Instrument,
     CanInstantiate,
     ChannelProvider,
+    ChannelsLike,
     IPLike,
 )
 from lab_wizard.lib.utilities.model_tree import ResourceConfig
@@ -109,12 +110,12 @@ class Keysight53220AChannel(Counter):
         return True
 
 
-class Keysight53220AParams(IPLike, BaseModel, CanInstantiate["Keysight53220A"]):
+class Keysight53220AParams(ChannelsLike, IPLike, BaseModel, CanInstantiate["Keysight53220A"]):
     """Parameters for Keysight 53220A universal counter.
 
     Standalone top-level instrument connected via VISA (TCP/IP).
     Per-channel settings (threshold, gate time, trigger slope, etc.) live in
-    each entry of ``channels``.
+    the ``channels`` mapping, keyed by hardware channel index.
     """
 
     type: Literal["keysight53220A"] = "keysight53220A"
@@ -122,12 +123,8 @@ class Keysight53220AParams(IPLike, BaseModel, CanInstantiate["Keysight53220A"]):
     ip_port: int = 5025
     offline: bool = False
     ext_trigger: bool = False
-    channels: list[Keysight53220AChannelParams] = Field(
-        default_factory=lambda: [
-            Keysight53220AChannelParams(),
-            Keysight53220AChannelParams(),
-        ]
-    )
+    num_channels: ClassVar[int] = 2
+    channels: dict[int, Keysight53220AChannelParams] = Field(default_factory=dict)
 
     @property
     def inst(self) -> type[Keysight53220A]:
@@ -152,9 +149,9 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
                 dep=dep,
                 channel_index=i,
                 offline=params.offline,
-                params=ch_params,
+                params=params.channels.get(i, Keysight53220AChannelParams()),
             )
-            for i, ch_params in enumerate(params.channels)
+            for i in range(params.num_channels)
         ]
 
         if not params.offline:
@@ -180,7 +177,8 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
             return True
 
         success = True
-        for ch, ch_params in zip(self.channels, self.params.channels):
+        for i, ch in enumerate(self.channels):
+            ch_params = self.params.channels.get(i, Keysight53220AChannelParams())
             if ch_params.threshold_type == "absolute":
                 success &= ch.set_threshold(ch_params.threshold_absolute)
             success &= ch.set_gate_time(ch_params.gate_time)

@@ -8,7 +8,7 @@ Verifies that ``InstrumentRegistry.from_instruments`` / ``from_config_dir``:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,7 @@ class _FakeRoot:
 
     def make_child(self, key: str) -> Any:
         _CALLS.append(f"make_child:{key}")
-        return _FakeLeaf(len(self._children[key].channels))
+        return _FakeLeaf(type(self._children[key]).num_channels)
 
 
 class _ChannelParams(BaseModel):
@@ -64,7 +64,8 @@ class _ChannelParams(BaseModel):
 
 class _LeafParams(BaseModel):
     attribute_name: str = ""
-    channels: list[_ChannelParams] = Field(default_factory=list)
+    num_channels: ClassVar[int] = 2
+    channels: dict[int, _ChannelParams] = Field(default_factory=dict)
 
     @property
     def inst(self) -> type:
@@ -88,10 +89,7 @@ def _tree() -> dict[str, Any]:
         "root1": _RootParams(
             children={
                 "leafA": _LeafParams(
-                    channels=[
-                        _ChannelParams(attribute_name="bias"),
-                        _ChannelParams(),
-                    ]
+                    channels={0: _ChannelParams(attribute_name="bias")}
                 )
             }
         )

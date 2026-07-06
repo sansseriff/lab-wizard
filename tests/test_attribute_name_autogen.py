@@ -15,14 +15,14 @@ class _ChannelParams(BaseModel):
 class _Params(BaseModel):
     type: str = "dac4D"
     attribute_name: str = ""
-    channels: list[_ChannelParams] = Field(default_factory=list)
+    channels: dict[int, _ChannelParams] = Field(default_factory=dict)
     children: dict = Field(default_factory=dict)
 
 
 def _leaf(type_str: str, n_channels: int = 0) -> _NodeRef:
     params = _Params(
         type=type_str,
-        channels=[_ChannelParams() for _ in range(n_channels)],
+        channels={i: _ChannelParams() for i in range(n_channels)},
     )
     return _NodeRef(key="k", params=params, parent=None)
 

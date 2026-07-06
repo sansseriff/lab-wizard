@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Annotated, Literal
 from pydantic import BaseModel, Field
 
@@ -19,14 +20,23 @@ from lab_wizard.lib.instruments.general.discovery import (
 )
 from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4DParams, Dac4D
 from lab_wizard.lib.instruments.dbay.modules.dac16d import Dac16DParams, Dac16D
+from lab_wizard.lib.instruments.dbay.modules.adc4d import Adc4DParams, Adc4D
 from lab_wizard.lib.instruments.dbay.modules.empty import EmptyParams, Empty
 
 
-# Map DBay server module types to child Params types
-_CHILD_TYPE_MAP: dict[str, str] = {"dac4D": "dac4D", "dac16D": "dac16D"}
+# Map DBay server module types (core.type in the GUI snapshot) to child Params
+# types. Keys must match the server's casing exactly (dac4D / dac16D / adc4D) —
+# no case sanitization. Any module type absent here is unsupported and is
+# surfaced as a warning during discovery rather than silently dropped.
+_CHILD_TYPE_MAP: dict[str, str] = {
+    "dac4D": "dac4D",
+    "dac16D": "dac16D",
+    "adc4D": "adc4D",
+}
 
 DBayChildParams = Annotated[
-    Dac4DParams | Dac16DParams | EmptyParams, Field(discriminator="type")
+    Dac4DParams | Dac16DParams | Adc4DParams | EmptyParams,
+    Field(discriminator="type"),
 ]
 
 
@@ -86,18 +96,30 @@ class DBayParams(
     def _discover_children(
         cls, params: DBayDiscoverChildrenParams
     ) -> ChildrenResult:
-        import json
-        import urllib.request
-
-        url = f"http://{params.ip_address}:{params.ip_port}/full-state"
-        with urllib.request.urlopen(url, timeout=5) as r:
-            state = json.loads(r.read())
+        # Ask the DBay client which modules the GUI server reports. It owns the
+        # transport (a lab-link websocket, formerly the HTTP /full-state
+        # endpoint), so discovery never touches it directly. load_state=False
+        # keeps construction cheap: present_modules() connects on demand and
+        # does not instantiate live module objects.
+        client = DBayClient(
+            mode="gui",
+            server_address=params.ip_address,
+            port=params.ip_port,
+            load_state=False,
+        )
+        try:
+            present = client.present_modules()
+        finally:
+            client.close()
 
         children: list[DiscoveredChild] = []
-        for m in state.get("data", []):
-            mtype = m.get("core", {}).get("type")
-            slot = m.get("core", {}).get("slot")
-            if mtype not in _CHILD_TYPE_MAP or slot is None:
+        unsupported: list[str] = []
+        for slot, mtype in present:
+            if mtype not in _CHILD_TYPE_MAP:
+                # Don't silently drop it — tell the user this build can't
+                # configure the module so a missing module type is visible
+                # instead of mysteriously absent from the tree.
+                unsupported.append(f"slot {slot}: unsupported module type '{mtype}'")
                 continue
             children.append(
                 DiscoveredChild(
@@ -105,9 +127,18 @@ class DBayParams(
                     key_fields={"slot": str(slot)},
                 )
             )
+        if unsupported:
+            logging.getLogger(__name__).warning(
+                "DBay %s:%s reported %d unsupported module(s): %s",
+                params.ip_address,
+                params.ip_port,
+                len(unsupported),
+                "; ".join(unsupported),
+            )
         return ChildrenResult(
             children=children,
             parent_key=f"{params.ip_address}:{params.ip_port}",
+            warnings=unsupported,
         )
 
 
@@ -165,12 +196,18 @@ class DBay(
         if self.params.mode == "gui":
             module = self.client.module(slot)
         else:
-            from dbay import dac4D as dac4D_mod, dac16D as dac16D_mod
+            from dbay import (
+                dac4D as dac4D_mod,
+                dac16D as dac16D_mod,
+                ADC4D as adc4D_mod,
+            )
 
             if isinstance(params, Dac4DParams):
                 module = self.client.attach_module(slot, dac4D_mod)
             elif isinstance(params, Dac16DParams):
                 module = self.client.attach_module(slot, dac16D_mod)
+            elif isinstance(params, Adc4DParams):
+                module = self.client.attach_module(slot, adc4D_mod)
             else:
                 module = None
         child = params.inst(module, params)

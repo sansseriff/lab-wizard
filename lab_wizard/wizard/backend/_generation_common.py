@@ -157,18 +157,23 @@ def _selected_channel_indices_by_lineage(
 
 
 def _trim_channels_for_selection(params: Any, channel_indices: set[int] | None) -> Any:
+    """Reduce a channel provider's params to exactly the selected channel entries.
+
+    Project YAMLs carry a sparse ``channels`` mapping — only the channels the
+    experiment selected — while config/instruments stays fully populated.
+    """
     if channel_indices is None or not hasattr(params, "channels"):
         return params
     channels = getattr(params, "channels")
-    if not isinstance(channels, list) or not channel_indices:
+    if not isinstance(channels, dict) or not channel_indices:
         return params
-    max_index = max(channel_indices)
-    if max_index >= len(channels):
+    missing = sorted(i for i in channel_indices if i not in channels)
+    if missing:
         raise ValueError(
-            f"Selected channel index {max_index} out of range for "
+            f"Selected channel indices {missing} not configured for "
             f"{type(params).__name__}.channels"
         )
-    params.channels = channels[: max_index + 1]  # type: ignore[attr-defined]
+    params.channels = {i: channels[i] for i in sorted(channel_indices)}  # type: ignore[attr-defined]
     return params
 
 

@@ -157,8 +157,8 @@ def _search_node(
         return path, None
 
     channels = getattr(params, "channels", None)
-    if isinstance(channels, list):
-        for idx, ch_params in enumerate(channels):
+    if isinstance(channels, dict):
+        for idx, ch_params in channels.items():
             if getattr(ch_params, "attribute_name", None) == attribute_name:
                 return path, idx
 

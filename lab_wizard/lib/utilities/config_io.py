@@ -110,7 +110,12 @@ def to_commented_yaml_value(value: Any) -> Any:
     if isinstance(value, dict):
         cm = CommentedMap()
         dict_value = cast(dict[Any, Any], value)
-        for k, v in dict_value.items():
+        items = list(dict_value.items())
+        # Integer-keyed maps (e.g. channels) are written in index order so
+        # regenerated YAML diffs stably.
+        if items and all(isinstance(k, int) for k, _ in items):
+            items.sort(key=lambda kv: kv[0])
+        for k, v in items:
             cm[k] = to_commented_yaml_value(v)
         return cm
     if isinstance(value, list):
@@ -341,35 +346,51 @@ def load_instruments_with_paths(
 # ---------------------------- Merging ----------------------------
 
 
-def merge_parent_params(base_parent: Any, delta_parent: Any) -> Any:
-    """Merge delta_parent into base_parent in-place, unioning children by key.
+def _merge_keyed_params_map(base_map: Dict[Any, Any], delta_map: Dict[Any, Any]) -> Dict[Any, Any]:
+    """Union two keyed Params maps in-place: delta entries win per key, base entries survive.
 
-    - For simple fields present in delta (excluding children), overwrite base fields.
-    - For children dicts, recursively merge when both are parents; otherwise replace child.
+    Shared by ``children`` (hash-keyed), ``channels`` (index-keyed), and the
+    top-level instruments dict. When both sides of a key are parents (carry a
+    ``children`` attr), they are deep-merged; otherwise delta replaces base.
+    """
+    def _has_keyed_map(obj: Any) -> bool:
+        return isinstance(getattr(obj, "children", None), dict) or isinstance(
+            getattr(obj, "channels", None), dict
+        )
+
+    for key, dval in (delta_map or {}).items():
+        if key not in base_map:
+            base_map[key] = dval
+            continue
+        bval = base_map[key]
+        if _has_keyed_map(bval) and _has_keyed_map(dval):
+            merge_parent_params(bval, dval)
+        else:
+            base_map[key] = dval
+    return base_map
+
+
+def merge_parent_params(base_parent: Any, delta_parent: Any) -> Any:
+    """Merge delta_parent into base_parent in-place, unioning keyed maps by key.
+
+    - For simple fields present in delta (excluding children/channels), overwrite base fields.
+    - ``children`` and ``channels`` are unioned by key so a sparse delta (e.g. a
+      project subset carrying one channel) never erases sibling entries in base.
     """
     # Merge simple fields
     for name in getattr(base_parent, "model_fields", {}).keys():  # pydantic v2
-        if name == "children":
+        if name in ("children", "channels"):
             continue
         if hasattr(delta_parent, name):
             setattr(base_parent, name, getattr(delta_parent, name))
 
-    # Merge children
-    base_children: Dict[str, Any] = getattr(base_parent, "children", {})
-    delta_children: Dict[str, Any] = getattr(delta_parent, "children", {})
-    for key, dchild in (delta_children or {}).items():
-        if key not in base_children:
-            base_children[key] = dchild
+    # Union keyed maps
+    for map_field in ("children", "channels"):
+        base_map = getattr(base_parent, map_field, None)
+        delta_map = getattr(delta_parent, map_field, None)
+        if not isinstance(base_map, dict) or not isinstance(delta_map, dict):
             continue
-        bchild = base_children[key]
-        # If both have children attribute, treat as parent and merge recursively
-        if hasattr(bchild, "children") and hasattr(dchild, "children"):
-            merge_parent_params(bchild, dchild)
-        else:
-            base_children[key] = dchild
-    # write back possibly new dict
-    if hasattr(base_parent, "children"):
-        base_parent.children = base_children  # type: ignore[attr-defined]
+        setattr(base_parent, map_field, _merge_keyed_params_map(base_map, delta_map))
     return base_parent
 
 
@@ -509,17 +530,7 @@ def validate_and_repair_hashes(
 
 def merge_instruments(base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, Any]:
     """Merge delta instruments dict into base dict (in place)."""
-    for key, dval in (delta or {}).items():
-        if key not in base:
-            base[key] = dval
-            continue
-        bval = base[key]
-        # If both look like parents (have children), deep-merge
-        if hasattr(bval, "children") and hasattr(dval, "children"):
-            merge_parent_params(bval, dval)
-        else:
-            base[key] = dval
-    return base
+    return _merge_keyed_params_map(base, delta)
 
 
 def load_merge_save_instruments(
@@ -628,8 +639,8 @@ def _collect_attribute_names(instruments: Dict[str, Any]) -> set[str]:
             names.add(attr_name)
 
         channels = getattr(params, "channels", None)
-        if isinstance(channels, list):
-            for ch_params in channels:
+        if isinstance(channels, dict):
+            for ch_params in channels.values():
                 ch_attr_name = getattr(ch_params, "attribute_name", None)
                 if isinstance(ch_attr_name, str) and ch_attr_name:
                     names.add(ch_attr_name)
@@ -664,6 +675,11 @@ def assign_missing_leaf_attribute_names(instruments: Dict[str, Any]) -> int:
     terminal channel provider, the channels are the remotely useful objects; for
     non-channel terminal instruments, the leaf node itself is named.
 
+    For channel providers this also enforces the config-tree density
+    invariant: every hardware channel index (``0..num_channels-1``) gets a
+    params entry, so config/instruments always names all channels even though
+    the ``channels`` mapping is sparse elsewhere (e.g. project YAMLs).
+
     Existing names are preserved. Returns the number of names added.
     """
 
@@ -681,8 +697,13 @@ def assign_missing_leaf_attribute_names(instruments: Dict[str, Any]) -> int:
 
         type_str = str(getattr(params, "type", "instrument"))
         channels = getattr(params, "channels", None)
-        if isinstance(channels, list) and channels:
-            for ch_params in channels:
+        if isinstance(channels, dict) and hasattr(type(params), "channel_params_class"):
+            ch_cls = type(params).channel_params_class()
+            for i in range(type(params).num_channels):
+                ch_params = channels.get(i)
+                if ch_params is None:
+                    ch_params = ch_cls()
+                    channels[i] = ch_params
                 if not hasattr(ch_params, "attribute_name"):
                     continue
                 if getattr(ch_params, "attribute_name", None):
@@ -728,12 +749,17 @@ def _node_to_tree_dict(key: str, params: Any) -> Dict[str, Any]:
     children_dict: Dict[str, Any] = {}
     for ck, cp in (getattr(params, "children", {}) or {}).items():
         children_dict[ck] = _node_to_tree_dict(ck, cp)
-    return {
+    node: Dict[str, Any] = {
         "type": type_str,
         "key": key,
         "fields": fields,
         "children": children_dict,
     }
+    # Hardware channel count is a class-level fact (ChannelsLike), not a
+    # params field — surface it for the UI's channel pickers.
+    if isinstance(getattr(params, "channels", None), dict):
+        node["num_channels"] = int(getattr(type(params), "num_channels", 0) or 0)
+    return node
 
 
 def get_configured_tree(config_dir: str | Path) -> List[Dict[str, Any]]:
@@ -874,12 +900,13 @@ def reinitialize_instrument(
 
     existing_children = getattr(target, "children", None)
     existing_attribute_name = getattr(target, "attribute_name", None)
-    existing_channel_attribute_names: list[str | None] = []
+    existing_channel_attribute_names: dict[int, str] = {}
     target_channels = getattr(target, "channels", None)
-    if isinstance(target_channels, list):
-        existing_channel_attribute_names = [
-            getattr(ch_params, "attribute_name", None) for ch_params in target_channels
-        ]
+    if isinstance(target_channels, dict):
+        for idx, ch_params in target_channels.items():
+            name = getattr(ch_params, "attribute_name", None)
+            if isinstance(name, str) and name:
+                existing_channel_attribute_names[idx] = name
     for name in type(target).model_fields:
         if name == "children":
             continue
@@ -894,15 +921,14 @@ def reinitialize_instrument(
     ):
         target.attribute_name = existing_attribute_name
     reset_channels = getattr(target, "channels", None)
-    if isinstance(reset_channels, list):
-        for ch_params, attr_name in zip(
-            reset_channels, existing_channel_attribute_names
-        ):
-            if (
-                isinstance(attr_name, str)
-                and attr_name
-                and hasattr(ch_params, "attribute_name")
-            ):
+    if isinstance(reset_channels, dict) and existing_channel_attribute_names:
+        ch_cls = type(target).channel_params_class()
+        for idx, attr_name in existing_channel_attribute_names.items():
+            ch_params = reset_channels.get(idx)
+            if ch_params is None:
+                ch_params = ch_cls()
+                reset_channels[idx] = ch_params
+            if hasattr(ch_params, "attribute_name"):
                 ch_params.attribute_name = attr_name
 
     # Re-apply the original key field so the hash is stable after save/reload.

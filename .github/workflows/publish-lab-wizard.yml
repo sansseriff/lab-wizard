@@ -1,0 +1,47 @@
+name: Publish lab-wizard
+
+on:
+  push:
+    tags:
+      - "lab-wizard-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install build backend
+        run: python -m pip install --upgrade build
+      - name: Build lab-wizard
+        working-directory: lab_wizard
+        run: python -m build --sdist --wheel
+      - uses: actions/upload-artifact@v5
+        with:
+          name: lab-wizard-dist
+          path: lab_wizard/dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: lab-wizard-dist
+          path: dist
+      - name: Publish lab-wizard
+        uses: pypa/gh-action-pypi-publish@release/v1
+

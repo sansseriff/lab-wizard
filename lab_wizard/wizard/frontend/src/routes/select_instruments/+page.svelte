@@ -107,8 +107,7 @@
 		return path.map((p) => `${p.type}(${p.key})`).join(' -> ');
 	}
 	function channelCount(node: TreeItem): number {
-		const channels = node.fields?.channels;
-		return Array.isArray(channels) ? channels.length : 0;
+		return typeof node.num_channels === 'number' ? node.num_channels : 0;
 	}
 	function reqByVar(variableName: string | null): ResourceReq | null {
 		if (!variableName) return null;

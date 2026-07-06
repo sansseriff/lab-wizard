@@ -16,7 +16,11 @@ from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
 from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
-from lab_wizard.lib.utilities.config_io import instrument_hash, save_instruments_to_config
+from lab_wizard.lib.utilities.config_io import (
+    assign_missing_leaf_attribute_names,
+    instrument_hash,
+    save_instruments_to_config,
+)
 
 _PROLOGIX_KEY = instrument_hash("prologix_gpib", "/dev/ttyUSB0")
 _SIM900_KEY = instrument_hash("sim900", "5")
@@ -190,6 +194,9 @@ def _seed_config(config_dir: Path) -> None:
             },
         )
     }
+    # Mirror the wizard CRUD flow: config/instruments is always saved with
+    # every hardware channel present and named.
+    assign_missing_leaf_attribute_names(instruments)
     save_instruments_to_config(instruments, config_dir)
 
 

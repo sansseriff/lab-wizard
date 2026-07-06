@@ -4,6 +4,9 @@
 		key: string;
 		fields: Record<string, any>;
 		children: Record<string, TreeItem>;
+		// Hardware channel count for channel providers (class-level fact);
+		// absent for instruments without channels.
+		num_channels?: number;
 	};
 
 	export type TreePathRef = {

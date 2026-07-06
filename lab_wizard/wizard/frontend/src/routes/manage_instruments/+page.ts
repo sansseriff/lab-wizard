@@ -34,6 +34,7 @@ export type ChildrenResult = {
 	result_type: 'children';
 	children: { type: string; key_fields: Record<string, string>; idn?: string }[];
 	parent_key: string | null;
+	warnings?: string[];
 };
 
 export type SelfCandidatesResult = {

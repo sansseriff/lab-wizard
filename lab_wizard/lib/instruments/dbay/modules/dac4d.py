@@ -1,7 +1,7 @@
-from typing import Literal, Any
+from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, ChannelsLike, SlotLike
 from lab_wizard.lib.instruments.general.vsource import VSource
 
 
@@ -47,15 +47,17 @@ class Dac4DChannel(VSource):
 """
 Dac4DParams stores the 'path' to any particular channels in use.
 
-If a channel is to be used in an experiment, Dac4DParams will be given a key/value pair
-in the channels list, and the Dac4DChannelParams class will be given an attribute_name string.
+If a channel is to be used in an experiment, Dac4DParams will hold an entry in the
+channels mapping (keyed by hardware channel index), and that Dac4DChannelParams
+entry will be given an attribute_name string.
 """
 
 
-class Dac4DParams(SlotLike, ChildParams["Dac4D"]):
+class Dac4DParams(ChannelsLike, SlotLike, ChildParams["Dac4D"]):
     type: Literal["dac4D"] = "dac4D"
     name: str = "Dac4D"
-    channels: list[Dac4DChannelParams] = Field(default_factory=lambda: [Dac4DChannelParams() for _ in range(4)])
+    num_channels: ClassVar[int] = 4
+    channels: dict[int, Dac4DChannelParams] = Field(default_factory=dict)
 
     @property
     def inst(self):  # type: ignore[override]
@@ -67,8 +69,8 @@ class Dac4D(Child[Any, Dac4DParams], ChannelProvider[Dac4DChannel]):
         self.module = module
         self.params = params
         self.channels: list[Dac4DChannel] = [
-            Dac4DChannel(module, i, ch_params)
-            for i, ch_params in enumerate(params.channels)
+            Dac4DChannel(module, i, params.channels.get(i, Dac4DChannelParams()))
+            for i in range(params.num_channels)
         ]
 
     @property

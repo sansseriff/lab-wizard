@@ -682,6 +682,22 @@
 								⚠ No devices found. Check connection and try again.
 							</p>
 						{/if}
+						{#if discoveryResult.warnings && discoveryResult.warnings.length > 0}
+							<div class="mb-4 rounded-md bg-amber-50 px-3 py-2 text-sm dark:bg-amber-900/20">
+								<p class="font-medium text-amber-700 dark:text-amber-400">
+									⚠ {discoveryResult.warnings.length} unsupported module{discoveryResult.warnings.length === 1 ? '' : 's'}
+								</p>
+								<div class="mt-2 space-y-1">
+									{#each discoveryResult.warnings as warning}
+										<div
+											class="rounded bg-white px-2 py-1 text-xs text-amber-700 dark:bg-gray-800 dark:text-amber-400"
+										>
+											{warning}
+										</div>
+									{/each}
+								</div>
+							</div>
+						{/if}
 					{:else if discoveryResult.result_type === 'probe'}
 						{#if discoveryResult.found.length > 0}
 							<div class="mb-4 rounded-md bg-green-50 px-3 py-2 text-sm dark:bg-green-900/20">

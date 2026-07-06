@@ -105,7 +105,7 @@ def test_add_channelized_leaf_assigns_channel_attribute_names(tmp_path):
     dac4d_hash = instrument_hash("dac4D", "1")
     dac4d = instruments[dbay_hash].children[dac4d_hash]
 
-    names = [ch.attribute_name for ch in dac4d.channels]
+    names = [ch.attribute_name for ch in dac4d.channels.values()]
     assert len(names) == 4
     assert all(name.startswith("dac4d-") for name in names)
     assert len(set(names)) == 4

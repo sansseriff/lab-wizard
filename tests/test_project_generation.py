@@ -11,6 +11,7 @@ from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
 from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
 from lab_wizard.lib.utilities.config_io import (
+    assign_missing_leaf_attribute_names,
     instrument_hash,
     save_instruments_to_config,
 )
@@ -50,6 +51,9 @@ def _write_test_config(config_dir: Path) -> None:
         ),
         _KEYSIGHT_KEY: Keysight53220AParams(ip_address="10.0.0.5", ip_port=5025),
     }
+    # Mirror the wizard CRUD flow: config/instruments is always saved with
+    # every hardware channel present and named.
+    assign_missing_leaf_attribute_names(instruments)
     save_instruments_to_config(instruments, config_dir)
 
 
@@ -237,7 +241,8 @@ def test_generate_pcr_project_uses_from_config_style(tmp_path: Path) -> None:
         loader.load(Path(out["yaml_file"]).read_text(encoding="utf-8")),
     )
     counter = cast(dict[str, Any], payload["resources"]["instruments"][_KEYSIGHT_KEY])
-    assert len(counter["channels"]) == 2
+    # Only the selected channel (index 1) is carried into the project YAML.
+    assert list(counter["channels"]) == [1]
     ast.parse(setup_text)
     assert f"PrologixGPIB.from_config(resources, key={_PROLOGIX_KEY!r})" in setup_text
     assert "Sim900.from_config(" in setup_text
@@ -348,4 +353,5 @@ def test_pedagogical_embedded_trims_selected_channel_payload(tmp_path: Path) -> 
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
     ast.parse(setup_text)
     assert ".channels[1]" in setup_text
-    assert setup_text.count("'settling_time': 0.1") == 2
+    # Only the selected channel's params are embedded.
+    assert setup_text.count("'settling_time': 0.1") == 1

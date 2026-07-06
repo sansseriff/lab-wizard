@@ -1,6 +1,17 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Any, TypeVar, Generic, Iterable, Set, Type, Self, Iterator, ClassVar
+from typing import (
+    Any,
+    TypeVar,
+    Generic,
+    Iterable,
+    Set,
+    Type,
+    Self,
+    Iterator,
+    ClassVar,
+    get_args,
+)
 import inspect
 from pydantic import BaseModel, model_validator, field_validator
 from lab_wizard.lib.instruments.general.discovery import Discoverable
@@ -111,6 +122,74 @@ class SlotLike(BaseModel):
 
     def apply_key(self, key: str) -> None:
         self.slot = key
+
+
+class ChannelsLike(BaseModel):
+    """Params mixin for modules with a fixed set of hardware channels.
+
+    Concrete subclasses must declare BOTH:
+        num_channels: ClassVar[int] = <hardware channel count>
+        channels: dict[int, YourChannelParams] = Field(default_factory=dict)
+
+    The ``channels`` mapping is *sparse*: an entry exists only for channels
+    that carry configuration (e.g. an ``attribute_name``). The hardware layer
+    is always dense — instrument classes construct all ``num_channels`` live
+    channel objects and use default channel params for indices missing from
+    the mapping. Two densities of the same schema:
+
+    - ``config/instruments`` YAMLs are kept fully populated (every index
+      present and named) by ``assign_missing_leaf_attribute_names`` so the
+      remote server can address every channel by attribute_name.
+    - Project YAMLs carry only the channels the experiment selected.
+    """
+
+    num_channels: ClassVar[int]
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if getattr(cls, "__abstractmethods__", None):
+            return
+        if "[" in cls.__name__:
+            return
+        if not isinstance(getattr(cls, "num_channels", None), int):
+            raise TypeError(
+                f"{cls.__name__} inherits ChannelsLike but does not define "
+                "'num_channels: ClassVar[int] = <count>'"
+            )
+        has_channels = any(
+            "channels" in getattr(base, "__annotations__", {})
+            for base in cls.__mro__
+            if base is not ChannelsLike
+        )
+        if not has_channels:
+            raise TypeError(
+                f"{cls.__name__} inherits ChannelsLike but does not define a "
+                "'channels' field. Add: "
+                "channels: dict[int, YourChannelParams] = Field(default_factory=dict)"
+            )
+
+    @field_validator("channels", check_fields=False)
+    @classmethod
+    def _validate_channel_indices(cls, v: dict[int, Any]) -> dict[int, Any]:
+        for idx in v:
+            if not 0 <= idx < cls.num_channels:
+                raise ValueError(
+                    f"channel index {idx} out of range "
+                    f"0..{cls.num_channels - 1} for {cls.__name__}"
+                )
+        return v
+
+    @classmethod
+    def channel_params_class(cls) -> type[BaseModel]:
+        """Return the per-channel Params class from the ``channels`` field annotation."""
+        annotation = cls.model_fields["channels"].annotation
+        args = get_args(annotation)
+        if len(args) != 2 or not (isinstance(args[1], type) and issubclass(args[1], BaseModel)):
+            raise TypeError(
+                f"{cls.__name__}.channels must be annotated as "
+                "dict[int, <ChannelParams subclass>]"
+            )
+        return args[1]
 
 
 class GPIBAddressLike(BaseModel):
@@ -446,9 +525,17 @@ class ChannelProvider(ABC, Generic[ChanT]):
     Provides a small convenience API and an abstract contract that ``channels`` exists.
     Instruments like Sim970, Dac4D, Dac16D inherit from this to guarantee a stable
     interface for higher-level code (measurement orchestration, UI, etc.).
+
+    The live ``channels`` list is always DENSE — one object per hardware
+    channel, regardless of which channels are configured in the (sparse)
+    params ``channels`` mapping (see ChannelsLike). To keep that cheap and
+    safe when several clients share one module, constructing a channel object
+    MUST NOT perform hardware I/O. Hardware-touching per-channel setup (e.g.
+    a future ``initialize_range(A, B)``) belongs in an explicit lifecycle
+    method invoked only for channels a client actually uses.
     """
 
-    # Subclasses must set: self.channels: list[ChanT]
+    # Subclasses must set: self.channels: list[ChanT] (dense, one per hardware channel)
     channels: list[ChanT]
 
     @property
@@ -487,4 +574,5 @@ __all__ = [
     "IPLike",
     "SlotLike",
     "GPIBAddressLike",
+    "ChannelsLike",
 ]

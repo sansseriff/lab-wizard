@@ -53,6 +53,10 @@ class ChildrenResult(BaseModel):
     result_type: Literal["children"] = "children"
     children: list[DiscoveredChild]
     parent_key: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    """Non-fatal messages for the user, e.g. modules the parent reported but
+    this build does not support. The frontend renders these alongside the
+    discovered children."""
 
 
 class SelfCandidate(BaseModel):

@@ -64,7 +64,7 @@ class MeasureIVPoint(Step):
     def run(self) -> Status:
         assert self.context is not None
         sense_voltage = self.voltage_sense.measure()
-        current = (self.bias_voltage - sense_voltage) / self.bias_resistance_ohm
+        current = sense_voltage / self.bias_resistance_ohm
         self.context.data_bus.emit(
             Observation(
                 data={

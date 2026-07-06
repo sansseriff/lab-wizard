@@ -4,23 +4,23 @@ version = "0.0.1"
 description = "A framework for easy setup and control of laboratory experiments."
 requires-python = ">=3.12"
 dependencies = [
-    "lab-procedure",
+    "lab-procedure>=0.0.1,<0.1.0",
     "numpy",
     "matplotlib",
     "pyvisa",
     "pyserial",
     "h5py",
     "pyyaml",
-    "pydantic>=2.11.7",
+    "pydantic>=2.13.0",
     "requests>=2.32.4",
-    "pydantic-yaml",
+    "pydantic-yaml==1.7.0",
     "ruamel-yaml>=0.18.14",
     "pytest>=8.4.1",
     "fastapi[standard]>=0.116.1",
     "pywebview[qt5]>=6.0 ; sys_platform == 'linux'",
     "pywebview[qt]>=6.0 ; sys_platform != 'linux'",
     "pyro5>=5.15",
-    "dbay>=0.2.0",
+    "dbay>=0.4.0",
     "pyvisa-py>=0.8.1",
     "sqlalchemy>=2.0",
     "pyleco>=0.6.0.post1",
@@ -28,18 +28,46 @@ dependencies = [
     "black>=25.11.0",
 ]
 
-[tool.uv.sources]
-pydantic-yaml = { git = "https://github.com/sansseriff/pydantic-yaml", rev = "main" }
-
 [build-system]
 requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-include = ["lab_wizard*"]
+[tool.setuptools]
+package-dir = { "lab_wizard" = "." }
+packages = [
+    "lab_wizard",
+    "lab_wizard.lib",
+    "lab_wizard.lib.client",
+    "lab_wizard.lib.client.proxies",
+    "lab_wizard.lib.instruments",
+    "lab_wizard.lib.instruments.andoAQ8201A",
+    "lab_wizard.lib.instruments.andoAQ8201A.modules",
+    "lab_wizard.lib.instruments.dbay",
+    "lab_wizard.lib.instruments.dbay.addons",
+    "lab_wizard.lib.instruments.dbay.modules",
+    "lab_wizard.lib.instruments.general",
+    "lab_wizard.lib.instruments.sim900",
+    "lab_wizard.lib.instruments.sim900.modules",
+    "lab_wizard.lib.instruments.yokogawaAQ2212",
+    "lab_wizard.lib.instruments.yokogawaAQ2212.modules",
+    "lab_wizard.lib.measurements",
+    "lab_wizard.lib.measurements.general",
+    "lab_wizard.lib.measurements.iv_curve",
+    "lab_wizard.lib.measurements.pcr_curve",
+    "lab_wizard.lib.plotters",
+    "lab_wizard.lib.savers",
+    "lab_wizard.lib.server",
+    "lab_wizard.lib.task_adapters",
+    "lab_wizard.lib.utilities",
+    "lab_wizard.wizard",
+    "lab_wizard.wizard.backend",
+]
 
 [tool.setuptools.package-data]
 lab_wizard = [
+    "config/**/*.yml",
+    "config/**/*.yaml",
+    "config/**/.gitkeep",
     "wizard/backend/static/*",
     "wizard/backend/static/**/*",
 ]
@@ -48,6 +76,3 @@ lab_wizard = [
 wizard = "lab_wizard.wizard.cli:main"
 lab_wizard_server = "lab_wizard.lib.server.server:main"
 lab_wizard_client = "lab_wizard.lib.server.demo_client:main"
-
-
-

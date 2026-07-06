@@ -5,12 +5,13 @@ from lab_wizard.lib.instruments.general.parent_child import (
     Child,
     ChildParams,
     ChannelProvider,
+    ChannelsLike,
     SlotLike,
 )
 from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 import time
 import numpy as np
-from typing import Literal, Any
+from typing import Any, ClassVar, Literal
 
 
 class Sim970ChannelParams(BaseModel):
@@ -24,23 +25,22 @@ class Sim970ChannelParams(BaseModel):
     max_retries: int = 3
 
 
-class Sim970Params(SlotLike, ChildParams["Sim970"]):
+class Sim970Params(ChannelsLike, SlotLike, ChildParams["Sim970"]):
     """Parameters for SIM970 module.
 
     ``slot`` (via SlotLike) holds the physical slot number within the SIM900
     mainframe and participates in hash key derivation.
 
     Per-channel settings (settling time, max retries, attribute name) live in
-    each entry of ``channels``. The number of channels is derived from the
-    length of that list.
+    the ``channels`` mapping, keyed by hardware channel index. The hardware
+    channel count is ``num_channels``; the mapping may be sparse.
     """
 
     type: Literal["sim970"] = "sim970"
     attribute_name: str = ""
     offline: bool | None = False
-    channels: list[Sim970ChannelParams] = Field(
-        default_factory=lambda: [Sim970ChannelParams() for _ in range(4)]
-    )
+    num_channels: ClassVar[int] = 4
+    channels: dict[int, Sim970ChannelParams] = Field(default_factory=dict)
 
     @property
     def inst(self):  # type: ignore[override]
@@ -82,8 +82,9 @@ class Sim970Channel(VSense):
 class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
     """SIM970 module representing a multi-channel voltmeter.
 
-    Channels are exposed via the ``channels`` list and created from per-channel
-    ``Sim970ChannelParams`` entries in ``Sim970Params.channels``.
+    Channels are exposed via the dense ``channels`` list — one per hardware
+    channel — created from the sparse per-channel ``Sim970ChannelParams``
+    entries in ``Sim970Params.channels`` (defaults for unconfigured indices).
 
     from_config is inherited from Child base class — no override needed.
     """
@@ -92,9 +93,10 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
         self._dep = dep
         self.params = params
         self.slot = dep.slot
-        self.channels: list[Sim970Channel] = []
-        for i, ch_params in enumerate(params.channels):
-            self.channels.append(Sim970Channel(dep, i, ch_params))
+        self.channels: list[Sim970Channel] = [
+            Sim970Channel(dep, i, params.channels.get(i, Sim970ChannelParams()))
+            for i in range(params.num_channels)
+        ]
 
     @property
     def parent_class(self) -> str:

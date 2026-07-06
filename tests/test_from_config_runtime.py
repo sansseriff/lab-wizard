@@ -39,7 +39,7 @@ def _resources_with_sim_and_counter() -> ResourceConfig:
                                     "slot": "5",
                                     "offline": False,
                                     "attribute_name": "sense",
-                                    "channels": [{}, {}, {}, {}],
+                                    "channels": {},
                                 },
                             },
                         }
@@ -51,7 +51,7 @@ def _resources_with_sim_and_counter() -> ResourceConfig:
                     "ip_port": 5025,
                     "offline": True,
                     "ext_trigger": False,
-                    "channels": [{}, {}],
+                    "channels": {},
                 },
             },
         }
@@ -76,7 +76,7 @@ def _resources_with_dbay() -> ResourceConfig:
                     "ip_address": "10.0.0.6",
                     "ip_port": 8345,
                     "children": {
-                        "1": {"type": "dac4D", "slot": "1", "name": "Dac4D", "channels": [{}, {}, {}, {}]}
+                        "1": {"type": "dac4D", "slot": "1", "name": "Dac4D", "channels": {}}
                     },
                 }
             },

@@ -167,8 +167,8 @@ class InstrumentRegistry:
             for i, channel in enumerate(channels):
                 ch_path = f"{parent_path}/channel/{i}"
                 ch_params = (
-                    channel_params[i]
-                    if isinstance(channel_params, list) and i < len(channel_params)
+                    channel_params.get(i)
+                    if isinstance(channel_params, dict)
                     else None
                 )
                 self._register_live(ch_path, channel, ch_params)
@@ -218,15 +218,18 @@ class InstrumentRegistry:
                 self._walk_lazy(child_params, child_path)
 
         channel_params = getattr(params, "channels", None)
-        if isinstance(channel_params, list) and channel_params:
+        if isinstance(channel_params, dict):
+            # Register a path for every hardware channel (dense), with params
+            # attached only for configured indices (sparse mapping).
+            num_channels = int(getattr(type(params), "num_channels", 0) or 0)
             chan_cls = _channel_class(getattr(params, "inst", None))
             chan_abc = _behavior_abc_for_class(chan_cls)
             chan_type_hint = chan_cls.__name__ if chan_cls is not None else None
-            for i, ch_params in enumerate(channel_params):
+            for i in range(num_channels):
                 ch_path = f"{parent_path}/channel/{i}"
                 self._register_lazy(
                     ch_path,
-                    ch_params,
+                    channel_params.get(i),
                     factory=lambda pp=parent_path, idx=i: self.resolve(pp).channels[
                         idx
                     ],

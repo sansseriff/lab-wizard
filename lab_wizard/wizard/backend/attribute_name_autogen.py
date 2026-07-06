@@ -64,8 +64,8 @@ def _collect_existing_attribute_names(instruments: dict[str, Any]) -> set[str]:
             out.add(name)
 
         channels = getattr(params, "channels", None)
-        if isinstance(channels, list):
-            for ch in channels:
+        if isinstance(channels, dict):
+            for ch in channels.values():
                 ch_name = getattr(ch, "attribute_name", None)
                 if isinstance(ch_name, str) and ch_name:
                     out.add(ch_name)
@@ -83,17 +83,21 @@ def _collect_existing_attribute_names(instruments: dict[str, Any]) -> set[str]:
 
 def _current_name(leaf: _NodeRef, channel_index: int | None) -> str:
     if channel_index is not None:
-        ch_list = getattr(leaf.params, "channels", None)
-        if isinstance(ch_list, list) and 0 <= channel_index < len(ch_list):
-            return getattr(ch_list[channel_index], "attribute_name", "") or ""
+        ch_map = getattr(leaf.params, "channels", None)
+        if isinstance(ch_map, dict) and channel_index in ch_map:
+            return getattr(ch_map[channel_index], "attribute_name", "") or ""
         return ""
     return getattr(leaf.params, "attribute_name", "") or ""
 
 
 def _assign_name(leaf: _NodeRef, channel_index: int | None, name: str) -> None:
     if channel_index is not None:
-        ch_list = getattr(leaf.params, "channels", None)
-        ch_list[channel_index].attribute_name = name  # type: ignore[index]
+        ch_map = getattr(leaf.params, "channels", None)
+        entry = ch_map.get(channel_index)  # type: ignore[union-attr]
+        if entry is None:
+            entry = type(leaf.params).channel_params_class()()
+            ch_map[channel_index] = entry  # type: ignore[index]
+        entry.attribute_name = name
     else:
         leaf.params.attribute_name = name
 

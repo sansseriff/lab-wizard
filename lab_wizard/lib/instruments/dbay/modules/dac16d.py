@@ -1,7 +1,7 @@
-from typing import Any, Literal, List
+from typing import Any, ClassVar, Literal, List
 from pydantic import BaseModel, Field
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, ChannelsLike, SlotLike
 from lab_wizard.lib.instruments.general.vsource import VSource
 
 
@@ -36,10 +36,11 @@ class Dac16DChannel(VSource):
         return True
 
 
-class Dac16DParams(SlotLike, ChildParams["Dac16D"]):
+class Dac16DParams(ChannelsLike, SlotLike, ChildParams["Dac16D"]):
     type: Literal["dac16D"] = "dac16D"
     name: str = "Dac16D"
-    channels: list[Dac16DChannelParams] = Field(default_factory=lambda: [Dac16DChannelParams() for _ in range(16)])
+    num_channels: ClassVar[int] = 16
+    channels: dict[int, Dac16DChannelParams] = Field(default_factory=dict)
 
     @property
     def inst(self):  # type: ignore[override]
@@ -51,8 +52,8 @@ class Dac16D(Child[Any, Dac16DParams], ChannelProvider[Dac16DChannel]):
         self.module = module
         self.params = params
         self.channels: list[Dac16DChannel] = [
-            Dac16DChannel(module, i, ch_params)
-            for i, ch_params in enumerate(params.channels)
+            Dac16DChannel(module, i, params.channels.get(i, Dac16DChannelParams()))
+            for i in range(params.num_channels)
         ]
 
     @property
