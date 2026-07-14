@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 import socket
 import time
 from pathlib import Path
@@ -31,13 +30,9 @@ def _free_tcp_port() -> int:
 
 @pytest.fixture
 def config_dir(tmp_path: Path) -> Path:
-    """A writable copy of the packaged config with a self-contained server.yaml.
-
-    server.yaml is gitignored (per-workstation), so the fixture writes its own
-    rather than depending on one being present in the repo / a fresh clone.
-    """
+    """An isolated workspace config with a self-contained server.yaml."""
     dst = tmp_path / "config"
-    shutil.copytree("lab_wizard/config", dst)
+    (dst / "instruments").mkdir(parents=True)
     server_dir = dst / "server"
     server_dir.mkdir(parents=True, exist_ok=True)
     yaml = YAML(typ="rt")

@@ -3,7 +3,6 @@ from pydantic import BaseModel
 from pathlib import Path
 from typing import Any, Literal
 
-
 ResourceKind = Literal["instrument", "saver", "plotter"]
 
 
@@ -20,8 +19,22 @@ class Env(BaseModel):
     base_dir: Path = Path(__file__).parent.parent.parent / "lib"
     instruments_dir: Path = base_dir / "instruments"
     measurements_dir: Path = base_dir / "measurements"
-    projects_dir: Path = base_dir / "projects"
+    workspace_dir: Path | None = None
+    config_dir: Path | None = None
+    projects_dir: Path | None = None
+    logs_dir: Path | None = None
 
+    @classmethod
+    def from_current_workspace(cls) -> "Env":
+        from lab_wizard.wizard.workspace import require_workspace
+
+        workspace = require_workspace()
+        return cls(
+            workspace_dir=workspace.root,
+            config_dir=workspace.config_dir,
+            projects_dir=workspace.projects_dir,
+            logs_dir=workspace.logs_dir,
+        )
 
 
 class MatchingReq(BaseModel):

@@ -9,9 +9,11 @@ ref/
 
 !ref/snspd_measure_old/
 
-# Project-specific outputs and configs
-projects/*
-!projects/.gitkeep
+# Local Lab Wizard workspace state (created by `wizard init .`)
+lab-wizard.toml
+config/
+projects/
+logs/
 
 # Python bytecode / caches
 **/__pycache__/
@@ -26,4 +28,3 @@ old/
 
 
 lab_wizard_repo.egg-info/
-

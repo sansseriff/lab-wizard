@@ -4,7 +4,7 @@ icon: lucide/play
 
 # Getting started
 
-## Install
+## Editable repository install
 
 Run the setup script from the repository root:
 
@@ -21,7 +21,37 @@ This will:
 
 The project requires **Python ≥ 3.14**. The repo is a uv workspace: the root
 package (`lab-wizard-repo`) depends on the `lab_wizard` member package, installed
-editable.
+editable. Initialize the repository root after setup so instrument-code edits
+and the local workspace share the same checkout:
+
+```bash
+uv run wizard init .
+uv run wizard
+```
+
+The generated workspace files are ignored by this repository and are not part
+of a fresh clone.
+
+To return a development checkout to that fresh-clone state, run `wizard clean`.
+The command lists `config/`, `projects/`, `logs/`, and `lab-wizard.toml` and asks
+for confirmation before deleting them. `wizard clean --yes` skips the prompt.
+
+## PyPI install
+
+Create a directory for this computer's Lab Wizard state, install the package,
+and initialize the workspace:
+
+```bash
+mkdir my-lab
+cd my-lab
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install lab-wizard
+wizard init .
+```
+
+`wizard init` creates `lab-wizard.toml`, `config/`, `projects/`, and `logs/`.
+These are user-owned runtime state; they are never stored in `site-packages`.
 
 ## Launch the GUI
 
@@ -31,9 +61,9 @@ After setup:
 wizard
 ```
 
-(or `uv run wizard` if the virtualenv is not activated)
+(or `uv run wizard` in the repository if the virtualenv is not activated)
 
-`wizard` is a console script ([`lab_wizard/wizard/cli.py`](../lab_wizard/wizard/cli.py))
+`wizard` is a console command ([`lab_wizard/wizard/cli.py`](../lab_wizard/wizard/cli.py))
 that launches the FastAPI backend ([`lab_wizard/wizard/backend/main.py`](../lab_wizard/wizard/backend/main.py))
 on port `8884` and opens a desktop window via `pywebview`.
 
@@ -44,7 +74,7 @@ Useful flags (passed through `cli.py`):
 | `--no-ui` | Run headless; print reachable URLs instead of opening a window. Useful over SSH. |
 | `--port N` | Bind a different port (default `8884`). |
 | `--debug` | Enable debug logging. |
-| `--projects PATH` | Point the projects root somewhere other than the current directory. |
+| `--workspace PATH` | Use a specific workspace instead of searching the current directory and parents. |
 
 On a headless/SSH host the backend prints all reachable `http://host:8884/`
 URLs and an `ssh -L` tunnel hint, so you can drive the GUI from a browser on your
@@ -81,10 +111,17 @@ Each generated project is a timestamped folder under `projects/` containing:
 - a generated `*_setup.py` that initializes and wires those resources for the
   measurement.
 
-## Repository layout
+## Repository and generated workspace layout
+
+A fresh clone contains the source directories. Running `wizard init .` adds the
+ignored workspace entries shown below:
 
 ```text
 lab_wizard_repo/
+├── lab-wizard.toml           # generated; workspace paths + schema version
+├── config/                   # generated; user-owned YAML state
+├── projects/                 # generated measurement projects
+├── logs/                     # generated runtime logs
 ├── lab_wizard/
 │   ├── lib/                 # the instrument library (importable, no GUI)
 │   │   ├── instruments/     #   instrument models (general/ + per-vendor dirs)
@@ -97,7 +134,5 @@ lab_wizard_repo/
 │   ├── wizard/
 │   │   ├── backend/         #   FastAPI app + project generation
 │   │   └── frontend/        #   SvelteKit GUI
-│   └── config/              # the on-disk config tree (instruments/, savers/, …)
-├── projects/                # generated measurement projects land here
 └── docs/                    # this documentation
 ```

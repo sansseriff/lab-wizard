@@ -87,10 +87,8 @@ def _base_type_info(base_type: Any) -> tuple[str, str]:
     raise ValueError(f"Could not resolve base type import for {base_type!r}")
 
 
-def _requirements_for_measurement(
-    config_dir: Path, measurement_name: str
-) -> list[FilledReq]:
-    lib_base = config_dir.resolve().parent / "lib"
+def _requirements_for_measurement(measurement_name: str) -> list[FilledReq]:
+    lib_base = Path(__file__).resolve().parents[2] / "lib"
     env = Env(base_dir=lib_base)
     all_meas = get_measurements(env)
     if measurement_name not in all_meas:
@@ -98,7 +96,7 @@ def _requirements_for_measurement(
     return reqs_from_measurement(all_meas[measurement_name])
 
 
-def _setup_template_text(config_dir: Path, measurement_name: str) -> str:
+def _setup_template_text(measurement_name: str) -> str:
     lab_wizard_root = Path(__file__).resolve().parents[2]
     template = (
         lab_wizard_root
@@ -223,7 +221,9 @@ def _flat_resource_codegen(
             seen_imports.add((module, runtime_cls))
         var = var_alloc(sel.key)
         var_names[sel.key] = var
-        inst_lines.append(f"{var} = {runtime_cls}.from_config(resources, key={sel.key!r})")
+        inst_lines.append(
+            f"{var} = {runtime_cls}.from_config(resources, key={sel.key!r})"
+        )
 
     return import_pairs, inst_lines, var_names
 
@@ -688,9 +688,9 @@ def generate_measurement_project(
         inst_selected_map[sel.variable_name] = _resolve_selection_node(sel, all_nodes)
         inst_selected_channels[sel.variable_name] = sel.channel_index
 
-    requirements = _requirements_for_measurement(config_dir, req.measurement_name)
+    requirements = _requirements_for_measurement(req.measurement_name)
     instrument_reqs, saver_reqs, plotter_reqs = _split_requirements(requirements)
-    template_text = _setup_template_text(config_dir, req.measurement_name)
+    template_text = _setup_template_text(req.measurement_name)
 
     instruments_subset = _build_subset_instruments_from_selected_nodes(
         [

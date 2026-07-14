@@ -18,11 +18,30 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: oven-sh/setup-bun@v2
+      - name: Build frontend assets
+        working-directory: lab_wizard/wizard/frontend
+        run: |
+          bun install --frozen-lockfile
+          bun run buildall
       - name: Install build backend
         run: python -m pip install --upgrade build
       - name: Build lab-wizard
         working-directory: lab_wizard
         run: python -m build --sdist --wheel
+      - name: Verify wheel contents
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          wheel = next(Path("lab_wizard/dist").glob("*.whl"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+          assert "lab_wizard/wizard/backend/static/index.html" in names
+          assert not any(name.startswith("lab_wizard/config/") for name in names)
+          print(f"Verified frontend assets and workspace boundary in {wheel.name}")
+          PY
       - uses: actions/upload-artifact@v5
         with:
           name: lab-wizard-dist
@@ -44,4 +63,3 @@ jobs:
           path: dist
       - name: Publish lab-wizard
         uses: pypa/gh-action-pypi-publish@release/v1
-

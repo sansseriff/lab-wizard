@@ -71,4 +71,4 @@ echo "Building frontend (output -> lab_wizard/wizard/backend/static/)..."
 bun run ./build.ts
 
 echo ""
-echo "Setup complete. You can now run the wizard ui with 'uv run wizard', or just 'wizard' if the virtual environment is activated."
+echo "Setup complete. Next run 'uv run wizard init .' once, then launch the UI with 'uv run wizard'."

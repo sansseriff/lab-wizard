@@ -95,7 +95,7 @@ from pathlib import Path
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
 
 
-from lab_wizard.wizard.backend.location import WEB_DIR, LOG_DIR
+from lab_wizard.wizard.backend.location import WEB_DIR
 
 FRAMELESS = False
 ICON_PATH = Path(WEB_DIR) / "icon.png"
@@ -105,9 +105,12 @@ logger = logging.getLogger("lab_wizard.wizard.backend.main")
 # Define the lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log_file = configure_wizard_logging(logs_dir=Path(LOG_DIR))
+    env = Env.from_current_workspace()
+    if env.logs_dir is None:
+        raise RuntimeError("Workspace logs directory was not resolved")
+    log_file = configure_wizard_logging(logs_dir=env.logs_dir)
     logger.info("Wizard logging initialized at %s", log_file)
-    app.state.env = Env()
+    app.state.env = env
 
     # Pre-warm the instrument metadata cache in a thread so the first
     # /api/manage-instruments request is instant.  We do this BEFORE yielding
@@ -131,7 +134,7 @@ def get_env(request: Request) -> Env:
     env = getattr(request.app.state, "env", None)
     if env is None:
         # Fallback: create once if not present (e.g., during tests)
-        env = Env()
+        env = Env.from_current_workspace()
         request.app.state.env = env
     return env
 
@@ -299,12 +302,15 @@ def get_resources(
 
 
 def _config_dir(env: Env) -> str:
-    return str(env.base_dir.parent / "config")
+    if env.config_dir is None:
+        raise RuntimeError("Workspace config directory was not resolved")
+    return str(env.config_dir)
 
 
 def _projects_dir(env: Env) -> Path:
-    # base_dir -> <repo>/lab_wizard/lib ; projects live at <repo>/projects
-    return env.base_dir.parent.parent / "projects"
+    if env.projects_dir is None:
+        raise RuntimeError("Workspace projects directory was not resolved")
+    return env.projects_dir
 
 
 @app.get("/api/manage-instruments")
@@ -854,7 +860,10 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     os.environ["LAB_WIZARD_LOG_LEVEL"] = "DEBUG" if args.debug else "INFO"
-    configure_wizard_logging(logs_dir=Path(LOG_DIR), debug=args.debug)
+    runtime_env = Env.from_current_workspace()
+    if runtime_env.logs_dir is None:
+        raise RuntimeError("Workspace logs directory was not resolved")
+    configure_wizard_logging(logs_dir=runtime_env.logs_dir, debug=args.debug)
     log_level = "debug" if args.debug else "info"
 
     server_ip = "0.0.0.0"

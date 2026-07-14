@@ -1,25 +1,3 @@
-projects/
-
-!projects/.gitkeep
-
-
-logs/
-!logs/.gitkeep
-
-# User-specific instrument and measurement configurations
-config/instruments/*
-config/measurements/*
-config/plotters/*
-config/savers/*
-config/server/*
-
-!config/instruments/.gitkeep
-!config/measurements/.gitkeep
-!config/plotters/.gitkeep
-!config/savers/.gitkeep
-!config/server/.gitkeep
-
-
 # ignore all __pycache__ directories
 **/__pycache__/
 

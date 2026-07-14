@@ -6,7 +6,7 @@ icon: lucide/folder-tree
 
 This page covers three closely-related mechanisms:
 
-- the **on-disk config tree** under `lab_wizard/config/`,
+- the **on-disk config tree** under the active workspace's `config/`,
 - how Lab Wizard **loads and saves** that tree
   ([`config_io.py`](../../lab_wizard/lib/utilities/config_io.py)),
 - how instrument types are **auto-discovered** from source
@@ -15,6 +15,11 @@ This page covers three closely-related mechanisms:
   ([`discovery.py`](../../lab_wizard/lib/instruments/general/discovery.py)).
 
 ## The config tree
+
+The tree is runtime state created by `wizard init` and then populated by the
+user through the GUI. No YAML configuration is shipped as Python package data.
+Instrument YAML starts empty and is produced from the universal defaults in the
+installed Pydantic models when the user initializes instruments.
 
 ```text
 config/

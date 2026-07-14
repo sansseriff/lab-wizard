@@ -57,8 +57,8 @@ separate output enable, so it overrides `turn_on`/`turn_off` to record
 
 ## Authoring rules
 
-Rules live under `permissions:` in
-[`config/server/server.yaml`](../../lab_wizard/config/server/server.yaml). A
+Rules live under `permissions:` in the active workspace's
+`config/server/server.yaml`. A
 worked example:
 
 ```yaml

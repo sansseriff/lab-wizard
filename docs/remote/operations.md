@@ -33,9 +33,9 @@ apply edited [permission rules](permissions.md) — the server reads them at boo
 ### From the command line
 
 ```bash
-python -m lab_wizard.lib.server.server --config lab_wizard/config/server/server.yaml
+python -m lab_wizard.lib.server.server --config config/server/server.yaml
 # or the installed console script:
-lab_wizard_server --config lab_wizard/config/server/server.yaml
+lab_wizard_server --config config/server/server.yaml
 ```
 
 ### `server.yaml`

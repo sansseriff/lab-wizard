@@ -4,8 +4,9 @@ icon: lucide/layers
 
 # Architecture
 
-Lab Wizard separates cleanly into a **library** and a **GUI**, with a **config
-tree** as the shared contract between them.
+Lab Wizard separates cleanly into an installed **library**, a **GUI**, and a
+user-owned **workspace**. The workspace config tree is the shared contract
+between the library and GUI.
 
 ## The library / GUI split
 
@@ -21,6 +22,11 @@ tree** as the shared contract between them.
 The GUI is essentially a friendly editor for the config tree plus a code
 generator. Nothing the GUI does is magic — it writes YAML and generates Python
 you can read.
+
+Installed Python and compiled frontend files are immutable package resources.
+`wizard init` creates `lab-wizard.toml` plus the mutable `config/`, `projects/`,
+and `logs/` directories outside the package. The same layout is used whether
+the package is installed editable from this repository or from PyPI.
 
 ## The four layers
 

@@ -8,7 +8,7 @@ The config file is a small YAML:
     server:
       bind: tcp://0.0.0.0:12300
       # Optional. Directory containing an `instruments/` tree. Defaults to the
-      # parent of this file's directory (i.e. lab_wizard/config). The server
+      # parent of this file's directory (i.e. the workspace config/). The server
       # hosts every configured instrument with an attribute_name.
       config_dir: ..
       # Optional override: host a single project's resources instead of config_dir.
@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         "--config",
         required=True,
         type=Path,
-        help="Path to server YAML config (see lab_wizard/config/server/server.yaml).",
+        help="Path to a workspace server YAML config (normally config/server/server.yaml).",
     )
     parser.add_argument(
         "--log-level",

@@ -19,8 +19,9 @@ graph LR
     FE -->|/api/*| BE
 ```
 
-- [`cli.py`](../../lab_wizard/wizard/cli.py) is the `wizard` console script. It
-  sets `LAB_WIZARD_PROJECTS_DIR` and launches the backend as a subprocess.
+- [`cli.py`](../../lab_wizard/wizard/cli.py) implements `wizard init` and the
+  bare `wizard` launcher. The launcher resolves `lab-wizard.toml`, passes the
+  workspace root to the backend, and launches it as a subprocess.
 - [`backend/main.py`](../../lab_wizard/wizard/backend/main.py) is a FastAPI app.
   It defines the `/api/*` routes and then mounts the pre-built SvelteKit static
   site at `/`. A `pywebview` window points at `http://localhost:8884/`.

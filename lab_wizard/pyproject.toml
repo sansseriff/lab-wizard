@@ -65,9 +65,6 @@ packages = [
 
 [tool.setuptools.package-data]
 lab_wizard = [
-    "config/**/*.yml",
-    "config/**/*.yaml",
-    "config/**/.gitkeep",
     "wizard/backend/static/*",
     "wizard/backend/static/**/*",
 ]

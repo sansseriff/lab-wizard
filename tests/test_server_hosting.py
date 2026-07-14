@@ -15,7 +15,13 @@ from pydantic import BaseModel, Field
 from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
 from lab_wizard.lib.instruments.general.vsource import VSource
 from lab_wizard.lib.server.registry import InstrumentRegistry
-
+from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
+from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
+from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
+from lab_wizard.lib.utilities.config_io import (
+    instrument_hash,
+    save_instruments_to_config,
+)
 
 # A record of every create_inst / make_child call, to prove laziness.
 _CALLS: list[str] = []
@@ -139,10 +145,27 @@ def test_resolve_instantiates_lazily_and_caches():
     assert _CALLS == ["root", "make_child:leafA", "leaf"]
 
 
-def test_from_config_dir_indexes_real_tree():
-    # The packaged config has a DBay + Dac4D/Dac16D and a Prologix/SIM900 tree.
-    reg = InstrumentRegistry.from_config_dir("lab_wizard/config")
+def test_from_config_dir_indexes_real_tree(tmp_path):
+    config_dir = tmp_path / "config"
+    root_key = instrument_hash("prologix_gpib", "/dev/ttyUSB0")
+    rack_key = instrument_hash("sim900", "5")
+    leaf_key = instrument_hash("sim928", "1")
+    save_instruments_to_config(
+        {
+            root_key: PrologixGPIBParams(
+                port="/dev/ttyUSB0",
+                children={
+                    rack_key: Sim900Params(
+                        gpib_address="5",
+                        children={leaf_key: Sim928Params(slot="1")},
+                    )
+                },
+            )
+        },
+        config_dir,
+    )
+    reg = InstrumentRegistry.from_config_dir(str(config_dir))
     paths = reg.list_paths()
-    assert "inst://2da0863e/a0da5bfa/channel/0" in paths
-    # Channel behavior resolved statically from the generic channel class.
-    assert reg.describe_path("inst://2da0863e/a0da5bfa/channel/0")["behavior_abc"] == "VSource"
+    path = f"inst://{root_key}/{rack_key}/{leaf_key}"
+    assert path in paths
+    assert reg.describe_path(path)["behavior_abc"] == "VSource"

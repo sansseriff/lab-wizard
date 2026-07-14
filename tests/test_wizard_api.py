@@ -21,6 +21,7 @@ from lab_wizard.lib.utilities.config_io import (
     instrument_hash,
     save_instruments_to_config,
 )
+from lab_wizard.wizard.workspace import WORKSPACE_ENV, initialize_workspace
 
 _PROLOGIX_KEY = instrument_hash("prologix_gpib", "/dev/ttyUSB0")
 _SIM900_KEY = instrument_hash("sim900", "5")
@@ -29,8 +30,10 @@ _SIM970_KEY = instrument_hash("sim970", "2")
 
 
 @pytest.fixture
-def client():
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Create a test client for the FastAPI app."""
+    workspace, _ = initialize_workspace(tmp_path / "workspace")
+    monkeypatch.setenv(WORKSPACE_ENV, str(workspace.root))
     with TestClient(app) as c:
         yield c
 
