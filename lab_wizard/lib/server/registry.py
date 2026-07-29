@@ -28,15 +28,33 @@ Examples:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Optional, get_args, get_origin
 
 from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
+from lab_wizard.lib.instruments.general.transport import (
+    DEFAULT_STATE_AUTHORITY,
+    DEFAULT_TRANSPORT_SHARING,
+)
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
 from lab_wizard.lib.utilities.model_tree import ResourceConfig
 
 
 PATH_PREFIX = "inst://"
+
+logger = logging.getLogger(__name__)
+
+
+def root_path(path: str) -> str:
+    """Root segment of an ``inst://`` path.
+
+    ``inst://a/b/channel/1`` -> ``inst://a``. Children and channels reach
+    hardware through their root's transport, so the root is the unit of
+    contention.
+    """
+    body = path[len(PATH_PREFIX):] if path.startswith(PATH_PREFIX) else path
+    return f"{PATH_PREFIX}{body.split('/', 1)[0]}"
 
 
 # Order matters: most specific terminal behavior first. ``describe_*`` returns
@@ -105,6 +123,7 @@ class InstrumentRegistry:
         self._descriptions: dict[str, dict[str, Any]] = {}
         self._factories: dict[str, Callable[[], Any]] = {}
         self._classes: dict[str, type] = {}
+        self._root_transports: dict[str, dict[str, Any]] = {}
         self._build_eager(resources.instruments)
 
     # ------------------------- construction -------------------------
@@ -134,6 +153,7 @@ class InstrumentRegistry:
         self._descriptions = {}
         self._factories = {}
         self._classes = {}
+        self._root_transports = {}
         self._build_lazy(instruments)
         return self
 
@@ -150,6 +170,7 @@ class InstrumentRegistry:
             inst = root_params.create_inst()
             path = f"{PATH_PREFIX}{root_key}"
             self._register_live(path, inst, root_params)
+            self._index_root_transport(path, root_params)
             self._walk_eager(inst, root_params, path)
 
     def _walk_eager(self, inst: Any, params: Any, parent_path: str) -> None:
@@ -201,6 +222,7 @@ class InstrumentRegistry:
                 params,
                 factory=lambda params=params: params.create_inst(),
             )
+            self._index_root_transport(path, root_params)
             self._walk_lazy(root_params, path)
 
     def _walk_lazy(self, params: Any, parent_path: str) -> None:
@@ -267,6 +289,44 @@ class InstrumentRegistry:
 
     # ------------------------- shared helpers -------------------------
 
+    def _index_root_transport(self, path: str, params: Any | None) -> None:
+        """Record a root's transport declarations (see general/transport.py).
+
+        Only roots open transports, so only roots are recorded. Children and
+        channels inherit their root's answer via :meth:`transport_for`.
+        """
+        if params is None or not hasattr(params, "create_inst"):
+            return
+
+        # A root is anything providing create_inst — inheriting CanInstantiate
+        # is the norm but not required (tests and adapters duck-type it), so a
+        # missing declaration falls back to the conservative default rather
+        # than failing to register the instrument at all.
+        def _declared(name: str, default: Any) -> Any:
+            method = getattr(params, name, None)
+            if not callable(method):
+                return default
+            try:
+                return method()
+            except Exception:  # noqa: BLE001 - never block hosting on this
+                logger.warning(
+                    "%s.%s() failed for %s; using %r",
+                    type(params).__name__,
+                    name,
+                    path,
+                    default,
+                    exc_info=True,
+                )
+                return default
+
+        self._root_transports[path] = {
+            "transport_sharing": _declared(
+                "transport_sharing", DEFAULT_TRANSPORT_SHARING
+            ),
+            "state_authority": _declared("state_authority", DEFAULT_STATE_AUTHORITY),
+            "transport_key": _declared("transport_key", None),
+        }
+
     def _index_attribute(self, path: str, params: Any | None) -> None:
         if params is None:
             return
@@ -295,6 +355,47 @@ class InstrumentRegistry:
         paths = set(self._index) | set(getattr(self, "_factories", {}))
         return sorted(paths)
 
+    def list_held(self) -> list[str]:
+        """Paths whose hardware this server has actually opened.
+
+        Distinct from :meth:`list_paths`, which is everything it *could* serve.
+        Because instantiation is lazy, a running server holds nothing until a
+        call resolves a path — so "a server is running" does not imply "that
+        rack is in use". Arbitration keys off this, never off config.
+        """
+        return sorted(self._index)
+
+    def held_roots(self) -> set[str]:
+        """Root paths with at least one live object under them.
+
+        The unit of contention is the transport, and only roots own one, so a
+        held channel makes its whole root held.
+        """
+        return {root_path(p) for p in self._index}
+
+    def transport_for(self, path: str) -> dict[str, Any]:
+        """Transport declarations governing ``path``, inherited from its root."""
+        root = root_path(path)
+        declared = getattr(self, "_root_transports", {}).get(root, {})
+        return {
+            "root": root,
+            "transport_sharing": declared.get(
+                "transport_sharing", DEFAULT_TRANSPORT_SHARING
+            ),
+            "state_authority": declared.get(
+                "state_authority", DEFAULT_STATE_AUTHORITY
+            ),
+            "transport_key": declared.get("transport_key"),
+        }
+
+    def exclusive_roots(self) -> dict[str, dict[str, Any]]:
+        """Roots that cannot be shared with another process, by path."""
+        return {
+            path: info
+            for path, info in getattr(self, "_root_transports", {}).items()
+            if info.get("transport_sharing") != "shared"
+        }
+
     def list_attributes(self) -> dict[str, str]:
         return dict(self._attribute_index)
 
@@ -311,14 +412,16 @@ class InstrumentRegistry:
         falls back to live introspection for paths registered as live objects
         without a cached description.
         """
+        transport = self.transport_for(path)
         desc = getattr(self, "_descriptions", {}).get(path)
         if desc is not None:
-            return {"path": path, **desc}
+            return {"path": path, **desc, **transport}
         obj = self.resolve(path)
         return {
             "path": path,
             "behavior_abc": _behavior_abc_name(obj),
             "type_hint": type(obj).__name__,
+            **transport,
         }
 
     def instrument_class(self, path: str) -> type | None:

@@ -62,6 +62,7 @@ class WireServer:
         self._rpc = RPCServer(title="lab_wizard_server")
         self._rpc.method()(self.call)
         self._rpc.method()(self.list_paths)
+        self._rpc.method()(self.list_held)
         self._rpc.method()(self.list_attributes)
         self._rpc.method()(self.describe_path)
         self._rpc.method()(self.describe_attribute)
@@ -118,6 +119,21 @@ class WireServer:
 
     def list_paths(self) -> list[str]:
         return self._registry.list_paths()
+
+    def list_held(self) -> dict[str, Any]:
+        """What this server has actually opened, and on what terms.
+
+        Answers "may I open this hardware myself?" for a local program. The
+        server declares every configured path but holds only what a call has
+        resolved, so this is deliberately narrower than ``list_paths``.
+        ``exclusive_roots`` is included because a root that is merely
+        *configured* here will conflict later even if nothing holds it yet.
+        """
+        return {
+            "held_paths": self._registry.list_held(),
+            "held_roots": sorted(self._registry.held_roots()),
+            "exclusive_roots": self._registry.exclusive_roots(),
+        }
 
     def list_attributes(self) -> dict[str, str]:
         return self._registry.list_attributes()

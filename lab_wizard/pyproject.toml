@@ -20,7 +20,7 @@ dependencies = [
     "pywebview[qt5]>=6.0 ; sys_platform == 'linux'",
     "pywebview[qt]>=6.0 ; sys_platform != 'linux'",
     "pyro5>=5.15",
-    "dbay>=0.4.0",
+    "dbay>=0.6.0",
     "pyvisa-py>=0.8.1",
     "sqlalchemy>=2.0",
     "pyleco>=0.6.0.post1",

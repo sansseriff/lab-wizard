@@ -64,10 +64,19 @@ class LocalSerialDep(SerialDep):
         if self._serial is None:
             if pyserial is None:  # pragma: no cover
                 raise RuntimeError("serial module not available")
+            # exclusive=True sets TIOCEXCL, so a second process opening this
+            # port fails immediately. Without it POSIX allows both opens and
+            # incoming bytes go to whichever process reads first — the failure
+            # is silent, intermittent data theft rather than an error. A
+            # stateful controller (Prologix ``++addr N`` then command) cannot
+            # survive that at all.
             self._serial = pyserial.Serial(
-                port=self.port, baudrate=self.baudrate, timeout=self.timeout
+                port=self.port,
+                baudrate=self.baudrate,
+                timeout=self.timeout,
+                exclusive=True,
             )
-            logger.debug("Opened serial port %s", self.port)
+            logger.debug("Opened serial port %s (exclusive)", self.port)
             atexit.register(self.close)
         return self._serial
 

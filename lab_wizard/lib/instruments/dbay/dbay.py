@@ -78,6 +78,37 @@ class DBayParams(
     def create_inst(self) -> "DBay":
         return DBay.from_params(self)
 
+    # -- Transport ----------------------------------------------------------
+
+    def transport_sharing(self):
+        """GUI mode is shared; direct modes are not.
+
+        In GUI mode the rack sits behind the DBay GUI backend, a lab-link
+        reactive server that broadcasts state to every connected client — so
+        several programs on different modules is the designed case and needs no
+        arbitration from us. Direct serial owns a serial handle. Direct UDP has
+        no connection to own, but two processes' replies cannot be attributed,
+        so it is treated as exclusive until proven otherwise.
+        """
+        return "shared" if self.mode == "gui" else "exclusive"
+
+    def state_authority(self):
+        """GUI mode has its own authority; nothing else does.
+
+        The GUI backend is authoritative and broadcasts changes, so a physicist
+        moving a channel in the DBay GUI changes hardware we did not command.
+        Inferring state from our own writes would leave the permission gate
+        believing something false, so it must be read from the server instead.
+        """
+        return "subscribed" if self.mode == "gui" else "inferred"
+
+    def transport_key(self) -> str | None:
+        if self.mode == "gui":
+            return f"dbay-gui://{self.ip_address}:{self.ip_port}"
+        if self.direct_transport == "serial":
+            return f"serial://{self.serial_port}" if self.serial_port else None
+        return f"udp://{self.ip_address}:{self.direct_port}"
+
     # -- Discovery ----------------------------------------------------------
 
     @classmethod

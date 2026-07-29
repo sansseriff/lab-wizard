@@ -133,6 +133,13 @@ class Keysight53220AParams(ChannelsLike, IPLike, BaseModel, CanInstantiate["Keys
     def create_inst(self) -> Keysight53220A:
         return Keysight53220A.from_params(self)
 
+    # -- Transport ----------------------------------------------------------
+    # Raw SCPI socket: the instrument accepts a single session on this port, so
+    # a second process is refused by the hardware rather than multiplexed.
+
+    def transport_key(self) -> str | None:
+        return f"visa-tcp://{self.ip_address}:{self.ip_port}"
+
 class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
     """Keysight 53220A Universal Counter.
 

@@ -42,6 +42,12 @@ class YokogawaAQ2212Params(
     def create_inst(self) -> "YokogawaAQ2212":
         return YokogawaAQ2212.from_params(self)
 
+    # -- Transport ----------------------------------------------------------
+    # Command socket; one session per instrument.
+
+    def transport_key(self) -> str | None:
+        return f"tcp://{self.ip_address}:{self.ip_port}"
+
 class YokogawaAQ2212(
     Parent[YokoAQ2212Dep, YokoAQ2212ChildParams],
     ParentFactory[YokogawaAQ2212Params, "YokogawaAQ2212"],

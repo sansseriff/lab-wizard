@@ -243,16 +243,16 @@ wheels = [
 
 [[package]]
 name = "dbay"
-version = "0.4.0"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lab-link" },
     { name = "pydantic" },
     { name = "pyserial" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/11/b4/0c765b5646b7a2694e4ddad27245a970aa65e8219970942b55352d5f87c9/dbay-0.4.0.tar.gz", hash = "sha256:03882fc2f03d08f35c08967223f60f485d0066b788ccc7cfdf3ee5758ca8f88b", size = 18736, upload-time = "2026-07-02T18:08:38.101Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/1c/36885816d6c77514e403e9e7d85b5a9524800fd9e7ac75e82070332d4d2c/dbay-0.6.0.tar.gz", hash = "sha256:bd97a1c3931b32a4184f8dabde7166b4ec23cf4d4e58040a58b48ccdfffe8eca", size = 26581, upload-time = "2026-07-29T00:00:49.866Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a1/bf/1fd747e0b8b79bac4506b1dfa08eaa46db56ba3491861ad5ce0bf62e9a6b/dbay-0.4.0-py3-none-any.whl", hash = "sha256:7d062581d46aff46d41eda80baec5a31ee9729fe036e757687a12d1e119bba36", size = 19682, upload-time = "2026-07-02T18:08:36.714Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/5c/fb2eeb8876a0803b2d64152e4800aa7b1aafdd9bd94c6edfb55e89c856bb/dbay-0.6.0-py3-none-any.whl", hash = "sha256:b13e4dc8827c0a99fa58af7f93e1972fadd691de6dcf75cf93288ffcab7d876b", size = 25154, upload-time = "2026-07-29T00:00:48.549Z" },
 ]
 
 [[package]]
@@ -680,7 +680,7 @@ dependencies = [
 requires-dist = [
     { name = "black", specifier = ">=25.11.0" },
     { name = "coolname", specifier = ">=5.0.0" },
-    { name = "dbay", specifier = ">=0.4.0" },
+    { name = "dbay", specifier = ">=0.6.0" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.116.1" },
     { name = "h5py" },
     { name = "lab-procedure", editable = "procedure_framework" },

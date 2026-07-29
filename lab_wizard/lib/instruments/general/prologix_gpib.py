@@ -67,6 +67,19 @@ class PrologixGPIBParams(
     def create_inst(self) -> "PrologixGPIB":
         return PrologixGPIB.from_params(self)
 
+    # -- Transport ----------------------------------------------------------
+    #
+    # Exclusive for two compounding reasons. The serial port itself admits only
+    # one holder (LocalSerialDep opens with exclusive=True). And even given a
+    # shared byte stream the protocol could not be split: ``++addr N`` is
+    # global controller state, a query is address-then-command, and under
+    # ``++auto 1`` the reply carries no address — so two processes cannot tell
+    # whose response they are reading. Serializing at the controller is what
+    # the server is for; that is how many programs share one Prologix bus.
+
+    def transport_key(self) -> str | None:
+        return f"serial://{self.port}" if getattr(self, "port", None) else None
+
     # -- Discovery ----------------------------------------------------------
 
     @classmethod

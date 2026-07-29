@@ -15,6 +15,12 @@ from typing import (
 import inspect
 from pydantic import BaseModel, model_validator, field_validator
 from lab_wizard.lib.instruments.general.discovery import Discoverable
+from lab_wizard.lib.instruments.general.transport import (
+    DEFAULT_STATE_AUTHORITY,
+    DEFAULT_TRANSPORT_SHARING,
+    StateAuthority,
+    TransportSharing,
+)
 
 
 # Move base classes above TypeVar declarations so bounds use real types (not strings)
@@ -47,12 +53,36 @@ class Params2Inst(Generic[E_co], ABC):
 class CanInstantiate(Generic[P_co], ABC):
     """
     An instrument can be created with the params object. No other dependencies are required.
+
+    These are the *roots* of the instrument tree, so they are also the things
+    that open a transport — a serial port, a socket, an HTTP session. Children
+    and channels reach hardware through their root's transport and never open
+    one of their own, which is why the sharing declarations below live here.
+    See :mod:`lab_wizard.lib.instruments.general.transport`.
     """
 
     @abstractmethod
     def create_inst(self) -> P_co:
         # this typically calls self.inst.from_params(self) or similar, possibly using internal deps
         pass
+
+    def transport_sharing(self) -> TransportSharing:
+        """Whether a second process may talk to this hardware concurrently."""
+        return DEFAULT_TRANSPORT_SHARING
+
+    def state_authority(self) -> StateAuthority:
+        """Whether this instrument's state must be read rather than inferred."""
+        return DEFAULT_STATE_AUTHORITY
+
+    def transport_key(self) -> str | None:
+        """Identifier of the physical transport this root opens, if known.
+
+        Two roots that resolve to the same key contend for the same hardware
+        even though they are separate config entries — which is how the same
+        device configured twice gets caught. ``None`` means "no better handle
+        than the config key itself".
+        """
+        return None
 
 
 # ----------------------- KeyLike Params Mixins -----------------------

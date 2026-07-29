@@ -92,6 +92,10 @@ from lab_wizard.wizard.backend.server_control import (
 )
 from pydantic import BaseModel as _PermBM, Field as _PermField
 from pathlib import Path
+from lab_wizard.wizard.backend.transport_status import (
+    conflicts_for_selection,
+    transport_overview,
+)
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
 
 
@@ -320,6 +324,32 @@ def api_manage_instruments(env: Env = Depends(get_env)):
     tree = get_configured_tree(config_dir)
     metadata = get_instrument_metadata()
     return {"tree": tree, "metadata": metadata}
+
+
+@app.get("/api/transport-status")
+def api_transport_status(env: Env = Depends(get_env)):
+    """Per-root sharing/authority declarations plus what the server holds now.
+
+    Lets the tree show whether a rack is exclusive or shared, and whether it is
+    currently in use, without the user having to run anything to find out.
+    """
+    return transport_overview(_config_dir(env))
+
+
+class _ConflictCheckRequest(_PermBM):
+    paths: list[str] = _PermField(default_factory=list)
+
+
+@app.post("/api/transport-status/check")
+def api_transport_conflicts(
+    req: _ConflictCheckRequest, env: Env = Depends(get_env)
+):
+    """Would a *local* project using these instruments contend with the server?
+
+    Used during measurement creation so a conflict is a design-time answer
+    rather than a 2am failure.
+    """
+    return conflicts_for_selection(_config_dir(env), req.paths)
 
 
 @app.get("/api/permissions")
