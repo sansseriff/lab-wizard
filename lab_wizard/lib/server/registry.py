@@ -29,6 +29,7 @@ Examples:
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any, Callable, Optional, get_args, get_origin
 
 from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
@@ -44,6 +45,9 @@ from lab_wizard.lib.utilities.model_tree import ResourceConfig
 PATH_PREFIX = "inst://"
 
 logger = logging.getLogger(__name__)
+
+# Guards creation of a registry's per-root lock table, nothing else.
+_TABLE_INIT_GUARD = threading.Lock()
 
 
 def root_path(path: str) -> str:
@@ -111,6 +115,36 @@ def _channel_class(parent_inst_cls: type | None) -> type | None:
     return None
 
 
+def _teardown(path: str, obj: Any) -> None:
+    """Close whatever handle ``obj`` holds, tolerating every convention.
+
+    Instruments spell this differently — ``disconnect()`` on the instrument,
+    ``close()`` on a dependency reached via ``dep`` / ``_dep`` / ``client`` —
+    and channels usually own nothing at all. The first candidate that exists is
+    called and the rest are skipped, since ``disconnect()`` typically closes the
+    dependency itself and calling both would double-close.
+
+    Never raises: teardown runs during shutdown and on eviction, where one
+    uncooperative instrument must not leave the others holding open handles.
+    """
+    candidates = (
+        getattr(obj, "disconnect", None),
+        getattr(obj, "close", None),
+        getattr(getattr(obj, "dep", None), "close", None),
+        getattr(getattr(obj, "_dep", None), "close", None),
+        getattr(getattr(obj, "client", None), "close", None),
+    )
+    for candidate in candidates:
+        if not callable(candidate):
+            continue
+        try:
+            candidate()
+            logger.debug("Released %s via %s", path, getattr(candidate, "__qualname__", candidate))
+        except Exception:  # noqa: BLE001 - best-effort by contract
+            logger.warning("Error releasing %s; continuing", path, exc_info=True)
+        return
+
+
 class InstrumentRegistry:
     """Index from ``inst://`` path to instrument object, with lazy hosting."""
 
@@ -124,6 +158,7 @@ class InstrumentRegistry:
         self._factories: dict[str, Callable[[], Any]] = {}
         self._classes: dict[str, type] = {}
         self._root_transports: dict[str, dict[str, Any]] = {}
+        self._transport_locks: dict[str, threading.RLock] = {}
         self._build_eager(resources.instruments)
 
     # ------------------------- construction -------------------------
@@ -154,6 +189,7 @@ class InstrumentRegistry:
         self._factories = {}
         self._classes = {}
         self._root_transports = {}
+        self._transport_locks = {}
         self._build_lazy(instruments)
         return self
 
@@ -351,6 +387,41 @@ class InstrumentRegistry:
             return obj
         raise KeyError(f"No instrument registered at path {path!r}")
 
+    # ------------------------- teardown -------------------------
+
+    def release(self, path: str) -> list[str]:
+        """Disconnect and evict ``path`` and everything beneath it.
+
+        Deepest-first, so channels and children are let go before the root
+        whose transport they borrow — releasing a root first would leave its
+        children holding a closed handle.
+
+        The path stays *registered*: its factory is untouched, so the next call
+        that resolves it opens the hardware again. This is eviction, not
+        removal.
+        """
+        doomed = sorted(
+            (p for p in self._index if p == path or p.startswith(f"{path}/")),
+            key=lambda p: p.count("/"),
+            reverse=True,
+        )
+        for p in doomed:
+            _teardown(p, self._index.pop(p))
+        return doomed
+
+    def release_all(self) -> list[str]:
+        """Disconnect every live instrument, deepest-first.
+
+        Used on shutdown. Best-effort by design: one instrument that refuses to
+        close must not strand the rest with open handles.
+        """
+        released: list[str] = []
+        for root in sorted(self.held_roots()):
+            released.extend(self.release(root))
+        return released
+
+    # ------------------------- query API -------------------------
+
     def list_paths(self) -> list[str]:
         paths = set(self._index) | set(getattr(self, "_factories", {}))
         return sorted(paths)
@@ -372,6 +443,39 @@ class InstrumentRegistry:
         held channel makes its whole root held.
         """
         return {root_path(p) for p in self._index}
+
+    def transport_lock(self, path: str) -> "threading.RLock":
+        """Lock guarding the transport ``path`` reaches hardware through.
+
+        One lock per root, because that is what a transport is. Calls to
+        different roots may run in parallel; calls sharing a root are
+        serialized in arrival order.
+
+        This must be held across a whole *transaction*, not one RPC. A Prologix
+        query is ``++addr N`` then the command then a read — three writes
+        against controller-global state. Locking anything finer lets a second
+        caller retarget the controller mid-query, which is the documented
+        cross-address desync.
+
+        Shared transports get a lock too, so the code path is uniform; it is
+        uncontended in practice because concurrent use is the design there.
+        """
+        root = root_path(path)
+        # Registries are also built via __new__ with attributes assigned
+        # directly (tests, adapters), as the getattr guards elsewhere in this
+        # class assume, so the table is created on demand rather than requiring
+        # every construction path to remember it. _TABLE_INIT_GUARD is
+        # module-level and only covers creating the table itself.
+        with _TABLE_INIT_GUARD:
+            locks = getattr(self, "_transport_locks", None)
+            if locks is None:
+                locks = {}
+                self._transport_locks = locks
+            lock = locks.get(root)
+            if lock is None:
+                lock = threading.RLock()
+                locks[root] = lock
+            return lock
 
     def transport_for(self, path: str) -> dict[str, Any]:
         """Transport declarations governing ``path``, inherited from its root."""

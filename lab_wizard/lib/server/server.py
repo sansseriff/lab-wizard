@@ -26,6 +26,7 @@ from typing import Any
 
 import yaml
 
+from lab_wizard.lib.client.server_discovery import workspace_ipc_endpoint
 from lab_wizard.lib.server.permissions import PermissionGate, load_permissions
 from lab_wizard.lib.server.registry import InstrumentRegistry
 from lab_wizard.lib.server.wire import WireServer
@@ -76,6 +77,15 @@ def main(argv: list[str] | None = None) -> int:
     bind: str = cfg["server"]["bind"]
     server_cfg = cfg["server"]
 
+    # Resolved up front (not only in the default branch) because the ipc
+    # endpoint is derived from it, and a client computes the same path from its
+    # own workspace — the two must agree in every hosting mode.
+    config_dir = (
+        config_path.parent / server_cfg["config_dir"]
+        if server_cfg.get("config_dir")
+        else config_path.parent.parent
+    ).resolve()
+
     if server_cfg.get("project_yaml"):
         # Override mode: host a single project's resources (eager — opens hardware).
         project_yaml = (config_path.parent / server_cfg["project_yaml"]).resolve()
@@ -86,11 +96,6 @@ def main(argv: list[str] | None = None) -> int:
     else:
         # Default mode: host the whole config/instruments tree (lazy — hardware
         # opens on first request).
-        config_dir = (
-            config_path.parent / server_cfg["config_dir"]
-            if server_cfg.get("config_dir")
-            else config_path.parent.parent
-        ).resolve()
         log.info("Hosting config/instruments tree from %s (lazy)", config_dir)
         registry = InstrumentRegistry.from_config_dir(str(config_dir))
 
@@ -114,7 +119,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         log.info("No permission rules configured (all calls allowed)")
 
-    server = WireServer(bind=bind, registry=registry, gate=gate)
+    # Same-machine clients (the wizard, locally-run projects) reach the server
+    # over an ipc:// socket derived from the config dir, so they need no
+    # discovery and are unaffected by the tcp bind being reconfigured. The
+    # tcp:// bind stays for remote clients. One socket, two endpoints.
+    binds = [bind]
+    ipc_endpoint = workspace_ipc_endpoint(config_dir)
+    if server_cfg.get("ipc", True):
+        binds.append(ipc_endpoint)
+
+    server = WireServer(bind=binds, registry=registry, gate=gate)
 
     def _handle_signal(signum: int, _frame: Any) -> None:
         log.info("Received signal %s; shutting down", signum)
@@ -123,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    log.info("WireServer ready on %s — Ctrl-C to exit", bind)
+    log.info("WireServer ready on %s — Ctrl-C to exit", ", ".join(binds))
     server.serve_forever()
     log.info("WireServer stopped")
     return 0

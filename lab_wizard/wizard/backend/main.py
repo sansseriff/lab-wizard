@@ -82,6 +82,7 @@ from lab_wizard.wizard.backend.remote_servers import (
     list_remote_attributes,
 )
 from lab_wizard.wizard.backend.server_control import (
+    ensure_server,
     server_status,
     start_server,
     stop_server,
@@ -92,6 +93,7 @@ from lab_wizard.wizard.backend.server_control import (
 )
 from pydantic import BaseModel as _PermBM, Field as _PermField
 from pathlib import Path
+from lab_wizard.wizard.backend.hardware_access import hardware_owner, run_discovery
 from lab_wizard.wizard.backend.transport_status import (
     conflicts_for_selection,
     transport_overview,
@@ -122,6 +124,26 @@ async def lifespan(app: FastAPI):
     # the health-poll in start_window therefore returns OK at exactly the
     # right moment.
     await asyncio.to_thread(get_instrument_metadata)
+
+    # Find-or-start this workspace's instrument server, so hardware has exactly
+    # one owner and the wizard is a client of it. Off the event loop because
+    # start_server waits briefly to confirm the child survived. Managed mode:
+    # stop_managed_children() below stops it when the wizard exits.
+    try:
+        status = await asyncio.to_thread(ensure_server, str(env.config_dir))
+        if status.get("running"):
+            logger.info(
+                "Instrument server owns hardware for this workspace (pid=%s, bind=%s)",
+                status.get("pid"),
+                status.get("bind"),
+            )
+        else:
+            logger.info(
+                "No instrument server for this workspace; the wizard will open "
+                "hardware in-process"
+            )
+    except Exception:
+        logger.exception("Could not reconcile the instrument server; continuing")
 
     yield
     # Code to run on shutdown (if any)
@@ -350,6 +372,16 @@ def api_transport_conflicts(
     rather than a 2am failure.
     """
     return conflicts_for_selection(_config_dir(env), req.paths)
+
+
+@app.get("/api/hardware-owner")
+def api_hardware_owner(env: Env = Depends(get_env)):
+    """Which process currently owns this workspace's hardware.
+
+    ``server`` means the wizard routes hardware operations through it; the UI
+    should say so, since it explains why discovery behaves differently.
+    """
+    return hardware_owner(_config_dir(env))
 
 
 @app.get("/api/permissions")
@@ -592,12 +624,29 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
             detail=f"Type '{body.type}' has no discovery action '{body.action}'",
         )
 
-    parent_inst = None
+    def _in_process() -> dict:
+        """Fallback for when no server owns this workspace's hardware."""
+        parent_inst = None
+        try:
+            if body.parent_chain:
+                parent_inst = _walk_parent_chain(body.parent_chain, env)
+            return action.run(body.params, parent=parent_inst).model_dump()
+        finally:
+            if parent_inst is not None and hasattr(parent_inst, "disconnect"):
+                parent_inst.disconnect()
+
     try:
-        if body.parent_chain:
-            parent_inst = _walk_parent_chain(body.parent_chain, env)
-        result = action.run(body.params, parent=parent_inst)
-        return result.model_dump()
+        # If a server is running it owns the transport, so it runs the scan —
+        # two processes on one serial handle is exactly what this avoids, and
+        # it keeps the permission gate's view of the hardware complete.
+        return run_discovery(
+            _config_dir(env),
+            type=body.type,
+            action=body.action,
+            params=body.params,
+            parent_chain=body.parent_chain,
+            in_process_fallback=_in_process,
+        )
     except HTTPException:
         logger.exception(
             "Discovery action failed (HTTPException): %s/%s parent_chain=%s",
@@ -611,9 +660,6 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
             "Discovery action failed: %s/%s — %s", body.type, body.action, e
         )
         raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        if parent_inst is not None and hasattr(parent_inst, "disconnect"):
-            parent_inst.disconnect()
 
 
 class _ApplyChildrenBody(_BM):

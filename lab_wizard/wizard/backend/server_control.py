@@ -335,6 +335,28 @@ def stop_server(config_dir: str | Path, timeout_s: float = 5.0) -> dict[str, Any
     return server_status(config_dir)
 
 
+def ensure_server(config_dir: str | Path) -> dict[str, Any]:
+    """Start this workspace's server if it is configured but not running.
+
+    Called at wizard startup so the server, not the GUI, owns the hardware —
+    which is what keeps a single process holding each transport and keeps the
+    permission gate's picture of instrument state complete.
+
+    Deliberately quiet about failure. A workstation with no ``server.yaml`` has
+    simply not opted in, and a port already taken usually means another wizard
+    is up; neither should stop the GUI from launching, because the in-process
+    fallback still works. Returns the resulting status either way.
+    """
+    status = server_status(config_dir)
+    if status["running"] or not status["has_config"]:
+        return status
+    try:
+        return start_server(config_dir, detached=False)
+    except ValueError as exc:
+        logger.info("Not auto-starting instrument server: %s", exc)
+        return server_status(config_dir)
+
+
 def restart_server(config_dir: str | Path, detached: bool = False) -> dict[str, Any]:
     """Stop (if running) then start — used to apply edited permission rules."""
     stop_server(config_dir)

@@ -177,24 +177,46 @@ badges and the conflict warning is Phase 5.
 
 ---
 
-## Phase 2 — One hardware owner
+## Phase 2 — One hardware owner ✅ done
 
-- **2.1** Dual-bind one ROUTER socket (`ipc://` + optional `tcp://`). No second
-  process.
-- **2.2** Wizard find-or-start for its workspace server. Managed mode already
-  exists in `server_control.py`.
-- **2.3** Route wizard hardware ops through the session; remove in-process
-  `create_inst()` from the discover / apply-children paths. **This is what makes
-  the permission gate honest.**
-- **2.4** Registry lifecycle: `register` / `unregister`, eviction, and
-  `disconnect()` in dependency order (children before roots). Also closes the
-  roadmap's "graceful shutdown" item.
-- **2.5** Per-root concurrency. Once everything funnels through the server, one
-  slow `set_voltage` blocking all RPCs becomes a real problem. One lock per
-  `exclusive` root; `shared` roots run parallel.
-  **The lock must wrap the transaction, not the RPC** — `query_instrument` is
-  write-then-readline, and interleaving inside it is the documented Prologix
-  desync bug (`.claude/prologix_scan_slowness.md`).
+- **2.1** ✅ `WireServer` takes a list of binds and binds one ROUTER to all of
+  them. The server adds `workspace_ipc_endpoint(config_dir)` alongside the
+  configured `tcp://`, so same-machine clients need no discovery. Disable with
+  `server.ipc: false`. ipc socket files are removed on shutdown — a stale one
+  would make a dead server look live to anything probing by existence.
+- **2.2** ✅ `ensure_server()` in `server_control.py`, called from the wizard's
+  lifespan. Quiet on failure: no `server.yaml` means the workstation never
+  opted in, and a taken port usually means another wizard — neither should stop
+  the GUI launching, since the in-process fallback still works.
+- **2.3** ✅ `discover` RPC on the server, and
+  [`wizard/backend/hardware_access.py`](lab_wizard/wizard/backend/hardware_access.py)
+  routing the wizard's discovery through it when one answers. The in-process
+  path remains only as the no-server fallback. Server-side discovery resolves
+  the parent chain **through the registry**, so it reuses the already-open
+  connection instead of building a second one, and no longer disconnects the
+  parent afterwards — the registry owns that lifetime now.
+  `GET /api/hardware-owner` reports which process owns the hardware.
+- **2.4** ✅ `registry.release(path)` / `release_all()`, deepest-first so
+  children let go before the root whose transport they borrow. `_teardown()`
+  tolerates every convention in the codebase (`disconnect()`, `close()`,
+  `dep`/`_dep`/`client`.`close()`) and never raises, so one uncooperative
+  instrument cannot strand the rest. Wired into `serve_forever`'s shutdown, and
+  exposed as a `release` RPC so an operator can hand back one rack without
+  stopping the server. Release is *eviction*, not removal: the factory stays,
+  and the next call reopens.
+- **2.5** ✅ `registry.transport_lock(path)` — one `RLock` per root, held across
+  the whole transaction in `WireServer.call` (resolve + dispatch + state
+  record). Covered by a concurrency test asserting that two calls on one root
+  never overlap while calls on different roots do.
+
+Covered by [`tests/test_single_hardware_owner.py`](tests/test_single_hardware_owner.py)
+(11 tests) plus a live check: server on ipc, wizard discovering it, `release`
+RPC closing the handle, shutdown releasing the rest and cleaning the socket,
+and the wizard correctly falling back once the server is gone.
+
+**Known gap:** `apply-children` still writes config directly in the wizard —
+that is a config write, not a hardware operation, so it belongs to the `tree.*`
+work in Phase 8 rather than here.
 
 ---
 

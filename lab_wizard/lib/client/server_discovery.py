@@ -9,7 +9,9 @@ liable to point a project at the wrong rack.
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -64,3 +66,37 @@ def local_server_url(start: Path | str) -> Optional[str]:
     # A server binds 0.0.0.0 to accept remote clients; we are on the same host,
     # so dial loopback rather than trying to connect to a wildcard address.
     return bind.replace("://0.0.0.0:", "://127.0.0.1:").replace("://*:", "://127.0.0.1:")
+
+
+# --------------------------- same-machine endpoint ---------------------------
+
+
+def workspace_ipc_endpoint(config_dir: Path | str) -> str:
+    """Deterministic ``ipc://`` endpoint for a workspace's server.
+
+    Derived from the resolved config path, so the server and any process on the
+    same machine compute the same answer without discovery. Hashed rather than
+    embedding the path because socket paths are length-limited (~104 bytes on
+    macOS) and a deep workspace path would overflow it.
+
+    Note this is per *workspace*: two workspaces on one machine get different
+    sockets and do not collide. It also means a GUI opened in workspace B
+    cannot derive workspace A's endpoint — cross-workspace discovery needs the
+    machine-local registry (plan 4.4), not this.
+    """
+    resolved = str(Path(config_dir).expanduser().resolve())
+    digest = hashlib.sha256(resolved.encode()).hexdigest()[:12]
+    return f"ipc://{tempfile.gettempdir()}/lab_wizard-{digest}.sock"
+
+
+def local_endpoints(config_dir: Path | str) -> list[str]:
+    """Endpoints a client on this machine should try, best first.
+
+    ipc:// is preferred: lower latency than a TCP loopback and unaffected by
+    the bind address being reconfigured.
+    """
+    endpoints = [workspace_ipc_endpoint(config_dir)]
+    url = local_server_url(config_dir)
+    if url:
+        endpoints.append(url)
+    return endpoints
