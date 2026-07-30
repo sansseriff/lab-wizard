@@ -158,6 +158,7 @@ class InstrumentRegistry:
         self._factories: dict[str, Callable[[], Any]] = {}
         self._classes: dict[str, type] = {}
         self._root_transports: dict[str, dict[str, Any]] = {}
+        self._params: dict[str, Any] = {}
         self._transport_locks: dict[str, threading.RLock] = {}
         self._build_eager(resources.instruments)
 
@@ -189,6 +190,7 @@ class InstrumentRegistry:
         self._factories = {}
         self._classes = {}
         self._root_transports = {}
+        self._params = {}
         self._transport_locks = {}
         self._build_lazy(instruments)
         return self
@@ -363,7 +365,19 @@ class InstrumentRegistry:
             "transport_key": _declared("transport_key", None),
         }
 
+    def params_for(self, path: str) -> Any | None:
+        """Params object registered at ``path``, if any.
+
+        Channels are registered with params only for configured indices, so this
+        returns ``None`` for a hardware channel nobody has configured.
+        """
+        return getattr(self, "_params", {}).get(path)
+
     def _index_attribute(self, path: str, params: Any | None) -> None:
+        if params is not None:
+            if not hasattr(self, "_params"):
+                self._params = {}
+            self._params[path] = params
         if params is None:
             return
         attr_name = getattr(params, "attribute_name", None)

@@ -100,3 +100,40 @@ def local_endpoints(config_dir: Path | str) -> list[str]:
     if url:
         endpoints.append(url)
     return endpoints
+
+
+# --------------------------- address book ---------------------------
+
+
+def load_server_urls(start: Path | str) -> dict[str, str]:
+    """``{server_name: url}`` from this workspace's ``config/remote/servers.yaml``.
+
+    The address book is a *client* concern: it records servers this workspace
+    wants to consume, which is exactly what a project's ``instrument_sources``
+    entries name. Kept here so a generated project can resolve those names
+    without reaching into wizard backend code.
+    """
+    config_dir = find_workspace_config_dir(start)
+    if config_dir is None:
+        return {}
+
+    servers_yaml = config_dir / "remote" / "servers.yaml"
+    if not servers_yaml.exists():
+        return {}
+
+    try:
+        with open(servers_yaml, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        logger.debug("Could not read %s: %s", servers_yaml, exc)
+        return {}
+
+    out: dict[str, str] = {}
+    for entry in data.get("servers") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name", "")).strip()
+        url = str(entry.get("url", "")).strip()
+        if name and url:
+            out[name] = url
+    return out

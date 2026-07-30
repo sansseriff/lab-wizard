@@ -47,8 +47,9 @@ Config schema (under ``permissions:`` in server.yaml):
 from __future__ import annotations
 
 import fnmatch
+import threading
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -226,16 +227,59 @@ class PermissionsConfig(BaseModel):
 
 
 class StateTracker:
-    """Holds ``(inst_path, state_key) -> value``, seeded with defaults."""
+    """Holds ``(inst_path, state_key) -> value``, seeded with defaults.
+
+    Two ways in. Most instruments are *inferred*: we know their state because we
+    set it, and :meth:`record` captures that after each successful call. Some are
+    *subscribed*: an external authority owns them and reports changes, so
+    :meth:`set_external` writes the truth and :meth:`record` deliberately does
+    nothing for those paths — inferring state you are being told is a
+    correctness bug, not a shortcut. See
+    :mod:`lab_wizard.lib.instruments.general.transport`.
+
+    Writes now arrive from two threads: the server's request loop and the
+    subscription callback thread, hence the lock.
+    """
 
     def __init__(self, defaults: Optional[dict[str, dict[str, Any]]] = None) -> None:
+        self._lock = threading.RLock()
         self._state: dict[tuple[str, str], Any] = {}
+        self._subscribed_paths: set[str] = set()
         for path, kv in (defaults or {}).items():
             for key, value in kv.items():
                 self._state[(path, key)] = value
 
     def get(self, path: str, key: str) -> Any:
-        return self._state.get((path, key))
+        with self._lock:
+            return self._state.get((path, key))
+
+    def mark_subscribed(self, path: str) -> None:
+        """Declare that ``path``'s state comes from an external authority."""
+        with self._lock:
+            self._subscribed_paths.add(path)
+
+    def is_subscribed(self, path: str) -> bool:
+        with self._lock:
+            return path in self._subscribed_paths
+
+    def set_external(self, path: str, key: str, value: Any) -> None:
+        """Record state reported by the authority that owns ``path``."""
+        with self._lock:
+            self._state[(path, key)] = value
+
+    def clear_external(self, paths: Iterable[str]) -> None:
+        """Forget state for ``paths``, used when a subscription resyncs.
+
+        A resync means we may have missed updates, so the old values are no
+        longer trustworthy. Callers seed the fresh snapshot immediately after;
+        anything absent from it stays unset, which reads as "unknown" rather
+        than as a stale claim about live hardware.
+        """
+        with self._lock:
+            targets = set(paths)
+            for existing in [p for (p, _k) in self._state if p in targets]:
+                for key in [k for (p, k) in list(self._state) if p == existing]:
+                    self._state.pop((existing, key), None)
 
     def record(
         self,
@@ -250,16 +294,26 @@ class StateTracker:
 
         ``_state_methods_`` is merged across the object's MRO, so declarations on
         a behavior ABC (e.g. VSource) apply to subclasses unless overridden.
+
+        Skipped entirely for subscribed paths: the authority will report the
+        change, and writing our guess here could overwrite a fresher value or
+        invent one the hardware never took (a clamped setpoint, say).
         """
-        spec_map = collect_state_methods(type(obj))
-        if method not in spec_map:
-            return
-        key, value_spec = spec_map[method]
-        self._state[(path, key)] = resolve_state_value(value_spec, args, kwargs, result)
+        with self._lock:
+            if path in self._subscribed_paths:
+                return
+            spec_map = collect_state_methods(type(obj))
+            if method not in spec_map:
+                return
+            key, value_spec = spec_map[method]
+            self._state[(path, key)] = resolve_state_value(
+                value_spec, args, kwargs, result
+            )
 
     def snapshot(self) -> dict[str, Any]:
         """Flat ``"path#key": value`` view (JSON-safe), for diagnostics/errors."""
-        return {f"{p}#{k}": v for (p, k), v in self._state.items()}
+        with self._lock:
+            return {f"{p}#{k}": v for (p, k), v in self._state.items()}
 
 
 @dataclass

@@ -10,9 +10,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+from lab_wizard.lib.client.composite_resources import CompositeResources
 from lab_wizard.lib.client.preflight import preflight_local_project
 from lab_wizard.lib.client.remote_resources import RemoteResources
-from lab_wizard.lib.client.server_discovery import local_server_url
+from lab_wizard.lib.client.server_discovery import load_server_urls
 from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
 from lab_wizard.lib.instruments.general.counter import Counter, StandInCounter
@@ -76,14 +77,19 @@ if __name__ == "__main__":
 
     resource_source: object | None = None
     if args.remote:
+        # Explicit override: route every instrument through one server.
         resource_source = RemoteResources.connect(args.remote)
-    else:
-        # Local control opens this project's instruments in *this* process.
-        # If the workstation's server already holds one of them, fail here with
-        # a message naming the rack rather than deep inside a driver.
-        preflight_local_project(
-            project.resources.instruments, local_server_url(project_dir)
+    elif project.resources.instrument_sources:
+        # Per-attribute routing declared in the project YAML, so instruments may
+        # be split between this machine and one or more servers.
+        resource_source = CompositeResources.from_project(
+            project, server_urls=load_server_urls(project_dir)
         )
+    else:
+        # Fully local: this process opens the instruments itself, so refuse if a
+        # server on this machine already holds one of them. Naming the rack here
+        # beats an opaque failure deep inside a driver.
+        preflight_local_project(project.resources.instruments)
 
     resources = create_instrument_resources(project, resource_source)
 

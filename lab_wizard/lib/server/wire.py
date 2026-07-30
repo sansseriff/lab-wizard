@@ -30,7 +30,7 @@ from pyleco.json_utils.json_objects import JsonRpcError
 from pyleco.json_utils.rpc_server import RPCServer
 
 from lab_wizard.lib.server.permissions import PermissionGate
-from lab_wizard.lib.server.registry import PATH_PREFIX, InstrumentRegistry
+from lab_wizard.lib.server.registry import PATH_PREFIX, InstrumentRegistry, root_path
 
 
 SERVER_NAME = b"lab_wizard_server"
@@ -55,12 +55,16 @@ class WireServer:
         bind: str | list[str],
         registry: InstrumentRegistry,
         gate: Optional[PermissionGate] = None,
+        config_dir: Optional[str] = None,
     ) -> None:
         self._binds = [bind] if isinstance(bind, str) else list(bind)
         if not self._binds:
             raise ValueError("WireServer needs at least one bind address")
         self._registry = registry
         self._gate = gate
+        # Present only in config-dir hosting mode. Single-project hosting has no
+        # editable tree, so tree_get() refuses rather than inventing one.
+        self._config_dir = config_dir
 
         self._rpc = RPCServer(title="lab_wizard_server")
         self._rpc.method()(self.call)
@@ -68,6 +72,9 @@ class WireServer:
         self._rpc.method()(self.list_held)
         self._rpc.method()(self.discover)
         self._rpc.method()(self.release)
+        self._rpc.method()(self.tree_get)
+        self._rpc.method()(self.schema_get)
+        self._rpc.method()(self.config_status)
         self._rpc.method()(self.list_attributes)
         self._rpc.method()(self.describe_path)
         self._rpc.method()(self.describe_attribute)
@@ -192,6 +199,104 @@ class WireServer:
         """
         with self._registry.transport_lock(path):
             return self._registry.release(path)
+
+    # ------------------------- tree (read-only) -------------------------
+
+    def tree_get(self) -> dict[str, Any]:
+        """The instrument tree this server hosts, shaped for the wizard's UI.
+
+        Read-only. Deliberately the same shape ``/api/manage-instruments``
+        already returns, so the existing tree components render a remote
+        server's tree with no change beyond where the data came from.
+
+        Carries transport facts per root so a node can show whether it is
+        exclusive or shared and whether it is currently held — that is the
+        difference between "this rack is busy" and "this rack is configured".
+        """
+        from lab_wizard.lib.utilities.config_io import get_configured_tree
+
+        config_dir = self._config_dir
+        if config_dir is None:
+            raise ValueError(
+                "This server hosts a single project rather than a config tree, "
+                "so it has no editable instrument tree to serve."
+            )
+        return {
+            "tree": get_configured_tree(config_dir),
+            "roots": {
+                root: self._registry.transport_for(root)
+                for root in sorted(
+                    {root_path(p) for p in self._registry.list_paths()}
+                )
+            },
+            "held_roots": sorted(self._registry.held_roots()),
+            "config_dir": str(config_dir),
+        }
+
+    def config_status(self) -> dict[str, Any]:
+        """Whether the config on disk still matches what this server loaded.
+
+        The tree is snapshotted at boot. A ``git pull``, a text editor, or the
+        wizard writing YAML all move the file underneath a running server, and
+        without this the wizard would show server state, the file would say
+        something else, and ``git diff`` would show changes nobody made through
+        the UI.
+
+        Compared by the set of registered paths rather than file mtimes, so a
+        reformat or comment edit is correctly reported as no change.
+        """
+        config_dir = self._config_dir
+        if config_dir is None:
+            return {"tracks_config": False}
+
+        try:
+            fresh = InstrumentRegistry.from_config_dir(config_dir)
+        except Exception as exc:  # noqa: BLE001 - a broken edit is a real answer
+            return {
+                "tracks_config": True,
+                "diverged": True,
+                "error": str(exc),
+                "detail": "The config on disk no longer loads.",
+            }
+
+        loaded = set(self._registry.list_paths())
+        on_disk = set(fresh.list_paths())
+        added = sorted(on_disk - loaded)
+        removed = sorted(loaded - on_disk)
+        return {
+            "tracks_config": True,
+            "diverged": bool(added or removed),
+            "added_paths": added,
+            "removed_paths": removed,
+            # Restarting is what picks the change up; held hardware is released
+            # cleanly on the way down.
+            "resolution": "restart" if (added or removed) else None,
+        }
+
+    def schema_get(self) -> dict[str, Any]:
+        """Vocabulary for rendering and editing this server's tree.
+
+        Served by the *server* on purpose. Which instrument classes exist, what
+        fields they take, what discovery actions they offer and which state keys
+        and methods a rule may reference all depend on the lab_wizard build
+        running here — which can differ from the client's. The server sends data
+        and schema; the client renders it. That is what stops a client offering
+        an instrument the server cannot instantiate.
+        """
+        from lab_wizard.lib.utilities.params_discovery import get_instrument_metadata
+
+        return {
+            "instrument_metadata": get_instrument_metadata(),
+            "permission_vocabulary": self._permission_vocabulary(),
+        }
+
+    def _permission_vocabulary(self) -> list[dict[str, Any]]:
+        """Per-path state keys and methods a rule may reference here."""
+        from lab_wizard.wizard.backend.permissions_api import (
+            _addressable_instruments,
+        )
+
+        return _addressable_instruments(self._registry)
 
     def list_attributes(self) -> dict[str, str]:
         return self._registry.list_attributes()

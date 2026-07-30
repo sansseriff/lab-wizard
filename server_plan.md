@@ -220,119 +220,83 @@ work in Phase 8 rather than here.
 
 ---
 
-## Phase 3 — DBay live state
+## Phase 3 — DBay live state ✅ done
 
-DBay's GUI backend is a `LabSync` reactive server with versioned snapshot +
-patch broadcast.
+DBay's GUI backend is a `LabSync` reactive server, so anyone with the GUI open
+can move a channel. A gate that only recorded its own writes was confidently
+wrong about live hardware.
 
-**How much glue is actually needed.** `AsyncLabLinkClient._handle_patch` applies
-each incoming patch to its own snapshot *before* invoking callbacks, so
-`client.snapshot()` is always current. Lab Wizard never parses JSON pointers,
-never applies patch ops, never reassembles state. What lab-link does *not* have
-is a client-side **typed** mirror — `_snapshot` is a plain dict; `ReactiveModel`
-is the server-side authoring primitive (wrong direction) and `StateStore` is
-server-internal. So the mirror is ours, and it is small:
+- **3.1** ✅ shipped in dbay 0.5.0 (`on_patch`, `on_snapshot`, `state_version`).
+- **3.2** ✅ [`server/external_state.py`](lab_wizard/lib/server/external_state.py).
+  `attach_external_state()` subscribes every root declaring
+  `state_authority() == "subscribed"`; `DBayParams.state_authority_client()`
+  builds a read-only client (`load_state=False`) distinct from the command one.
+- **3.3** ✅ [`instruments/dbay/state_sync.py`](lab_wizard/lib/instruments/dbay/state_sync.py)
+  — a declarative table, not patch parsing. `bias_voltage → voltage`,
+  `activated → output` (bool to the gate's `"on"`/`"off"`), plus dac16D's
+  singleton `vsb`/`vr` addons. Pure functions over a snapshot, so it is testable
+  without hardware or a socket.
 
-```python
-class MirroredState(Generic[T]):
-    def current(self) -> T:
-        if self._client.state_version != self._version:
-            self._cached = self._cls.model_validate(self._client.snapshot())
-            self._version = self._client.state_version
-        return self._cached
-```
+  Worth noting the subscribed path is *better informed* than inference, not
+  merely fresher: `Dac4DChannel` has no separate output enable and so never
+  records `output` at all, while the authority tracks it.
+- **3.4** ✅ Echoes dropped via `origin_client_id`; a `state_version` gap forces
+  a full resync rather than letting patch-derived state drift.
+- **3.5** ✅ Seeded from `snapshot()` at connect. Resync **clears before
+  seeding**, so anything absent from the new snapshot reads as unknown rather
+  than as a stale claim about live hardware — the same reasoning behind DBay's
+  own `_reset_transient_flags`.
+- **3.6** ✅ `StateTracker.record()` is a no-op for subscribed paths. The
+  concrete failure it prevents: we command 10 V, the hardware clamps to 5, and
+  recording our own value would leave the gate believing 10.
+- **3.7** ✅ `StateTracker` now holds an `RLock` — writes arrive from both the
+  request loop and the subscription callback thread.
 
-- **3.1** ~~Add `on_patch` / `on_snapshot` passthrough to `GuiSync`~~ —
-  **done, shipped in dbay 0.5.0** as `DBayClient.on_patch()`,
-  `on_snapshot()`, and `state_version`, plus the `GuiSync` passthroughs. Both
-  connect on demand and return an unsubscribe callable.
-- **3.2** For `state_authority == "subscribed"` roots, the server opens the sync
-  connection at registry build (websocket only — no hardware) and subscribes.
-- **3.3** **Declarative field map**, not patch parsing: declare which mirror
-  fields feed which state keys — DBay's `data[slot].vsource.channels[i].activated`
-  → `(inst://<root>/<child>/channel/<i>, "output")`. Lives next to the existing
-  `_state_methods_` declarations.
+Subscription failure is non-fatal but logged loudly: a gate running on inferred
+state for a subscribed root is exactly the silent wrongness this removes.
 
-  This mapping is irreducible: it bridges two *different domain models* (DBay's
-  module tree vs Lab Wizard's `inst://` + state-key vocabulary). No sync library
-  can infer it, and you don't want it gone — it **is** the vendor-neutral
-  abstraction that lets a rule say "this VSource is biased on" without knowing
-  DBay exists.
-- **3.4** Skip echoes of our own writes via `origin_client_id`; detect dropped
-  updates via `state_version` → force resnapshot.
-- **3.5** Seed `StateTracker` from `snapshot()` at connect rather than
-  `state_defaults`. On any resync, fail to the **safe** belief
-  (`activated=False`), not the last-known one — following DBay's own
-  `_reset_transient_flags` precedent.
-- **3.6** `StateTracker.record` becomes a no-op for subscribed paths. Inferring
-  state you are being told is a correctness bug, not a shortcut.
-- **3.7 Locking.** lab-link callbacks fire on the client's own thread while
-  `StateTracker` is touched from the ZMQ serve loop. `StateTracker` has no
-  locking today because it has never needed any. It will.
+Covered by [`tests/test_external_state.py`](tests/test_external_state.py) (15 tests).
 
-Net effect: someone drags a slider in the DBay GUI and the safety gate knows
-within a round-trip.
+## Phase 4 — Tree visibility, multi-source, mixed projects ✅ done
 
-### Outstanding upstream item
+- **4.1** ✅ `tree_get` RPC — same shape `/api/manage-instruments` returns, plus
+  per-root transport facts and `held_roots`. Refuses in single-project hosting
+  mode, which has no editable tree.
+- **4.2** ✅ `schema_get` RPC — instrument metadata and permission vocabulary
+  come from the **server's** build, which can differ from the client's. Server
+  sends data and schema; the client renders.
+- **4.3** ✅ `list_attributes` left narrow, as the measurement-binding contract.
+- **4.4** ✅ [`client/server_registry.py`](lab_wizard/lib/client/server_registry.py).
+  Servers advertise to `~/.lab_wizard/servers/<hash>.json` on start and withdraw
+  on exit; discovery is a directory read, never a port scan. Dead entries are
+  reaped by pid liveness.
 
-`client/dbay/state.py` ships only `Core` / `IModule` / `Empty` — a stub. The real
-models (`SystemState`, per-module state) live in `gui/backend/backend/state.py`
-and are not distributed. Until DBay exports its state schema from the client
-package, 3.3 validates into hand-written types that duplicate that schema and can
-drift silently.
+  **This closed a real hole.** Workspace-scoped lookup is structurally blind to
+  a server started elsewhere on the box — its ipc path is hashed from *its*
+  config dir and its `server.yaml` is somewhere we have no reason to look. So
+  preflight silently approved projects that could not run. `preflight_local_project`
+  and `transport_status` now consult every server on the machine, and
+  cross-workspace overlap is matched on **`transport_key`**, because the same
+  device under two configs has two different root hashes.
+- **4.5** ✅ [`client/composite_resources.py`](lab_wizard/lib/client/composite_resources.py)
+  routes `from_attribute` per attribute across a local tree and any number of
+  servers — possible only because `ResourceConfig` and `RemoteResources` already
+  share that interface. Ownership lives in the project YAML
+  (`resources.instrument_sources`), so a project runs identically for everyone
+  instead of depending on a remembered flag. `--remote` survives as an explicit
+  override; an absent mapping means local, so existing projects are untouched.
+- **4.6** ✅ `config_status` RPC compares the registered path set against a fresh
+  load, so a reformat or comment edit correctly reports no change while a real
+  edit reports `diverged` with added/removed paths. A config that no longer
+  loads is itself a reportable answer.
 
-**Shipping the state schema from the client package** is the fix, and it is the
-"reactive server whose clients get its schema, not just its bytes" move. It is an
-architectural change (where does the shared schema live — client package,
-separate schema package, or backend importing from client?) and needs a decision
-before anyone writes code.
+Covered by [`tests/test_server_registry.py`](tests/test_server_registry.py)
+(18 tests) plus a live run of a real server process: discovered from outside its
+workspace, serving `tree_get` / `schema_get` / `config_status`, and withdrawing
+on exit.
 
-> **Risk:** 3.3 remains the only item whose difficulty can't be estimated from
-> the outside. Prototype against `dac4D` before committing to the phase.
-
----
-
-## Phase 4 — Tree visibility, multi-source, mixed projects
-
-- **4.1** `tree.get()` over the wire, mirroring what `/api/manage-instruments`
-  returns today. Read-only.
-- **4.2** Server also serves its **schema / vocabulary** — instrument metadata,
-  discovery actions, per-class `state_keys` / `methods` from
-  `permissions_api.py`. These depend on the *server's* installed version, which
-  can differ from the client's. Server sends data + schema; client renders.
-- **4.3** Keep `list_attributes` as the narrow measurement-binding contract.
-  Don't conflate it with the admin tree view.
-- **4.4 Machine-local server registry.** `~/.lab_wizard/servers/<workspace-hash>.json`
-  holding `{bind, pid, workspace_path, started_at}`. Written on start, removed on
-  stop, stale entries reaped by `_pid_alive`.
-
-  This is required because the ipc socket path is hashed on the *server's*
-  workspace — a GUI opened in a different workspace on the same machine cannot
-  derive it. Makes "search localhost at startup" a directory read rather than a
-  port scan, and tells you which workspace each server belongs to so the merged
-  tree can label it. **Never scan ports.**
-- **4.5 `CompositeResources` + per-attribute ownership.** The real prerequisite
-  for mixed local/server measurements.
-
-  ```python
-  class CompositeResources:
-      """Routes from_attribute(name) to whichever source owns that attribute."""
-  ```
-
-  Holds one local `ResourceConfig` plus N `RemoteResources`. Small, because both
-  already expose an identical `from_attribute(name)` interface by design
-  ([model_tree.py:49](lab_wizard/lib/utilities/model_tree.py#L49)).
-
-  Record the owner per attribute in the project YAML. **`--remote` then stops
-  being needed as a global flag** — routing lives in config, where it is
-  inspectable and reproducible, instead of in a command-line argument someone
-  forgets.
-- **4.6** Detect divergence between config on disk and the server's in-memory
-  tree. The server snapshots at boot; hand-edits (git pull, text editor) will
-  still happen. Without this, the wizard shows server state, the file says
-  something else, and `git diff` shows changes nobody made through the UI.
-
----
+**Not yet wired into the UI** — the endpoints exist and are tested; rendering is
+Phase 5.
 
 ## Phase 5 — UI
 

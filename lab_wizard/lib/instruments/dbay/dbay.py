@@ -109,6 +109,26 @@ class DBayParams(
             return f"serial://{self.serial_port}" if self.serial_port else None
         return f"udp://{self.ip_address}:{self.direct_port}"
 
+    def state_authority_client(self) -> DBayClient:
+        """Client the server subscribes to for this rack's live state.
+
+        Separate from the client used for commands: this one only reads and
+        watches, so it is built with ``load_state=False`` (no module objects
+        instantiated) and never mutates. ``retain_changes`` is irrelevant here
+        for the same reason.
+        """
+        if self.mode != "gui":
+            raise RuntimeError(
+                "Only DBay in gui mode has an external state authority; "
+                f"this instrument is in {self.mode!r} mode."
+            )
+        return DBayClient(
+            mode="gui",
+            server_address=self.ip_address,
+            port=self.ip_port,
+            load_state=False,
+        )
+
     # -- Discovery ----------------------------------------------------------
 
     @classmethod

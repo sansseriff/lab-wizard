@@ -374,6 +374,27 @@ def api_transport_conflicts(
     return conflicts_for_selection(_config_dir(env), req.paths)
 
 
+@app.get("/api/local-servers")
+def api_local_servers():
+    """Every instrument server running on this machine.
+
+    Not just this workspace's. A server started from another workspace holds
+    real hardware and its endpoint is not derivable from here, so the UI needs
+    the machine-local registry to say which workspace owns which rack.
+    """
+    from lab_wizard.lib.client.server_registry import (
+        list_local_servers,
+        local_server_endpoints,
+    )
+
+    return {
+        "servers": [
+            {**entry, "endpoints": local_server_endpoints(entry)}
+            for entry in list_local_servers()
+        ]
+    }
+
+
 @app.get("/api/hardware-owner")
 def api_hardware_owner(env: Env = Depends(get_env)):
     """Which process currently owns this workspace's hardware.

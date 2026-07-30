@@ -27,6 +27,8 @@ from typing import Any
 import yaml
 
 from lab_wizard.lib.client.server_discovery import workspace_ipc_endpoint
+from lab_wizard.lib.client.server_registry import advertise_server, withdraw_server
+from lab_wizard.lib.server.external_state import attach_external_state
 from lab_wizard.lib.server.permissions import PermissionGate, load_permissions
 from lab_wizard.lib.server.registry import InstrumentRegistry
 from lab_wizard.lib.server.wire import WireServer
@@ -119,6 +121,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         log.info("No permission rules configured (all calls allowed)")
 
+    # Roots whose state another process owns are subscribed rather than
+    # inferred, so a change made outside lab_wizard (someone using the DBay GUI)
+    # is reflected in the gate instead of leaving it confidently stale.
+    bridges = attach_external_state(registry, gate.tracker)
+    if bridges:
+        log.info("Subscribed to %d external state authority(ies)", len(bridges))
+
     # Same-machine clients (the wizard, locally-run projects) reach the server
     # over an ipc:// socket derived from the config dir, so they need no
     # discovery and are unaffected by the tcp bind being reconfigured. The
@@ -128,7 +137,13 @@ def main(argv: list[str] | None = None) -> int:
     if server_cfg.get("ipc", True):
         binds.append(ipc_endpoint)
 
-    server = WireServer(bind=binds, registry=registry, gate=gate)
+    server = WireServer(
+        bind=binds,
+        registry=registry,
+        gate=gate,
+        # Only config-dir hosting has a servable tree; project_yaml mode does not.
+        config_dir=None if server_cfg.get("project_yaml") else str(config_dir),
+    )
 
     def _handle_signal(signum: int, _frame: Any) -> None:
         log.info("Received signal %s; shutting down", signum)
@@ -137,8 +152,21 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    log.info("WireServer ready on %s — Ctrl-C to exit", ", ".join(binds))
-    server.serve_forever()
+    # Publish to the machine-local registry so a workspace that knows nothing
+    # about this one can still find us. Its ipc path is hashed from *our* config
+    # dir, so it is not derivable from elsewhere.
+    advertise_server(
+        config_dir,
+        bind=bind,
+        ipc=ipc_endpoint if server_cfg.get("ipc", True) else None,
+    )
+    try:
+        log.info("WireServer ready on %s — Ctrl-C to exit", ", ".join(binds))
+        server.serve_forever()
+    finally:
+        for bridge in bridges:
+            bridge.stop()
+        withdraw_server(config_dir)
     log.info("WireServer stopped")
     return 0
 

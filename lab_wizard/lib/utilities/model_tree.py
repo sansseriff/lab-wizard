@@ -41,6 +41,13 @@ class ResourceConfig(BaseModel):
     plotters: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
     instruments: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
 
+    # Where each named instrument comes from: "local", or the name of a server
+    # in config/remote/servers.yaml. Recorded here rather than passed as a
+    # command-line flag so a project runs identically for everyone and stays
+    # reproducible. Attributes absent from this mapping are local, which is why
+    # existing projects need no change.
+    instrument_sources: dict[str, str] = Field(default_factory=dict)
+
     @model_validator(mode="before")
     @classmethod
     def _parse_dynamic_resources(cls, data: dict[str, Any]) -> dict[str, Any]:

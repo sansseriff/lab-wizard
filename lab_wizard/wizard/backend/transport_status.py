@@ -38,10 +38,8 @@ def _loopback(bind: Optional[str]) -> Optional[str]:
     return bind.replace("://0.0.0.0:", "://127.0.0.1:").replace("://*:", "://127.0.0.1:")
 
 
-def _held(url: Optional[str], timeout_ms: int = 1500) -> dict[str, Any]:
-    """Ask the local server what it holds. Unreachable is not an error."""
-    if not url:
-        return {}
+def _held_from(url: str, timeout_ms: int = 1500) -> dict[str, Any]:
+    """Ask one server what it holds. Unreachable is not an error."""
     from lab_wizard.lib.client.session import Session
 
     try:
@@ -55,6 +53,51 @@ def _held(url: Optional[str], timeout_ms: int = 1500) -> dict[str, Any]:
         return {}
 
 
+def _machine_held(timeout_ms: int = 1500) -> dict[str, Any]:
+    """Union of what *every* server on this machine holds.
+
+    Not just this workspace's. A server started elsewhere on the box holds real
+    hardware, and its endpoint is not derivable from here — so the authoring
+    check has to enumerate the machine-local registry or it will cheerfully
+    approve a project that cannot run.
+
+    Held transport keys are collected alongside roots because the same device
+    reached through another workspace's config has a different root hash.
+    """
+    from lab_wizard.lib.client.server_registry import (
+        list_local_servers,
+        local_server_endpoints,
+    )
+
+    held_roots: set[str] = set()
+    held_keys: dict[str, dict[str, Any]] = {}
+    servers: list[dict[str, Any]] = []
+
+    for entry in list_local_servers():
+        endpoints = local_server_endpoints(entry)
+        if not endpoints:
+            continue
+        held = _held_from(endpoints[0], timeout_ms)
+        if not held:
+            continue
+        servers.append(
+            {
+                "url": endpoints[0],
+                "workspace_path": entry.get("workspace_path"),
+                "config_dir": entry.get("config_dir"),
+                "pid": entry.get("pid"),
+                "held_roots": held.get("held_roots") or [],
+            }
+        )
+        held_roots.update(held.get("held_roots") or [])
+        for root, info in (held.get("exclusive_roots") or {}).items():
+            key = (info or {}).get("transport_key")
+            if key and root in set(held.get("held_roots") or []):
+                held_keys[key] = {"root": root, "url": endpoints[0]}
+
+    return {"servers": servers, "held_roots": held_roots, "held_keys": held_keys}
+
+
 def transport_overview(config_dir: str | Path) -> dict[str, Any]:
     """Per-root transport facts for this workspace, plus live server state.
 
@@ -63,9 +106,9 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
     """
     registry = InstrumentRegistry.from_config_dir(str(config_dir))
     status = server_status(config_dir)
-    url = _loopback(status.get("bind")) if status.get("running") else None
-    held = _held(url)
-    held_roots = set(held.get("held_roots") or [])
+    machine = _machine_held()
+    held_roots = machine["held_roots"]
+    held_keys = machine["held_keys"]
 
     roots: dict[str, Any] = {}
     for path in registry.list_paths():
@@ -73,12 +116,16 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
         if root in roots:
             continue
         info = registry.transport_for(root)
+        key = info["transport_key"]
+        # Held here, or held elsewhere on the machine via the same transport.
+        elsewhere = held_keys.get(key) if key else None
         roots[root] = {
             "root": root,
             "transport_sharing": info["transport_sharing"],
             "state_authority": info["state_authority"],
-            "transport_key": info["transport_key"],
-            "held_by_server": root in held_roots,
+            "transport_key": key,
+            "held_by_server": root in held_roots or elsewhere is not None,
+            "held_by": (elsewhere or {}).get("url"),
         }
 
     # Two roots resolving to one transport key are the same physical device
@@ -92,6 +139,9 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
 
     return {
         "server_running": bool(status.get("running")),
+        # Every server on the machine, so the UI can say *which* workspace holds
+        # a rack rather than just that something does.
+        "local_servers": machine["servers"],
         "roots": roots,
         "duplicate_transports": duplicates,
     }
@@ -116,11 +166,13 @@ def conflicts_for_selection(
             continue
         (held if info["held_by_server"] else configured).append(info)
 
+    any_server = bool(overview["local_servers"])
     return {
         "server_running": overview["server_running"],
+        "local_servers": overview["local_servers"],
         # Local run fails now.
         "held_conflicts": held,
-        # Local run works now, breaks as soon as the server touches this rack.
-        "configured_conflicts": configured if overview["server_running"] else [],
+        # Local run works now, breaks as soon as a server touches this rack.
+        "configured_conflicts": configured if any_server else [],
         "duplicate_transports": overview["duplicate_transports"],
     }
