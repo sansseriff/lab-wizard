@@ -178,6 +178,70 @@ def save_permissions(
     return _to_plain(permissions)
 
 
+def rules_referencing(config_dir: str | Path, attributes: set[str]) -> list[dict[str, Any]]:
+    """Rules that mention any of ``attributes``, and how.
+
+    Asked before removing an instrument. Removal is not blocked, but a rule left
+    referencing a vanished attribute fails closed — it denies everything it
+    covered — so deleting instrument A can silently make instrument B
+    un-callable. That has to be shown at the moment of deletion, or fail-closed
+    becomes a mystery outage days later.
+    """
+    config = load_permissions(_read_permissions_block(config_dir))
+    out: list[dict[str, Any]] = []
+
+    for rule in config.rules:
+        in_condition = _condition_attributes(rule.when) & attributes
+        # A deny clause naming the attribute is the consequential case: those
+        # are the methods that stop being callable.
+        denied: list[str] = []
+        for clause in rule.deny:
+            if clause.attribute in attributes:
+                denied.extend(clause.methods)
+        if not in_condition and not denied:
+            continue
+        out.append(
+            {
+                "id": rule.id,
+                "description": rule.description,
+                "referenced_in_condition": sorted(in_condition),
+                "blocks_methods": sorted(set(denied)),
+            }
+        )
+    return out
+
+
+def _condition_attributes(cond: Any) -> set[str]:
+    """Attributes referenced anywhere in a condition tree."""
+    refs: set[str] = set()
+    if cond.all_ is not None:
+        for c in cond.all_:
+            refs |= _condition_attributes(c)
+    elif cond.any_ is not None:
+        for c in cond.any_:
+            refs |= _condition_attributes(c)
+    elif cond.not_ is not None:
+        refs |= _condition_attributes(cond.not_)
+    elif cond.attribute is not None:
+        refs.add(cond.attribute)
+    return refs
+
+
+def attributes_under(config_dir: str | Path, type_str: str, key: str) -> set[str]:
+    """Every ``attribute_name`` at or beneath the node ``(type_str, key)``.
+
+    Removing a parent removes its children and their channels, so the warning
+    has to cover the whole subtree rather than just the node clicked.
+    """
+    registry = InstrumentRegistry.from_config_dir(str(config_dir))
+    prefix = f"inst://{key}"
+    return {
+        name
+        for name, path in registry.list_attributes().items()
+        if path == prefix or path.startswith(f"{prefix}/")
+    }
+
+
 def _referenced_attributes(config: Any) -> set[str]:
     """Collect every ``attribute`` referenced by conditions and deny clauses."""
     refs: set[str] = set()

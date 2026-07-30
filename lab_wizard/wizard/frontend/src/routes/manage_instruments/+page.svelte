@@ -71,9 +71,38 @@
 		confirmTarget = node;
 	}
 
+	// Rules that reference the instrument being removed. A rule left pointing at
+	// a vanished attribute fails closed — it denies everything it covered — so
+	// removing one instrument can make a different one un-callable.
+	type RemovalImpact = {
+		attributes: string[];
+		rules: {
+			id: string;
+			description: string;
+			referenced_in_condition: string[];
+			blocks_methods: string[];
+		}[];
+	};
+	let removalImpact: RemovalImpact | null = $state(null);
+	let impactLoading = $state(false);
+
 	function onRemove(node: TreeNodeItem) {
 		confirmAction = 'remove';
 		confirmTarget = node;
+		removalImpact = null;
+		impactLoading = true;
+		fetchWithConfig<RemovalImpact>('/api/manage-instruments/removal-impact', 'POST', {
+			type: node.type,
+			key: node.key
+		})
+			.then((res) => {
+				// Ignore a reply for a dialog the user already dismissed.
+				if (confirmTarget === node) removalImpact = res;
+			})
+			.catch(() => {})
+			.finally(() => {
+				impactLoading = false;
+			});
 	}
 
 	async function executeConfirm() {
@@ -915,6 +944,35 @@
 					and all its children from the config.
 				{/if}
 			</p>
+
+			{#if confirmAction === 'remove'}
+				{#if impactLoading}
+					<p class="mt-3 text-xs text-gray-500 dark:text-gray-400">Checking permission rules…</p>
+				{:else if removalImpact && removalImpact.rules.length > 0}
+					<div
+						class="mt-3 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs dark:border-amber-900 dark:bg-amber-950/20"
+					>
+						<div class="font-medium text-amber-900 dark:text-amber-300">
+							{removalImpact.rules.length} permission rule(s) reference this instrument
+						</div>
+						<ul class="mt-1 space-y-1 text-amber-800 dark:text-amber-400">
+							{#each removalImpact.rules as rule (rule.id)}
+								<li>
+									<span class="font-mono">{rule.id}</span>
+									{#if rule.blocks_methods.length > 0}
+										— blocks <span class="font-mono">{rule.blocks_methods.join(', ')}</span>
+									{/if}
+								</li>
+							{/each}
+						</ul>
+						<div class="mt-1.5 text-amber-700 dark:text-amber-500">
+							A rule whose instrument no longer exists fails closed: it denies every call it
+							covers, which may block instruments you did not remove. Edit these rules on
+							<a class="underline" href="/manage_permissions">Server &amp; Permissions</a> first.
+						</div>
+					</div>
+				{/if}
+			{/if}
 			<div class="mt-4 flex justify-end gap-2">
 				<button
 					class="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"

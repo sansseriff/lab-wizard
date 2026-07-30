@@ -71,7 +71,9 @@ from lab_wizard.wizard.backend.custom_resource_generation import (
     generate_custom_resource_project,
 )
 from lab_wizard.wizard.backend.permissions_api import (
+    attributes_under,
     get_permissions_model,
+    rules_referencing,
     save_permissions,
 )
 from lab_wizard.wizard.backend.remote_servers import (
@@ -610,6 +612,26 @@ def api_reset_instrument(body: _ResetBody, env: Env = Depends(get_env)):
     except Exception as e:
         logger.exception("Reset instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/manage-instruments/removal-impact")
+def api_removal_impact(body: _RemoveBody, env: Env = Depends(get_env)):
+    """What breaks if this instrument is removed.
+
+    A rule referencing a vanished attribute fails closed — it denies everything
+    it covered — so removing one instrument can make a *different* one
+    un-callable. Surfaced before the confirm, not discovered later.
+    """
+    config_dir = _config_dir(env)
+    try:
+        attributes = attributes_under(config_dir, body.type, body.key)
+        return {
+            "attributes": sorted(attributes),
+            "rules": rules_referencing(config_dir, attributes) if attributes else [],
+        }
+    except Exception as e:  # noqa: BLE001 - the dialog must still open
+        logger.warning("Could not compute removal impact: %s", e)
+        return {"attributes": [], "rules": [], "error": str(e)}
 
 
 @app.post("/api/manage-instruments/remove")
