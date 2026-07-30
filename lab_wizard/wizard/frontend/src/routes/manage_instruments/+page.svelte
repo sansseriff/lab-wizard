@@ -9,12 +9,27 @@
 		InstrumentMeta,
 		DiscoveryAction,
 		DiscoveryResult,
-		ChainStep
+		ChainStep,
+		RootTransport
 	} from './+page.ts';
+	import type { TransportBadge } from '$lib/components/TreeNode.svelte';
 
 	let { data } = $props();
 	let tree: TreeItem[] = $state(data.tree ?? []);
 	let metadata: Record<string, InstrumentMeta> = $state(data.metadata ?? {});
+	let roots: Record<string, RootTransport> = $state(data.roots ?? {});
+	let hardwareOwner: 'wizard' | 'server' = $state(data.hardwareOwner ?? 'wizard');
+
+	// Roots are keyed by inst:// path, which is the config key with a prefix.
+	function transportBadge(node: TreeNodeItem): TransportBadge | null {
+		const info = roots[`inst://${node.key}`];
+		if (!info) return null;
+		return {
+			transport_sharing: info.transport_sharing,
+			state_authority: info.state_authority,
+			held_by_server: info.held_by_server
+		};
+	}
 
 	// Confirmation dialog state
 	let confirmAction: 'reset' | 'remove' | null = $state(null);
@@ -427,6 +442,19 @@
 		<h1 class="text-2xl font-semibold">Manage Instruments</h1>
 	</div>
 
+	<!-- Which process will actually touch hardware when you hit Discover. Worth
+	     stating: it changes where the scan runs and whether the permission gate
+	     observes it. -->
+	<div class="text-xs text-gray-500 dark:text-gray-400">
+		{#if hardwareOwner === 'server'}
+			Discovery runs on this workspace's <strong>instrument server</strong>, which owns the
+			hardware.
+		{:else}
+			No server is running, so discovery opens hardware in the <strong>wizard</strong> process.
+		{/if}
+		<a class="text-indigo-600 hover:underline" href="/hardware_status">Hardware &amp; Servers →</a>
+	</div>
+
 	{#if statusMessage}
 		<div
 			class="rounded-lg px-3 py-2 text-sm {statusMessage.ok
@@ -449,7 +477,7 @@
 				</p>
 			{:else}
 				{#each tree as node}
-					<TreeNode {node} {onReset} {onRemove} />
+					<TreeNode {node} {onReset} {onRemove} {transportBadge} />
 				{/each}
 			{/if}
 		</div>

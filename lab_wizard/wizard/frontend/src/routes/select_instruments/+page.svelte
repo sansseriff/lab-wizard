@@ -72,6 +72,55 @@
 	const selected: Record<string, SelectedChoice | null> = $state({});
 	for (const r of reqs) if (r.resource_kind === 'instrument' && !(r.variable_name in selected)) selected[r.variable_name] = null;
 
+	// --- Transport conflicts for a locally-run project ---------------------
+	//
+	// Asked while the user is still choosing, because a conflict discovered at
+	// run time is a 2am failure. Only exclusive transports can conflict; a rack
+	// behind its own multiplexing server is fine for everyone at once.
+	type ConflictRoot = {
+		root: string;
+		transport_key: string | null;
+		held_by: string | null;
+	};
+	type ConflictCheck = {
+		local_servers: { url: string; workspace_path: string | null }[];
+		held_conflicts: ConflictRoot[];
+		configured_conflicts: ConflictRoot[];
+	};
+	let conflicts: ConflictCheck | null = $state(null);
+
+	// Roots the current selection would open. pathLeafToRoot is leaf-first, so
+	// the root is its last element.
+	function selectedRootPaths(): string[] {
+		const out = new Set<string>();
+		for (const choice of Object.values(selected)) {
+			if (!choice || choice.pathLeafToRoot.length === 0) continue;
+			const root = choice.pathLeafToRoot[choice.pathLeafToRoot.length - 1];
+			out.add(`inst://${root.key}`);
+		}
+		return [...out];
+	}
+
+	$effect(() => {
+		const paths = selectedRootPaths();
+		if (paths.length === 0) {
+			conflicts = null;
+			return;
+		}
+		let cancelled = false;
+		fetchWithConfig<ConflictCheck>('/api/transport-status/check', 'POST', { paths })
+			.then((res) => {
+				// A stale reply must not overwrite a newer one.
+				if (!cancelled) conflicts = res;
+			})
+			.catch(() => {
+				if (!cancelled) conflicts = null;
+			});
+		return () => {
+			cancelled = true;
+		};
+	});
+
 	// Saver / plotter selection state — multi-select (set of "type:key" strings) per variable
 	const flatSelected: Record<string, Set<string>> = $state({});
 	for (const r of reqs) {
@@ -310,6 +359,54 @@
 					placeholder="iv_curve_run"
 					class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm dark:border-gray-600 dark:bg-gray-900"
 				/>
+				{#if conflicts && (conflicts.held_conflicts.length > 0 || conflicts.configured_conflicts.length > 0)}
+					<!-- Two distinct warnings. "In use" means a local run fails now;
+					     "served by" means it works today and breaks the moment
+					     anything touches that rack through the server. -->
+					<div class="mt-3 space-y-2">
+						{#if conflicts.held_conflicts.length > 0}
+							<div
+								class="rounded-md border border-red-300 bg-red-50 p-2.5 text-xs dark:border-red-900 dark:bg-red-950/25"
+							>
+								<div class="font-medium text-red-900 dark:text-red-300">
+									Hardware in use — a local run of this project will refuse to start
+								</div>
+								<ul class="mt-1 space-y-0.5 text-red-800 dark:text-red-400">
+									{#each conflicts.held_conflicts as c (c.root)}
+										<li>
+											<span class="font-mono">{c.transport_key ?? c.root}</span>
+											is open in another process.
+										</li>
+									{/each}
+								</ul>
+								<div class="mt-1 text-red-700 dark:text-red-500">
+									Release it on
+									<a class="underline" href="/hardware_status">Hardware &amp; Servers</a>, or
+									generate this project to run through the server.
+								</div>
+							</div>
+						{/if}
+						{#if conflicts.configured_conflicts.length > 0}
+							<div
+								class="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs dark:border-amber-900 dark:bg-amber-950/20"
+							>
+								<div class="font-medium text-amber-900 dark:text-amber-300">
+									A server also serves this hardware
+								</div>
+								<ul class="mt-1 space-y-0.5 text-amber-800 dark:text-amber-400">
+									{#each conflicts.configured_conflicts as c (c.root)}
+										<li><span class="font-mono">{c.transport_key ?? c.root}</span></li>
+									{/each}
+								</ul>
+								<div class="mt-1 text-amber-700 dark:text-amber-500">
+									A local run works right now, but will fail as soon as anything uses that rack
+									through the server.
+								</div>
+							</div>
+						{/if}
+					</div>
+				{/if}
+
 				<div class="mt-3">
 					<div class="mb-1 text-xs text-gray-600 dark:text-gray-300">Generated setup style</div>
 					<div class="grid gap-2 text-sm sm:grid-cols-2">

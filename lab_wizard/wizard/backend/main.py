@@ -395,6 +395,32 @@ def api_local_servers():
     }
 
 
+class _ReleaseRequest(_PermBM):
+    url: str
+    path: str
+
+
+@app.post("/api/local-servers/release")
+def api_release_hardware(req: _ReleaseRequest):
+    """Ask a server to disconnect and evict one root.
+
+    Hands a rack back without stopping the whole server, which is what a user
+    wants when a local project needs the bus. The path stays servable — the next
+    call through the server reopens it.
+    """
+    from lab_wizard.lib.client.session import Session
+
+    try:
+        session = Session(req.url, timeout_ms=10_000)
+        try:
+            released = session.call("release", {"path": req.path})
+        finally:
+            session.close()
+    except Exception as e:  # noqa: BLE001 - surfaced to the UI
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", "released": released}
+
+
 @app.get("/api/hardware-owner")
 def api_hardware_owner(env: Env = Depends(get_env)):
     """Which process currently owns this workspace's hardware.

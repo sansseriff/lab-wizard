@@ -13,6 +13,14 @@
 		type: string;
 		key: string;
 	};
+
+	// Transport facts for a root, shown as badges. Only roots own a transport,
+	// so children and channels inherit their root's answer and are not badged.
+	export type TransportBadge = {
+		transport_sharing: 'exclusive' | 'shared';
+		state_authority: 'inferred' | 'subscribed';
+		held_by_server: boolean;
+	};
 </script>
 
 <script lang="ts">
@@ -29,6 +37,8 @@
 		isCompatible?: (node: TreeItem, path: TreePathRef[]) => boolean;
 		isSelected?: (node: TreeItem, path: TreePathRef[]) => boolean;
 		selectionLabel?: (node: TreeItem, path: TreePathRef[]) => string | null;
+		// Optional, so every existing caller renders unchanged.
+		transportBadge?: (node: TreeItem, path: TreePathRef[]) => TransportBadge | null;
 		path?: TreePathRef[];
 	};
 
@@ -42,6 +52,7 @@
 		isCompatible,
 		isSelected,
 		selectionLabel,
+		transportBadge,
 		path = []
 	}: Props = $props();
 
@@ -56,6 +67,10 @@
 		isSelectable ? (isSelected ? isSelected(node, currentPath) : false) : false
 	);
 	const selectBadge = $derived(selectionLabel ? selectionLabel(node, currentPath) : null);
+	// Depth 0 is a root — the only node that owns a transport.
+	const transport = $derived(
+		depth === 0 && transportBadge ? transportBadge(node, currentPath) : null
+	);
 
 	function handleSelect() {
 		if (!isSelectable || !compatible || !onSelect) return;
@@ -108,6 +123,36 @@
 			</span>
 		{/if}
 
+		{#if transport}
+			<span
+				class="rounded px-1.5 py-0.5 text-[10px] font-medium {transport.transport_sharing ===
+				'shared'
+					? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
+					: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'}"
+				title={transport.transport_sharing === 'shared'
+					? 'Behind a server that already multiplexes it — several programs may use it at once'
+					: 'One process at a time can hold this transport'}
+			>
+				{transport.transport_sharing}
+			</span>
+			{#if transport.state_authority === 'subscribed'}
+				<span
+					class="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-900/40 dark:text-sky-300"
+					title="State is read from the process that owns this hardware, not inferred from our own commands"
+				>
+					subscribed
+				</span>
+			{/if}
+			{#if transport.held_by_server}
+				<span
+					class="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
+					title="A server has this hardware open right now"
+				>
+					in use
+				</span>
+			{/if}
+		{/if}
+
 		<div class="ml-auto flex gap-1 opacity-0 transition group-hover:opacity-100">
 			{#if onReset}
 				<button
@@ -143,6 +188,7 @@
 					{isCompatible}
 					{isSelected}
 					{selectionLabel}
+					{transportBadge}
 					path={currentPath}
 				/>
 			{/each}

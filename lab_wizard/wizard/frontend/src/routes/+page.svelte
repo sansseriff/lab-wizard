@@ -43,6 +43,11 @@
 					href: '/manage_permissions',
 					label: 'Server & Permissions',
 					description: 'Start/stop the instrument server and author its safety rules.'
+				},
+				{
+					href: '/hardware_status',
+					label: 'Hardware & Servers',
+					description: 'See which process owns each transport and what is open right now.'
 				}
 			]
 		},

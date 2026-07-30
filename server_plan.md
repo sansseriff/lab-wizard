@@ -298,54 +298,38 @@ on exit.
 **Not yet wired into the UI** — the endpoints exist and are tested; rendering is
 Phase 5.
 
-## Phase 5 — UI
+## Phase 5 — UI ✅ partly done
 
-All three tree pages import the same
-[TreeNode.svelte](lab_wizard/wizard/frontend/src/lib/components/TreeNode.svelte),
-and all four tree-bearing pages source from one endpoint
-(`/api/manage-instruments`, or `/api/permissions` which embeds `tree`).
-**Keep that contract and change only what's behind it** — the swap then
-propagates everywhere for free.
+The backend of phases 1–4 was invisible; this makes it pressable.
 
-### The merged tree
+- **5.1** ✅ New **Hardware & Servers** page (`/hardware_status`), linked from the
+  home page under "This workstation". Shows which process owns hardware, every
+  server on the machine with its workspace and pid, and per-root transport
+  status. Provenance also appears on Manage Instruments, which now says whether
+  a Discover will run on the server or in the wizard.
+- **5.2** ✅ `TreeNode` gained an optional `transportBadge` prop — optional so
+  every existing caller renders unchanged — showing `exclusive`/`shared`,
+  `subscribed`, and `in use`. Only depth 0 is badged, since only roots own a
+  transport. Wired into Manage Instruments.
+- **5.5** ✅ Live conflict warnings while choosing instruments, separating
+  **held** (a local run refuses to start now) from **configured** (works now,
+  breaks the moment anything uses that rack through the server). The check
+  re-runs on each selection change and discards stale replies.
+- **5.6** ✅ Hardware owner is stated rather than implied, with a pointer to
+  create the server config when none exists.
+- **5.7** ✅ Refresh on the status page; a **Release** button hands one rack back
+  without stopping the server.
 
-Show roots from every source at once: local files, plus every reachable server
-(from 4.4's registry and `servers.yaml`). Group and badge by owner.
+**Deliberately not built yet:** 5.3 (read-only mode) and 5.4 (explicit edit
+destination for a merged multi-source tree). Both describe UI for editing a
+*remote* server's tree, which is Phase 8 — writing it now would be speculative.
+The merged-tree view therefore still shows only this workspace's tree; other
+machines' servers appear on the status page rather than as tree roots.
 
-The constraint is **not** on the view — it's that every mutation must name its
-target. The thing to avoid is an "add instrument" button with no visible answer
-to "add where."
-
-- **5.1** Owner grouping + provenance labels. Non-negotiable — without it, "why
-  didn't my edit show up" is unanswerable.
-- **5.2** Per-node badges from 1.2: `exclusive`/`shared`, `held`/`free`.
-- **5.3** Read-only mode with an explanation, when a remote server hasn't opted
-  into `tree.*` writes (8.3).
-- **5.4** Explicit destination for every add/init — either implied by the group
-  you acted within, or an explicit picker.
-- **5.5** `select_instruments`: the "Available on remote servers" info box
-  ([+page.svelte:531-552](lab_wizard/wizard/frontend/src/routes/select_instruments/+page.svelte#L531-L552))
-  becomes **selectable options in the same dropdown as local ones**, tagged with
-  their server. Net UI *reduction* — the local/remote duality collapses.
-- **5.6** Server connection state + local override. Auto-use the workspace
-  server if one is running; show it in the provenance indicator. The local
-  override exists but is deliberate and explained — choosing local means opening
-  hardware in-process, which defeats the gate and risks a resource conflict.
-  That warrants a confirmation naming both consequences, surfaced on demand, not
-  a startup modal everyone learns to dismiss.
-- **5.7** Staleness handling. `+page.ts` loads once; with multiple clients on one
-  server that's wrong. Needs Phase 6.3 push, or at minimum a refresh affordance.
-
-### Mixing rules (what 5.4 must enforce)
-
-| Situation | Allowed? |
-|---|---|
-| Client adds a **shared** root locally (DBay GUI mode) while server also serves it | **Yes** — both are clients of the DBay daemon |
-| Client adds an **exclusive** root locally that the server **holds** | **No** — refuse at authoring time |
-| Client adds an **exclusive** root the server has **configured but not resolved** | Yes, with a lease — but warn; starting the server's copy will now fail |
-| Client adds any root the server doesn't know about | Yes, unconditionally |
-
----
+Also still an info box, not selectable options: remote attributes in
+`select_instruments`. The `CompositeResources` plumbing (4.5) exists, but the
+generator does not yet emit `instrument_sources`, so per-attribute selection has
+nothing to write to. That is the natural next increment.
 
 ## Phase 6 — Client robustness
 

@@ -71,12 +71,45 @@ export type ManageData = {
 	metadata: Record<string, InstrumentMeta>;
 };
 
+export type RootTransport = {
+	root: string;
+	transport_sharing: 'exclusive' | 'shared';
+	state_authority: 'inferred' | 'subscribed';
+	transport_key: string | null;
+	held_by_server: boolean;
+	held_by: string | null;
+};
+
 export const load: PageLoad = async () => {
 	if (!browser) {
-		return { tree: [] as TreeItem[], metadata: {} as Record<string, InstrumentMeta> };
+		return {
+			tree: [] as TreeItem[],
+			metadata: {} as Record<string, InstrumentMeta>,
+			roots: {} as Record<string, RootTransport>,
+			hardwareOwner: 'wizard' as 'wizard' | 'server'
+		};
 	}
 	const data: ManageData = await fetchWithConfig('/api/manage-instruments', 'GET');
-	return { tree: data.tree ?? [], metadata: data.metadata ?? {} };
+
+	// Transport status is best-effort: the tree must still render if no server
+	// is around to ask, so a failure here costs badges, not the page.
+	let roots: Record<string, RootTransport> = {};
+	let hardwareOwner: 'wizard' | 'server' = 'wizard';
+	try {
+		const [status, owner] = await Promise.all([
+			fetchWithConfig<{ roots: Record<string, RootTransport> }>(
+				'/api/transport-status',
+				'GET'
+			),
+			fetchWithConfig<{ owner: 'wizard' | 'server' }>('/api/hardware-owner', 'GET')
+		]);
+		roots = status.roots ?? {};
+		hardwareOwner = owner.owner;
+	} catch {
+		// leave defaults
+	}
+
+	return { tree: data.tree ?? [], metadata: data.metadata ?? {}, roots, hardwareOwner };
 };
 
 export const prerender = true;
