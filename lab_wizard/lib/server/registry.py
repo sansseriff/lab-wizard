@@ -450,6 +450,30 @@ class InstrumentRegistry:
         """
         return sorted(self._index)
 
+    def list_held_objects(self) -> dict[str, Any]:
+        """Live instrument objects by path, for carrying across a tree reload."""
+        return dict(self._index)
+
+    def adopt_live(self, objects: dict[str, Any]) -> list[str]:
+        """Take ownership of already-open instruments from a previous registry.
+
+        A config edit rebuilds the index, but racks unaffected by the edit are
+        still open and must not be reopened — a second ``create_inst`` would try
+        to claim a port the surviving object still holds. Only paths this
+        registry actually knows are adopted; anything whose path no longer
+        exists (removed, or rehashed by a key-field edit) is disconnected here,
+        since nothing would ever be able to reach it again.
+        """
+        adopted: list[str] = []
+        for path, obj in objects.items():
+            if path in self._factories or path in self._index:
+                self._index[path] = obj
+                adopted.append(path)
+            else:
+                logger.info("Releasing %s: no longer present after reload", path)
+                _teardown(path, obj)
+        return sorted(adopted)
+
     def held_roots(self) -> set[str]:
         """Root paths with at least one live object under them.
 

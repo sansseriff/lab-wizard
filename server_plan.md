@@ -331,89 +331,92 @@ Also still an info box, not selectable options: remote attributes in
 generator does not yet emit `instrument_sources`, so per-attribute selection has
 nothing to write to. That is the natural next increment.
 
-## Phase 6 — Client robustness
+## Phase 6 — Client robustness ✅ mostly done
 
-- **6.1** Proxy re-resolution by `attribute_name` on path error. Fixes the frozen
-  path cached in `RemoteResources._proxy_cache`.
-- **6.2** `Session` reconnect / backoff.
-- **6.3** Server→client push (tree changed, state changed, lease changed).
-  Requires a receive thread — same work item as 6.2, do them together.
-
-> **Strategic note.** lab-link already solves versioned snapshot + patch
-> broadcast, command/ack with structured errors, reconnect, and sync+async
-> clients — four roadmap items. Lab Wizard hand-rolls the same thing on
-> ZMQ + pyleco.
->
-> Don't rewrite now: ZMQ `ipc://` beats websockets for same-machine latency, and
-> pyleco's binary frames are the right path for the roadmap's bulk-array item,
-> which JSON-over-websocket handles badly. But **design 6.3 to mirror lab-link's
-> semantics** (versioned snapshot + patch, `origin_client_id`, command/ack) so
-> the two systems feel identical to users and converging later is cheap.
-> Revisit after Phase 3, once lab-link has been consumed in anger.
+- **6.1** ✅ Proxies carry their `attribute_name` and re-resolve on a
+  "no instrument registered at path" error. `inst://` paths are hash-derived, so
+  a key-field edit moves an instrument and every proxy holding the old path
+  pointed at nothing forever — a latent bug that mutable trees would have
+  exposed. Retry is deliberately narrow: driver faults, permission denials and
+  timeouts propagate untouched.
+- **6.2** ✅ `Session` rebuilds its socket once on timeout. A DEALER queues
+  sends against a dead peer and then waits out the full timeout, so a server
+  restart left the socket permanently useless with nothing to distinguish it
+  from a slow instrument.
+- **6.3** ⬜ Server→client push. Still polling. The event log added in Phase 8
+  gives it something concrete to push, and lab-link remains the reference for
+  the semantics (versioned snapshot + patch, `origin_client_id`).
 
 ---
 
-## Phase 7 — Leases
+## Phase 7 — Leases ✅ done
 
-Only build when "server, give that rack back" is actually needed. Phases 1.3–1.5
-cover the common case without any crash-recovery edge cases.
-
-- **7.1** Claim registry keyed on transport identifier (see 2.3).
-- **7.2** Server is authority when running; workspace lockfile when not — which
-  incidentally fixes two *local* experiments colliding, a problem with no
-  mitigation today.
-- **7.3** pid-liveness for stale claims.
-- **7.4** Server reads claims at boot; declines to `resolve` leased roots but
-  still lists and describes them (static metadata, no hardware).
-
----
-
-## Phase 8 — Tree writes + governance
-
-Last, deliberately. By this point Phases 1–5 will have made the right answers
-substantially more obvious.
-
-- **8.1** `tree.add/remove/reset/update/discover` — mostly re-hosting
-  `config_io` functions, which are already pure over `config_dir`. Server writes
-  through `save_instruments_to_config` so the git-able YAML audit trail is
-  preserved. **This is a requirement, not an implementation detail.**
-- **8.2** Capture client identity — already on the wire and discarded at
-  [wire.py:172](lab_wizard/lib/server/wire.py#L172).
-- **8.3** Authority default: `ipc://` peers get full `tree.*`; `tcp://` peers get
-  read + `inst.call`, with `tree.*` opt-in per `server.yaml`.
-- **8.4** Permission coverage for `tree.*` — **allowlist**, not the blocklist
-  model used for method calls.
-- **8.5** Fail closed when a rule references a removed attribute: deny
-  everything it covered rather than silently dropping the rule.
-- **8.6** Force `attribute` references in the rule builder; retire raw `path`.
-  Hash-derived paths don't survive key-field edits.
+- **7.1** ✅ [`client/leases.py`](lab_wizard/lib/client/leases.py). Claims keyed
+  on the **transport identifier**, not the config path, so two workspaces naming
+  one serial port contend despite different root hashes. Acquisition is atomic
+  (`O_EXCL`), so two processes racing cannot both believe they won.
+- **7.2** ✅ Filesystem-based, so it works with or without a server running —
+  which also fixes two *local* projects colliding, previously unmitigated.
+- **7.3** ✅ pid liveness, with a real bug found and fixed: `os.kill(pid, 0)`
+  raises `PermissionError` for a process owned by another user, and the old
+  `except OSError` treated that as dead. A live holder's claim would have been
+  reaped and its hardware handed to a second process. Only `ProcessLookupError`
+  now counts as gone — fixed in `leases`, `server_registry` **and the
+  pre-existing `server_control`**, which had the same bug.
+- **7.4** ✅ The server declines to open a claimed rack, but keeps serving one it
+  already holds (a claim taken later does not evict it) and ignores claims on
+  shared transports.
 
 ---
 
-## Sequencing
+## Phase 8 — Tree writes + governance ✅ done
 
-```
-0 ──▶ 1 ──▶ 2 ──▶ 3
-      │     │
-      │     └──▶ 4 ──▶ 5
-      │           │
-      └──▶ 7      └──▶ 6 ──▶ 8
-```
+- **8.1** ✅ `tree_add` / `tree_remove` / `tree_reset` RPCs writing through
+  `save_instruments_to_config`, so the YAML audit trail survives. Each **refuses
+  while the rack is held** — see below.
+- **8.2** ✅ Peer identity and arrival transport captured per request via a
+  `ContextVar`. **This required correcting Phase 2.1:** one ROUTER bound to both
+  endpoints was elegant but ZMQ does not report which endpoint a message arrived
+  on, making the authority rule unimplementable. Now one socket per transport,
+  so "arrived locally" is a property of the receive path.
+- **8.3** ✅ `ipc://` peers may edit; `tcp://` peers get read + `inst.call`.
+  Reaching the ipc socket needs filesystem access to it, so same-machine is
+  proven by the OS rather than claimed in a payload. A same-machine client that
+  chooses tcp gets the smaller set — privilege is opted into, never ambient.
+- **8.4** ✅ Rule editing stays local-only.
+- **8.5** ✅ Removal shows which rules reference an instrument before confirming,
+  since a rule left pointing at a vanished attribute fails closed and can block
+  instruments the user did not remove.
+- **8.6** ⬜ `attribute` vs raw `path` in the rule builder — not forced yet.
 
-- **0, 1** are days, not weeks, and 1.5 removes most of the day-to-day pain.
-- **2** establishes the invariant everything else depends on.
-- **3** is self-contained once 1.1 lands.
-- **4, 5** are additive; 4.5 must land before 8 because it defines what the
-  tree's ownership metadata is *for*.
-- **7, 8** are the two phases needing policy decisions, and they're last on
-  purpose.
+### Why a held rack cannot be reconfigured
 
-## Open questions
+Rebuilding the index under a live instrument fails three ways at once: the old
+object keeps the serial handle with nothing able to reach it; the next call
+tries to open a port that is still held; and an in-flight call holds a lock from
+the old lock table while new calls take one from the new table — two locks for
+one bus, which is the Prologix desync. Requiring the rack to be free removes all
+three, and `registry.adopt_live()` carries *unaffected* racks across the reload
+so an edit in one place does not disturb another.
 
-1. **3.3** — how stable is DBay's state shape across module types? Prototype
-   first.
-2. **DBay state schema export** — where should the shared schema live? Blocks
-   3.3 from validating into real types rather than hand-written duplicates.
-3. **Direct-UDP DBay** — classified `exclusive` defensively. Worth confirming
-   whether reply attribution actually races.
-4. **6.3 vs lab-link** — revisit the transport decision after Phase 3.
+### Audit log
+
+[`server/events.py`](lab_wizard/lib/server/events.py) records who changed what,
+as JSONL beside the config plus a bounded in-memory tail. Once another workspace
+can edit your config, "who added this" stops being answerable from git alone.
+Surfaced in the remote-tree page as a "Recent activity" panel — deliberately
+minimal, enough to grow into a real feature if it earns one.
+
+Covered by [`tests/test_authority_and_leases.py`](tests/test_authority_and_leases.py)
+(21 tests) plus a live check: tcp refused an edit, ipc performed one, a held rack
+refused reconfiguration, and the event recorded the actor.
+
+---
+
+## Remaining
+
+- **6.3** push notifications (still polling)
+- **8.6** force `attribute` references in the rule builder
+- Per-attribute source selection in `select_instruments` — `CompositeResources`
+  can route, but the generator does not yet emit `instrument_sources`
+- Read-only mode / explicit edit destination for a merged multi-source tree

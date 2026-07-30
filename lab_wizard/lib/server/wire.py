@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -29,6 +30,15 @@ from pyleco.json_utils.errors import JSONRPCError
 from pyleco.json_utils.json_objects import JsonRpcError
 from pyleco.json_utils.rpc_server import RPCServer
 
+from lab_wizard.lib.server.events import EventLog
+from lab_wizard.lib.server.peer import (
+    LocalOnlyError,
+    Peer,
+    current_peer,
+    require_local,
+    reset_current_peer,
+    set_current_peer,
+)
 from lab_wizard.lib.server.permissions import PermissionGate
 from lab_wizard.lib.server.registry import PATH_PREFIX, InstrumentRegistry, root_path
 
@@ -56,15 +66,23 @@ class WireServer:
         registry: InstrumentRegistry,
         gate: Optional[PermissionGate] = None,
         config_dir: Optional[str] = None,
+        events: Optional[EventLog] = None,
     ) -> None:
         self._binds = [bind] if isinstance(bind, str) else list(bind)
         if not self._binds:
             raise ValueError("WireServer needs at least one bind address")
+        self._ipc_binds = [b for b in self._binds if b.startswith("ipc://")]
+        self._tcp_binds = [b for b in self._binds if not b.startswith("ipc://")]
         self._registry = registry
         self._gate = gate
         # Present only in config-dir hosting mode. Single-project hosting has no
         # editable tree, so tree_get() refuses rather than inventing one.
         self._config_dir = config_dir
+        # Records who changed what. Kept beside the config so a change made from
+        # another workspace is explainable later.
+        self._events = events or EventLog(
+            Path(config_dir) / "server" / "events.jsonl" if config_dir else None
+        )
 
         self._rpc = RPCServer(title="lab_wizard_server")
         self._rpc.method()(self.call)
@@ -75,13 +93,17 @@ class WireServer:
         self._rpc.method()(self.tree_get)
         self._rpc.method()(self.schema_get)
         self._rpc.method()(self.config_status)
+        self._rpc.method()(self.tree_add)
+        self._rpc.method()(self.tree_remove)
+        self._rpc.method()(self.tree_reset)
+        self._rpc.method()(self.events_recent)
         self._rpc.method()(self.list_attributes)
         self._rpc.method()(self.describe_path)
         self._rpc.method()(self.describe_attribute)
         self._rpc.method()(self.list_descriptions)
 
         self._ctx = zmq.Context.instance()
-        self._socket: Optional[zmq.Socket] = None
+        self._sockets: dict[str, zmq.Socket] = {}
         self._running = False
 
     # ------------------------- RPC methods -------------------------
@@ -107,6 +129,10 @@ class WireServer:
         # between them would let another caller interleave mid-query. Calls on
         # different roots take different locks and still run in parallel.
         with self._registry.transport_lock(path):
+            # A rack claimed by another process must not be opened here, or the
+            # claim would mean nothing. Checked before resolve, since resolve is
+            # what actually opens the transport.
+            self._refuse_if_leased(path)
             target = self._registry.resolve(path)
 
             if self._gate is not None:
@@ -273,6 +299,151 @@ class WireServer:
             "resolution": "restart" if (added or removed) else None,
         }
 
+    # ------------------------- tree (writes) -------------------------
+
+    def tree_add(self, chain: list[dict[str, Any]]) -> dict[str, Any]:
+        """Add an instrument (with any parent chain) to this server's config.
+
+        Same-machine callers only. The generated ``attribute_name`` is assigned
+        *here*, against this server's whole tree, so it is unique by
+        construction — a remote workspace never picks the name and so cannot
+        collide with one it cannot see.
+        """
+        peer = require_local("Adding instruments")
+        config_dir = self._require_config_dir()
+
+        from lab_wizard.lib.utilities.config_io import add_instrument_chain
+
+        for step in chain:
+            self._refuse_if_held(step.get("key"), "reconfigure")
+
+        result = add_instrument_chain(config_dir, chain)
+        self._reload_tree("tree_add")
+        self._events.record(
+            "tree.add",
+            "Added "
+            + ", ".join(f"{s.get('type')}" for s in chain if s.get("type"))
+            + " to the instrument tree",
+            actor=peer.describe(),
+            keys=result.get("saved_keys"),
+        )
+        return result
+
+    def tree_remove(self, type: str, key: str) -> dict[str, Any]:
+        """Remove an instrument and its children. Same-machine callers only."""
+        peer = require_local("Removing instruments")
+        config_dir = self._require_config_dir()
+
+        from lab_wizard.lib.utilities.config_io import remove_instrument
+
+        self._refuse_if_held(key, "remove")
+        result = remove_instrument(config_dir, type, key)
+        self._reload_tree("tree_remove")
+        self._events.record(
+            "tree.remove",
+            f"Removed {type} ({key}) from the instrument tree",
+            actor=peer.describe(),
+            type=type,
+            key=key,
+        )
+        return result
+
+    def tree_reset(self, type: str, key: str) -> dict[str, Any]:
+        """Reset an instrument to defaults, preserving children."""
+        peer = require_local("Resetting instruments")
+        config_dir = self._require_config_dir()
+
+        from lab_wizard.lib.utilities.config_io import reinitialize_instrument
+
+        self._refuse_if_held(key, "reset")
+        result = reinitialize_instrument(config_dir, type, key)
+        self._reload_tree("tree_reset")
+        self._events.record(
+            "tree.reset",
+            f"Reset {type} ({key}) to defaults",
+            actor=peer.describe(),
+            type=type,
+            key=key,
+        )
+        return result
+
+    def events_recent(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Recent notable events on this server, newest first."""
+        return [dict(e) for e in self._events.recent(limit)]
+
+    # ------------------------- write helpers -------------------------
+
+    def _require_config_dir(self) -> str:
+        if self._config_dir is None:
+            raise ValueError(
+                "This server hosts a single project rather than a config tree, "
+                "so its instrument tree cannot be edited."
+            )
+        return self._config_dir
+
+    def _refuse_if_held(self, key: Optional[str], verb: str) -> None:
+        """Refuse to reconfigure a rack whose hardware is currently open.
+
+        Rebuilding the index under a live instrument goes wrong three ways: the
+        old object keeps the serial handle with nothing able to reach it, the
+        next call tries to open a port that is still held, and an in-flight call
+        holds a lock from the old lock table while new calls take one from the
+        new table — two locks for one physical bus, which is the Prologix
+        desync. Requiring the rack to be free removes all three, and the fix is
+        a Release away.
+        """
+        if not key:
+            return
+        root = f"{PATH_PREFIX}{key}"
+        if root in self._registry.held_roots():
+            raise ValueError(
+                f"Cannot {verb} {root} while its hardware is open. Release it "
+                "first (Hardware & Servers → Release), then try again."
+            )
+
+    def _refuse_if_leased(self, path: str) -> None:
+        """Decline to open hardware another process has claimed.
+
+        Only applies to exclusive transports and only to paths not already open:
+        a rack we are holding was ours before the claim existed, and a shared
+        transport is not contended by definition.
+        """
+        if path in self._registry.list_held():
+            return
+        info = self._registry.transport_for(path)
+        if info.get("transport_sharing") == "shared":
+            return
+        key = info.get("transport_key")
+        if not key:
+            return
+
+        from lab_wizard.lib.client.leases import holder_of
+
+        holder = holder_of(key)
+        if holder is None or holder.get("pid") == os.getpid():
+            return
+        raise ValueError(
+            f"{key} is claimed by {holder.get('owner', 'another process')} "
+            f"(pid {holder.get('pid')}). This server will not open it until the "
+            "claim is released."
+        )
+
+    def _reload_tree(self, reason: str) -> None:
+        """Rebuild the registry from disk after a config change.
+
+        Safe only because every affected root was required to be free above: with
+        no live objects under them there is no handle to strand and no in-flight
+        call holding a lock we are about to replace. Live objects for *other*
+        roots are carried over so an unrelated rack is not disturbed by an edit
+        elsewhere.
+        """
+        config_dir = self._require_config_dir()
+        live = dict(self._registry.list_held_objects())
+        fresh = InstrumentRegistry.from_config_dir(config_dir)
+        fresh.adopt_live(live)
+        self._registry = fresh
+        log.info("Reloaded instrument tree after %s", reason)
+
     def schema_get(self) -> dict[str, Any]:
         """Vocabulary for rendering and editing this server's tree.
 
@@ -313,30 +484,34 @@ class WireServer:
     # ------------------------- Socket loop -------------------------
 
     def serve_forever(self) -> None:
-        self._socket = self._ctx.socket(zmq.ROUTER)
-        # One ROUTER, several endpoints. ZMQ binds a socket to many addresses,
-        # so serving same-machine clients over ipc:// alongside remote ones
-        # over tcp:// costs no extra process and no extra dispatch path. The
-        # endpoint a request arrives on is what later phases key authority off:
-        # an ipc:// peer already has filesystem access to the config this
-        # server reads, so trusting it more loses nothing.
-        for endpoint in self._binds:
-            self._socket.bind(endpoint)
-            log.info("WireServer listening on %s", endpoint)
-        self._running = True
-
+        # One ROUTER *per transport*, not one socket bound to both. ZMQ does not
+        # report which endpoint a message arrived on, and that fact is exactly
+        # what decides authority: reaching the ipc socket requires filesystem
+        # access to it, which only a process on this machine can have. Separate
+        # sockets make "arrived locally" a structural property of the receive
+        # path rather than something a client could claim.
         poller = zmq.Poller()
-        poller.register(self._socket, zmq.POLLIN)
+        for transport, endpoints in (("ipc", self._ipc_binds), ("tcp", self._tcp_binds)):
+            if not endpoints:
+                continue
+            socket = self._ctx.socket(zmq.ROUTER)
+            for endpoint in endpoints:
+                socket.bind(endpoint)
+                log.info("WireServer listening on %s (%s)", endpoint, transport)
+            self._sockets[transport] = socket
+            poller.register(socket, zmq.POLLIN)
 
+        self._running = True
         try:
             while self._running:
                 events = dict(poller.poll(timeout=200))
-                if self._socket in events:
-                    self._handle_one()
+                for transport, socket in self._sockets.items():
+                    if socket in events:
+                        self._handle_one(socket, transport)
         finally:
-            if self._socket is not None:
-                self._socket.close(linger=0)
-                self._socket = None
+            for socket in self._sockets.values():
+                socket.close(linger=0)
+            self._sockets.clear()
             # Stop answering before letting hardware go, so no request can
             # resolve a path we are in the middle of disconnecting.
             released = self._registry.release_all()
@@ -368,10 +543,9 @@ class WireServer:
 
     # ------------------------- Internals -------------------------
 
-    def _handle_one(self) -> None:
-        assert self._socket is not None
+    def _handle_one(self, socket: "zmq.Socket", transport: str) -> None:
         try:
-            raw = self._socket.recv_multipart()
+            raw = socket.recv_multipart()
         except zmq.ZMQError as exc:
             log.warning("recv_multipart failed: %s", exc)
             return
@@ -397,7 +571,18 @@ class WireServer:
             return
 
         request_bytes = msg.payload[0]
-        response_str = self._rpc.process_request(request_bytes)
+        # Published for the duration of dispatch so RPC methods can consult the
+        # caller without threading a parameter through every signature.
+        peer = Peer(
+            transport=transport,
+            identity=identity.hex(),
+            name=msg.sender.decode(errors="replace") if msg.sender else None,
+        )
+        token = set_current_peer(peer)
+        try:
+            response_str = self._rpc.process_request(request_bytes)
+        finally:
+            reset_current_peer(token)
         if response_str is None:
             # Notification — no response.
             return
@@ -416,6 +601,6 @@ class WireServer:
             message_type=MessageTypes.JSON,
         )
         try:
-            self._socket.send_multipart([identity] + reply.to_frames())
+            socket.send_multipart([identity] + reply.to_frames())
         except zmq.ZMQError as exc:
             log.warning("send_multipart failed: %s", exc)

@@ -61,19 +61,43 @@ class Session:
         *,
         timeout_ms: int = 10_000,
         client_name: str = "lab_wizard_client",
+        auto_reconnect: bool = True,
     ) -> None:
         self._url = url
         self._timeout_ms = timeout_ms
         self._client_name = client_name.encode()
+        self._auto_reconnect = auto_reconnect
 
         self._ctx = zmq.Context.instance()
-        self._socket = self._ctx.socket(zmq.DEALER)
-        self._socket.setsockopt(zmq.LINGER, 0)
-        self._socket.setsockopt(zmq.RCVTIMEO, timeout_ms)
-        self._socket.connect(url)
+        self._socket = self._open_socket()
 
         self._lock = threading.Lock()
         self._closed = False
+
+    def _open_socket(self) -> "zmq.Socket":
+        socket = self._ctx.socket(zmq.DEALER)
+        socket.setsockopt(zmq.LINGER, 0)
+        socket.setsockopt(zmq.RCVTIMEO, self._timeout_ms)
+        socket.connect(self._url)
+        return socket
+
+    def _reconnect(self) -> None:
+        """Replace the socket. Caller holds the lock."""
+        try:
+            self._socket.close(linger=0)
+        except Exception:  # noqa: BLE001 - already unusable
+            pass
+        self._socket = self._open_socket()
+
+    def _exchange(self, msg: Message) -> list[bytes]:
+        """One send/receive. Raises TimeoutError if nothing comes back."""
+        self._socket.send_multipart(msg.to_frames())
+        try:
+            return self._socket.recv_multipart()
+        except zmq.Again as exc:
+            raise TimeoutError(
+                f"No response from {self._url} within {self._timeout_ms}ms"
+            ) from exc
 
     @property
     def url(self) -> str:
@@ -102,13 +126,18 @@ class Session:
         )
 
         with self._lock:
-            self._socket.send_multipart(msg.to_frames())
             try:
-                frames = self._socket.recv_multipart()
-            except zmq.Again as exc:
-                raise TimeoutError(
-                    f"No response from {self._url} within {self._timeout_ms}ms"
-                ) from exc
+                frames = self._exchange(msg)
+            except TimeoutError:
+                # A DEALER queues sends against a dead peer and then waits out
+                # the full timeout, so a server restart leaves the socket
+                # permanently useless with no error to distinguish it from a
+                # slow instrument. Rebuilding the socket clears the queued
+                # request and gives the retry a clean connection.
+                if not self._auto_reconnect:
+                    raise
+                self._reconnect()
+                frames = self._exchange(msg)
 
         reply = Message.from_frames(*frames)
         data = reply.data

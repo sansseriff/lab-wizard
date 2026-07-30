@@ -59,6 +59,11 @@
 					href: '/manage_remote_servers',
 					label: 'Remote Servers',
 					description: 'Register remote lab_wizard servers to use in measurements.'
+				},
+				{
+					href: '/remote_tree',
+					label: "Another Workspace's Instruments",
+					description: "View and edit the instrument tree of a server on this machine."
 				}
 			]
 		}

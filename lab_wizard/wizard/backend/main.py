@@ -96,6 +96,11 @@ from lab_wizard.wizard.backend.server_control import (
 from pydantic import BaseModel as _PermBM, Field as _PermField
 from pathlib import Path
 from lab_wizard.wizard.backend.hardware_access import hardware_owner, run_discovery
+from lab_wizard.wizard.backend.remote_tree import (
+    remote_events,
+    remote_tree,
+    remote_tree_edit,
+)
 from lab_wizard.wizard.backend.transport_status import (
     conflicts_for_selection,
     transport_overview,
@@ -421,6 +426,51 @@ def api_release_hardware(req: _ReleaseRequest):
     except Exception as e:  # noqa: BLE001 - surfaced to the UI
         raise HTTPException(status_code=400, detail=str(e))
     return {"status": "ok", "released": released}
+
+
+class _RemoteTreeRequest(_PermBM):
+    config_dir: str
+
+
+class _RemoteEditRequest(_PermBM):
+    config_dir: str
+    operation: str
+    payload: dict = _PermField(default_factory=dict)
+
+
+@app.post("/api/remote-tree")
+def api_remote_tree(req: _RemoteTreeRequest):
+    """Tree, schema and recent activity of another workspace's server.
+
+    The schema comes from that server, not this build: it decides which
+    instrument types exist and what fields they take.
+    """
+    try:
+        return remote_tree(req.config_dir)
+    except Exception as e:  # noqa: BLE001 - surfaced to the UI
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/remote-tree/edit")
+def api_remote_tree_edit(req: _RemoteEditRequest):
+    """Add, remove, or reset an instrument on another workspace's server.
+
+    The server enforces both rules that matter — same-machine only, and not
+    while the rack is open — so a refusal here is its answer, not ours.
+    """
+    try:
+        return remote_tree_edit(req.config_dir, req.operation, req.payload)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/remote-tree/events")
+def api_remote_events(req: _RemoteTreeRequest):
+    """Recent notable events recorded by that server."""
+    try:
+        return {"events": remote_events(req.config_dir)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/hardware-owner")

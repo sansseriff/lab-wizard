@@ -55,12 +55,23 @@ class RemoteProxy:
 
     _session: "Session"
     _inst_path: str
+    _attribute_name: "str | None"
 
-    def __init__(self, session: "Session", inst_path: str) -> None:
+    def __init__(
+        self,
+        session: "Session",
+        inst_path: str,
+        attribute_name: "str | None" = None,
+    ) -> None:
         # Use object.__setattr__ to bypass any __setattr__ overridden by
         # subclasses that wire typed fields via descriptors.
         object.__setattr__(self, "_session", session)
         object.__setattr__(self, "_inst_path", inst_path)
+        # The stable handle. inst:// paths are derived from config hashes, so
+        # editing a key field moves an instrument to a new path and every proxy
+        # holding the old one silently points at nothing. Keeping the name lets
+        # a proxy find its instrument again instead of failing forever.
+        object.__setattr__(self, "_attribute_name", attribute_name)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -80,7 +91,48 @@ class RemoteProxy:
         cls.__abstractmethods__ = frozenset()
 
     def _call_remote(self, method: str, *args: Any, **kwargs: Any) -> Any:
-        return self._session.call_inst(self._inst_path, method, list(args), dict(kwargs))
+        try:
+            return self._session.call_inst(
+                self._inst_path, method, list(args), dict(kwargs)
+            )
+        except Exception as exc:
+            if not self._looks_like_stale_path(exc):
+                raise
+            new_path = self._reresolve()
+            if new_path is None:
+                raise
+            return self._session.call_inst(new_path, method, list(args), dict(kwargs))
+
+    @staticmethod
+    def _looks_like_stale_path(exc: Exception) -> bool:
+        """Whether ``exc`` reads like "that path is gone" rather than a real fault.
+
+        Deliberately narrow: a driver error, a permission denial, or a timeout
+        must propagate untouched. Only a missing registration is worth retrying,
+        because only that is fixed by looking the instrument up again.
+        """
+        text = str(exc)
+        return "No instrument registered at path" in text
+
+    def _reresolve(self) -> "str | None":
+        """Look the instrument up by name and adopt its new path.
+
+        Returns the new path, or ``None`` if there is no name to search by or
+        the server no longer knows it — in which case the original error is the
+        honest answer.
+        """
+        name = getattr(self, "_attribute_name", None)
+        if not name:
+            return None
+        try:
+            info = self._session.call("describe_attribute", {"name": name})
+        except Exception:
+            return None
+        path = info.get("path") if isinstance(info, dict) else None
+        if not path or path == self._inst_path:
+            return None
+        object.__setattr__(self, "_inst_path", path)
+        return path
 
     def __getattr__(self, name: str) -> Callable[..., Any]:
         """Reflective fallback: any unknown attribute becomes a remote method call.

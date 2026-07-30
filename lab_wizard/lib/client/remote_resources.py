@@ -83,7 +83,9 @@ class RemoteResources:
             return self._proxy_cache[name]
         info = self._session.call("describe_attribute", {"name": name})
         proxy_cls = proxy_class_for(info.get("behavior_abc"))
-        proxy = proxy_cls(self._session, info["path"])
+        # The name travels with the proxy so it can recover if the
+        # instrument's hash-derived path changes under it.
+        proxy = proxy_cls(self._session, info["path"], name)
         self._proxy_cache[name] = proxy
         return proxy
 

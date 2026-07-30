@@ -63,8 +63,19 @@ def _descriptor_path(config_dir: Path | str) -> Path:
 
 
 def _pid_alive(pid: int) -> bool:
+    """Whether ``pid`` is a running process.
+
+    ``EPERM`` means the process exists but belongs to someone else — a server
+    running as another user, or under a launcher. Treating that as dead would
+    reap a live holder's claim and hand its hardware to a second process, so
+    only ``ESRCH`` counts as gone.
+    """
     try:
         os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
     except OSError:
         return False
     return True
