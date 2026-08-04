@@ -48,9 +48,34 @@
 		defaults: Record<string, any>;
 		key_hint: string | null;
 	};
+	type AttributeEntry = {
+		attribute_name: string;
+		path: string;
+		behavior_abc: string | null;
+		type_hint: string | null;
+	};
+	type Source = {
+		name: string;
+		kind: 'local' | 'machine' | 'remote';
+		label: string;
+		url: string | null;
+		config_dir: string | null;
+		tree: TreeItem[] | null;
+		metadata: Record<string, InstrumentMeta>;
+		attributes: AttributeEntry[];
+		editable: boolean;
+		reachable: boolean;
+		error: string | null;
+	};
 	type SelectedChoice = {
+		source: string;
+		sourceLabel: string;
+		sourceKind: 'local' | 'machine' | 'remote';
 		type: string;
 		key: string;
+		// The handle a routed instrument is referenced by. Null only for a local
+		// selection, where the backend reads it off the tree itself.
+		attribute: string | null;
 		pathLeafToRoot: TreePathRef[];
 		pathDisplay: string;
 		pathKey: string;
@@ -61,8 +86,13 @@
 	let { data } = $props();
 	const measurementName: string | null = data?.measurementName ?? null;
 	const reqs: ResourceReq[] = (data?.requirements ?? []) as ResourceReq[];
-	const tree: TreeItem[] = (data?.tree ?? []) as TreeItem[];
-	const metadata: Record<string, InstrumentMeta> = (data?.metadata ?? {}) as Record<string, InstrumentMeta>;
+	const sources: Source[] = (data?.sources ?? []) as Source[];
+	const ownServer: { name: string; url: string } | null = data?.ownServer ?? null;
+
+	// Sources offering a browsable tree: this workspace, and other workspaces'
+	// daemons on this machine. A remote machine is flat by design.
+	const treeSources = $derived(sources.filter((s) => s.tree !== null));
+	const flatSources = $derived(sources.filter((s) => s.tree === null));
 
 	const instrumentReqs = $derived(reqs.filter((r) => r.resource_kind === 'instrument'));
 	const saverReqs = $derived(reqs.filter((r) => r.resource_kind === 'saver'));
@@ -77,10 +107,17 @@
 	// Asked while the user is still choosing, because a conflict discovered at
 	// run time is a 2am failure. Only exclusive transports can conflict; a rack
 	// behind its own multiplexing server is fine for everyone at once.
+	type ServedBy = {
+		url: string;
+		config_dir: string | null;
+		workspace_path: string | null;
+		root: string;
+	};
 	type ConflictRoot = {
 		root: string;
 		transport_key: string | null;
 		held_by: string | null;
+		served_by: ServedBy[];
 	};
 	type ConflictCheck = {
 		local_servers: { url: string; workspace_path: string | null }[];
@@ -89,16 +126,38 @@
 	};
 	let conflicts: ConflictCheck | null = $state(null);
 
-	// Roots the current selection would open. pathLeafToRoot is leaf-first, so
-	// the root is its last element.
+	// Roots the current selection would open **in this process**. Only local
+	// selections qualify: an instrument routed through a server cannot contend
+	// with it, because the server is its single owner and we are its client.
+	// pathLeafToRoot is leaf-first, so the root is its last element.
 	function selectedRootPaths(): string[] {
 		const out = new Set<string>();
 		for (const choice of Object.values(selected)) {
-			if (!choice || choice.pathLeafToRoot.length === 0) continue;
+			if (!choice || choice.source !== 'local') continue;
+			if (choice.pathLeafToRoot.length === 0) continue;
 			const root = choice.pathLeafToRoot[choice.pathLeafToRoot.length - 1];
 			out.add(`inst://${root.key}`);
 		}
 		return [...out];
+	}
+
+	/** Sources that could serve a conflicting rack instead of opening it here.
+	 *
+	 * Re-routing is the fix for a transport conflict, not merely a different
+	 * choice — so the warning names the source to switch to. Matched on url,
+	 * since the conflict check reports servers and the picker reports sources.
+	 */
+	function reroutingOptions(conflict: ConflictRoot): { name: string; label: string }[] {
+		const out: { name: string; label: string }[] = [];
+		for (const server of conflict.served_by ?? []) {
+			const source = sources.find((s) => s.url === server.url);
+			if (source) {
+				out.push({ name: source.name, label: source.label });
+			} else if (ownServer && ownServer.url === server.url) {
+				out.push({ name: ownServer.name, label: "this workspace's server" });
+			}
+		}
+		return out;
 	}
 
 	$effect(() => {
@@ -149,8 +208,11 @@
 	function classNameNoParams(name: string): string {
 		return name.endsWith('Params') ? name.slice(0, -6) : name;
 	}
-	function pathKey(path: TreePathRef[]): string {
-		return path.map((p) => `${p.type}:${p.key}`).join('|');
+	// Source-qualified, because two workspaces can hold the same instrument at
+	// the same hash key — comparing paths alone would make one look selected in
+	// the other's tree.
+	function pathKey(source: string, path: TreePathRef[]): string {
+		return `${source}::${path.map((p) => `${p.type}:${p.key}`).join('|')}`;
 	}
 	function pathDisplay(path: TreePathRef[]): string {
 		return path.map((p) => `${p.type}(${p.key})`).join(' -> ');
@@ -162,9 +224,12 @@
 		if (!variableName) return null;
 		return reqs.find((r) => r.variable_name === variableName) ?? null;
 	}
-	function reqMatchesType(req: ResourceReq, type: string): boolean {
+	// Metadata comes from the source that owns the tree, never from this build:
+	// which classes exist and what they are called depends on the lab_wizard
+	// running there, which can differ from ours.
+	function reqMatchesType(req: ResourceReq, type: string, source: Source): boolean {
 		if (req.resource_kind !== 'instrument') return false;
-		const meta = metadata[type];
+		const meta = source.metadata?.[type];
 		if (!meta) return false;
 		const instClass = classNameNoParams(meta.class_name);
 		const channelClass = `${instClass}Channel`;
@@ -208,49 +273,126 @@
 	function setActiveMode(variableName: string) {
 		activeRequirement = variableName;
 	}
-	function onSelectTreeNode(node: TreeItem, rootToNodePath: TreePathRef[]) {
+	/** attribute_name of a tree node, or of one of its channels.
+	 *
+	 * Only needed for a source other than `local`: the backend reads a local
+	 * selection's name off its own params, but a routed instrument has no params
+	 * here, so the handle has to travel with the selection.
+	 */
+	function attributeOf(node: TreeItem, channelIndex: number | null): string | null {
+		if (channelIndex !== null) {
+			const channels = node.fields?.channels;
+			const channel = channels?.[channelIndex] ?? channels?.[String(channelIndex)];
+			return channel?.attribute_name || null;
+		}
+		return node.fields?.attribute_name || null;
+	}
+
+	function onSelectTreeNode(source: Source, node: TreeItem, rootToNodePath: TreePathRef[]) {
 		if (!activeRequirement) return;
 		const req = reqByVar(activeRequirement);
 		if (!req || req.resource_kind !== 'instrument') return;
-		if (!reqMatchesType(req, node.type)) return;
+		if (!reqMatchesType(req, node.type, source)) return;
 		const cc = channelCount(node);
+		const channelIndex = cc > 1 ? null : 0;
 		selected[activeRequirement] = {
+			source: source.name,
+			sourceLabel: source.label,
+			sourceKind: source.kind,
 			type: node.type,
 			key: node.key,
+			attribute: source.kind === 'local' ? null : attributeOf(node, channelIndex),
 			pathLeafToRoot: [...rootToNodePath].reverse(),
 			pathDisplay: pathDisplay(rootToNodePath),
-			pathKey: pathKey(rootToNodePath),
+			pathKey: pathKey(source.name, rootToNodePath),
 			channelCount: cc,
-			channelIndex: cc > 1 ? null : 0
+			channelIndex
 		};
 		if (cc <= 1) activeRequirement = nextIncompleteAfter(activeRequirement);
 	}
-	function setChannelForActive(value: string) {
+
+	/** Match a flat leaf to a requirement by behavior ABC.
+	 *
+	 * A remote machine sends no class metadata, so the behavior ABC the server
+	 * reports is the contract — the same one measurement binding already uses.
+	 */
+	function reqMatchesAttribute(req: ResourceReq, entry: AttributeEntry): boolean {
+		if (req.resource_kind !== 'instrument') return false;
+		return Boolean(entry.behavior_abc) && entry.behavior_abc === shortBaseName(req.base_type);
+	}
+
+	function onSelectAttribute(source: Source, entry: AttributeEntry) {
+		if (!activeRequirement) return;
+		const req = reqByVar(activeRequirement);
+		if (!req || !reqMatchesAttribute(req, entry)) return;
+		selected[activeRequirement] = {
+			source: source.name,
+			sourceLabel: source.label,
+			sourceKind: source.kind,
+			type: entry.type_hint ?? '',
+			key: '',
+			attribute: entry.attribute_name,
+			// A named leaf already identifies one instrument or channel, so there
+			// is no tree position to record and nothing further to choose.
+			pathLeafToRoot: [],
+			pathDisplay: `${entry.attribute_name} on ${source.label}`,
+			pathKey: `${source.name}::@${entry.attribute_name}`,
+			channelCount: 0,
+			channelIndex: null
+		};
+		activeRequirement = nextIncompleteAfter(activeRequirement);
+	}
+
+	function isAttributeSelectedForCurrent(source: Source, entry: AttributeEntry): boolean {
+		if (!activeRequirement) return false;
+		return selected[activeRequirement]?.pathKey === `${source.name}::@${entry.attribute_name}`;
+	}
+	function setChannelForActive(value: string, node: TreeItem | null = null) {
 		if (!activeRequirement) return;
 		const cur = selected[activeRequirement];
 		if (!cur) return;
 		const parsed = Number.parseInt(value, 10);
 		cur.channelIndex = Number.isNaN(parsed) ? null : parsed;
+		// The channel carries its own attribute_name, so a routed selection's
+		// handle changes with the channel.
+		if (cur.sourceKind !== 'local' && node) {
+			cur.attribute = attributeOf(node, cur.channelIndex);
+		}
 		if (cur.channelIndex !== null) activeRequirement = nextIncompleteAfter(activeRequirement);
 	}
-	function isCompatibleForCurrent(node: TreeItem): boolean {
+	function isCompatibleForCurrent(node: TreeItem, source: Source): boolean {
 		const req = reqByVar(activeRequirement);
 		if (!req) return false;
-		return reqMatchesType(req, node.type);
+		return reqMatchesType(req, node.type, source);
 	}
-	function isNodeSelectedForCurrent(_node: TreeItem, path: TreePathRef[]): boolean {
+	function isNodeSelectedForCurrent(source: Source, path: TreePathRef[]): boolean {
 		if (!activeRequirement) return false;
 		const sel = selected[activeRequirement];
 		if (!sel) return false;
-		return sel.pathKey === pathKey(path);
+		return sel.pathKey === pathKey(source.name, path);
 	}
-	function selectionLabelForAny(_node: TreeItem, path: TreePathRef[]): string | null {
+	function selectionLabelForAny(source: Source, path: TreePathRef[]): string | null {
 		const labels: string[] = [];
-		const key = pathKey(path);
+		const key = pathKey(source.name, path);
 		for (const r of instrumentReqs) {
 			if (selected[r.variable_name]?.pathKey === key) labels.push(r.variable_name);
 		}
 		return labels.length ? labels.join(', ') : null;
+	}
+	/** The tree node a selection points at, for re-deriving a channel attribute. */
+	function selectedNode(choice: SelectedChoice | null): TreeItem | null {
+		if (!choice || choice.pathLeafToRoot.length === 0) return null;
+		const source = sources.find((s) => s.name === choice.source);
+		if (!source?.tree) return null;
+		const rootToLeaf = [...choice.pathLeafToRoot].reverse();
+		let nodes: TreeItem[] = source.tree;
+		let found: TreeItem | null = null;
+		for (const step of rootToLeaf) {
+			found = nodes.find((n) => n.type === step.type && n.key === step.key) ?? null;
+			if (!found) return null;
+			nodes = Object.values(found.children ?? {});
+		}
+		return found;
 	}
 	function toggleFlatSelection(variableName: string, type: string, key: string, isList: boolean) {
 		const id = `${type}:${key}`;
@@ -283,7 +425,9 @@
 					type: c.type,
 					key: c.key,
 					path: c.pathLeafToRoot,
-					channel_index: c.channelCount > 1 ? c.channelIndex : null
+					channel_index: c.channelCount > 1 ? c.channelIndex : null,
+					source: c.source,
+					attribute: c.attribute
 				});
 			}
 			for (const r of saverReqs) {
@@ -376,13 +520,19 @@
 										<li>
 											<span class="font-mono">{c.transport_key ?? c.root}</span>
 											is open in another process.
+											{#if reroutingOptions(c).length > 0}
+												<span class="text-red-700 dark:text-red-500">
+													Pick it from <span class="font-medium">{reroutingOptions(c).map((o) => o.label).join(' or ')}</span>
+													instead and this goes away.
+												</span>
+											{/if}
 										</li>
 									{/each}
 								</ul>
 								<div class="mt-1 text-red-700 dark:text-red-500">
-									Release it on
-									<a class="underline" href="/hardware_status">Hardware &amp; Servers</a>, or
-									generate this project to run through the server.
+									Using the instrument <em>through</em> the server that holds it is the fix — one
+									process owns the hardware and this project becomes its client. Otherwise,
+									release it on <a class="underline" href="/hardware_status">Hardware &amp; Servers</a>.
 								</div>
 							</div>
 						{/if}
@@ -395,7 +545,12 @@
 								</div>
 								<ul class="mt-1 space-y-0.5 text-amber-800 dark:text-amber-400">
 									{#each conflicts.configured_conflicts as c (c.root)}
-										<li><span class="font-mono">{c.transport_key ?? c.root}</span></li>
+										<li>
+											<span class="font-mono">{c.transport_key ?? c.root}</span>
+											{#if reroutingOptions(c).length > 0}
+												<span>— available from {reroutingOptions(c).map((o) => o.label).join(' or ')}</span>
+											{/if}
+										</li>
 									{/each}
 								</ul>
 								<div class="mt-1 text-amber-700 dark:text-amber-500">
@@ -541,6 +696,14 @@
 									</div>
 									{#if selected[r.variable_name]}
 										<div class="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
+											{#if selected[r.variable_name]?.source !== 'local'}
+												<span
+													class="mr-1 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300"
+													title="Used through this server rather than opened by the project"
+												>
+													{selected[r.variable_name]?.sourceLabel}
+												</span>
+											{/if}
 											{selected[r.variable_name]?.pathDisplay}
 											{#if selected[r.variable_name]?.channelCount && selected[r.variable_name]!.channelCount > 1}
 												<span class="ml-1">
@@ -575,7 +738,8 @@
 										value={selected[r.variable_name]?.channelIndex === null
 											? ''
 											: String(selected[r.variable_name]?.channelIndex)}
-										onValueChange={(v) => setChannelForActive(v)}
+										onValueChange={(v) =>
+											setChannelForActive(v, selectedNode(selected[r.variable_name]))}
 										items={Array.from(
 											{ length: selected[r.variable_name]!.channelCount },
 											(_, i) => ({ value: String(i), label: String(i) })
@@ -624,37 +788,12 @@
 									</Select.Root>
 								</div>
 							{/if}
-
-							{#if r.matching_remote && r.matching_remote.length > 0}
-								<div class="mt-3 rounded-md border border-indigo-200 bg-indigo-50/60 p-2 dark:border-indigo-900/50 dark:bg-indigo-950/20">
-									<div class="text-xs font-medium text-indigo-800 dark:text-indigo-300">
-										Available on remote servers
-									</div>
-									<ul class="mt-1 space-y-0.5 text-xs text-gray-700 dark:text-gray-300">
-										{#each r.matching_remote as rm}
-											<li>
-												<span class="font-mono">{rm.attribute}</span>
-												<span class="text-gray-500">on {rm.server_name}</span>
-												<span class="text-gray-400">({rm.url})</span>
-											</li>
-										{/each}
-									</ul>
-									<div class="mt-1 text-[11px] text-gray-500">
-										To use a remote attribute, generate this measurement in
-										<code>from_attribute</code> style and run the project with
-										<code>--remote &lt;url&gt;</code>.
-										<a class="text-indigo-600 hover:underline" href="/manage_remote_servers"
-											>Manage servers →</a
-										>
-									</div>
-								</div>
-							{/if}
 						</section>
 					{/each}
 
 					<section class="space-y-2">
 						<div class="flex items-center justify-between">
-							<h3 class="text-md font-medium">Configured tree</h3>
+							<h3 class="text-md font-medium">Where instruments come from</h3>
 							<div class="text-xs text-gray-600 dark:text-gray-300">
 								{#if activeRequirement}
 									Selection mode: <span class="font-medium">{activeRequirement}</span>
@@ -663,28 +802,130 @@
 								{/if}
 							</div>
 						</div>
-						<ScrollArea
-							class="relative overflow-hidden rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm dark:border-white/10 dark:bg-gray-800/70"
-							orientation="vertical"
-							viewportClasses="h-full max-h-[360px] w-full"
-						>
-							{#if tree.length === 0}
-								<div class="px-2 py-3 text-sm text-gray-600 dark:text-gray-300">
-									No configured instruments found.
+
+						<!-- Tree sources: this workspace, and other workspaces' daemons on
+						     this machine. Each is drawn with its own schema, because which
+						     classes exist depends on the build running there. -->
+						{#each treeSources as source (source.name)}
+							<div class="rounded-xl border border-gray-200 bg-white/70 shadow-sm dark:border-white/10 dark:bg-gray-800/70">
+								<div class="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-medium">{source.label}</span>
+										{#if source.kind === 'machine'}
+											<span
+												class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300"
+												title="A daemon on this machine. Its instruments are used through it, so they never contend with your local hardware."
+											>
+												through server
+											</span>
+										{/if}
+									</div>
+									{#if source.kind === 'machine'}
+										<a class="text-xs text-indigo-600 hover:underline" href="/remote_tree"
+											>Edit that workspace →</a
+										>
+									{:else}
+										<a class="text-xs text-indigo-600 hover:underline" href="/manage_instruments"
+											>Manage instruments →</a
+										>
+									{/if}
 								</div>
-							{:else}
-								{#each tree as node}
-									<TreeNode
-										{node}
-										isSelectable={Boolean(activeRequirement)}
-										isCompatible={(n) => isCompatibleForCurrent(n)}
-										isSelected={(n, p) => isNodeSelectedForCurrent(n, p)}
-										selectionLabel={(n, p) => selectionLabelForAny(n, p)}
-										onSelect={onSelectTreeNode}
-									/>
-								{/each}
-							{/if}
-						</ScrollArea>
+								<ScrollArea
+									class="relative overflow-hidden p-3"
+									orientation="vertical"
+									viewportClasses="h-full max-h-[300px] w-full"
+								>
+									{#if !source.reachable}
+										<div class="px-2 py-3 text-sm text-amber-700 dark:text-amber-400">
+											Not reachable: {source.error ?? 'no answer'}
+										</div>
+									{:else if (source.tree ?? []).length === 0}
+										<div class="px-2 py-3 text-sm text-gray-600 dark:text-gray-300">
+											No instruments configured here.
+										</div>
+									{:else}
+										{#each source.tree ?? [] as node (node.key)}
+											<TreeNode
+												{node}
+												isSelectable={Boolean(activeRequirement)}
+												isCompatible={(n) => isCompatibleForCurrent(n, source)}
+												isSelected={(_n, p) => isNodeSelectedForCurrent(source, p)}
+												selectionLabel={(_n, p) => selectionLabelForAny(source, p)}
+												onSelect={(n, p) => onSelectTreeNode(source, n, p)}
+											/>
+										{/each}
+									{/if}
+								</ScrollArea>
+							</div>
+						{/each}
+
+						<!-- Remote machines: named leaves only. A tcp peer gets read + call
+						     and never reconfiguration, so there is no tree to offer. -->
+						{#each flatSources as source (source.name)}
+							<div class="rounded-xl border border-gray-200 bg-white/70 shadow-sm dark:border-white/10 dark:bg-gray-800/70">
+								<div class="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
+									<div class="flex items-center gap-2">
+										<span class="text-sm font-medium">{source.label}</span>
+										<span
+											class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+											title="Another machine. Its instruments can be used, but its configuration can only be changed there."
+										>
+											read &amp; control only
+										</span>
+									</div>
+									<span class="font-mono text-[10px] text-gray-400">{source.url}</span>
+								</div>
+								<div class="max-h-[300px] overflow-y-auto p-3">
+									{#if !source.reachable}
+										<div class="px-2 py-2 text-sm text-amber-700 dark:text-amber-400">
+											Not reachable: {source.error ?? 'no answer'}
+										</div>
+									{:else if source.attributes.length === 0}
+										<div class="px-2 py-2 text-sm text-gray-600 dark:text-gray-300">
+											No named instruments there.
+										</div>
+									{:else}
+										<div class="grid gap-1.5 sm:grid-cols-2">
+											{#each source.attributes as entry (entry.attribute_name)}
+												{@const req = reqByVar(activeRequirement)}
+												{@const compatible = Boolean(req) && reqMatchesAttribute(req!, entry)}
+												<button
+													class="flex items-start gap-2 rounded border px-3 py-2 text-left text-sm transition {isAttributeSelectedForCurrent(
+														source,
+														entry
+													)
+														? 'border-indigo-400 bg-indigo-50 dark:border-indigo-600 dark:bg-indigo-950/30'
+														: 'border-gray-200 dark:border-gray-600'} {activeRequirement && !compatible
+														? 'opacity-45'
+														: 'hover:border-indigo-300'}"
+													disabled={!activeRequirement || !compatible}
+													onclick={() => onSelectAttribute(source, entry)}
+												>
+													<div class="flex-1">
+														<div class="font-mono text-xs font-medium">{entry.attribute_name}</div>
+														<div class="text-[11px] text-gray-500">
+															{entry.type_hint ?? 'instrument'}
+															{#if entry.behavior_abc}
+																· {entry.behavior_abc}
+															{/if}
+														</div>
+													</div>
+												</button>
+											{/each}
+										</div>
+									{/if}
+								</div>
+							</div>
+						{/each}
+
+						{#if treeSources.length === 0 && flatSources.length === 0}
+							<div class="rounded-xl border border-gray-200 px-3 py-4 text-sm text-gray-600 dark:border-white/10 dark:text-gray-300">
+								No instrument sources found. Add instruments in
+								<a class="text-indigo-600 hover:underline" href="/manage_instruments">Manage Instruments</a>,
+								or register a server on
+								<a class="text-indigo-600 hover:underline" href="/manage_remote_servers">Remote Servers</a>.
+							</div>
+						{/if}
 					</section>
 				</section>
 			{/if}

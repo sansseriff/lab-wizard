@@ -6,6 +6,7 @@ type TreeItem = {
     key: string;
     fields: Record<string, any>;
     children: Record<string, TreeItem>;
+    num_channels?: number;
 };
 
 type InstrumentMeta = {
@@ -21,40 +22,58 @@ type InstrumentMeta = {
     key_hint: string | null;
 };
 
-type ManageData = {
-    tree: TreeItem[];
-    metadata: Record<string, InstrumentMeta>;
+type AttributeEntry = {
+    attribute_name: string;
+    path: string;
+    behavior_abc: string | null;
+    type_hint: string | null;
 };
 
-export const load = async ({ fetch, url }: any) => {
-    if (!browser) {
-        return {
-            measurementName: null,
-            requirements: [] as any[],
-            tree: [] as TreeItem[],
-            metadata: {} as Record<string, InstrumentMeta>
-        };
-    }
+/** One place instruments can come from. See backend/instrument_sources.py.
+ *
+ * `tree` is null for a remote-machine source: a tcp peer gets read + call and
+ * never reconfiguration, so it is offered as a flat list of named leaves rather
+ * than a hierarchy it could not act on.
+ */
+type Source = {
+    name: string;
+    kind: 'local' | 'machine' | 'remote';
+    label: string;
+    url: string | null;
+    config_dir: string | null;
+    tree: TreeItem[] | null;
+    metadata: Record<string, InstrumentMeta>;
+    attributes: AttributeEntry[];
+    editable: boolean;
+    reachable: boolean;
+    error: string | null;
+};
+
+const EMPTY = {
+    measurementName: null,
+    requirements: [] as any[],
+    sources: [] as Source[],
+    ownServer: null as { name: string; url: string; pid: number } | null
+};
+
+export const load = async ({ url }: any) => {
+    if (!browser) return EMPTY;
 
     const name = url.searchParams.get('name');
-    if (!name) {
-        return {
-            measurementName: null,
-            requirements: [] as any[],
-            tree: [] as TreeItem[],
-            metadata: {} as Record<string, InstrumentMeta>
-        };
-    }
+    if (!name) return EMPTY;
 
     let requirements = await fetchWithConfig(`/api/get-resources/${encodeURIComponent(name)}`, 'GET');
     requirements = Array.isArray(requirements) ? requirements : [];
-    const manageData = await fetchWithConfig<ManageData>('/api/manage-instruments', 'GET');
+    const sourceData = await fetchWithConfig<{
+        sources: Source[];
+        own_server: { name: string; url: string; pid: number } | null;
+    }>('/api/instrument-sources', 'GET');
 
     return {
         measurementName: name,
         requirements,
-        tree: manageData?.tree ?? [],
-        metadata: manageData?.metadata ?? {}
+        sources: sourceData?.sources ?? [],
+        ownServer: sourceData?.own_server ?? null
     };
 };
 

@@ -148,6 +148,50 @@ def set_server_bind(config_dir: str | Path, bind: str) -> dict[str, Any]:
     return server_status(config_dir)
 
 
+def enable_hosting(config_dir: str | Path) -> dict[str, Any]:
+    """Declare this workspace a hardware host, without choosing an address.
+
+    Creating ``server.yaml`` *is* the opt-in: :func:`ensure_server` starts a
+    daemon only for a workspace that has one, which is what keeps a cloned
+    satellite workspace from racing the host for the same instruments. A fresh
+    ``wizard init`` deliberately does not write one.
+
+    The file is created with no ``bind``, so the daemon serves this machine over
+    ipc:// alone. That covers the whole same-machine story — other workspaces
+    can read, call, *and* edit its tree — and adds no listening socket. Add a
+    bind later (Find free port) only when another machine needs to connect.
+
+    Idempotent: an existing config is returned untouched rather than reset,
+    since it may already carry permission rules.
+    """
+    path = _server_yaml_path(config_dir)
+    if path.exists():
+        return server_status(config_dir)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    yaml_rt = RuamelYAML(typ="rt")
+    yaml_rt.default_flow_style = False
+    with open(path, "w", encoding="utf-8") as f:
+        yaml_rt.dump({"server": {"ipc": True}}, f)
+    logger.info("Enabled hardware hosting for %s (ipc only)", config_dir)
+    return server_status(config_dir)
+
+
+def disable_hosting(config_dir: str | Path) -> dict[str, Any]:
+    """Stop hosting and remove the opt-in, returning this workspace to a client.
+
+    The running daemon is stopped first — leaving one up with no config would
+    make a workspace that no longer claims to host still be holding hardware.
+    """
+    stop_server(config_dir)
+    try:
+        _server_yaml_path(config_dir).unlink(missing_ok=True)
+    except OSError as exc:
+        raise ValueError(f"Could not remove the server config: {exc}")
+    logger.info("Disabled hardware hosting for %s", config_dir)
+    return server_status(config_dir)
+
+
 def _rule_count(config_dir: str | Path) -> int:
     perms = _read_server_yaml(config_dir).get("permissions") or {}
     rules = perms.get("rules") or []
@@ -353,16 +397,24 @@ def ensure_server(config_dir: str | Path) -> dict[str, Any]:
     which is what keeps a single process holding each transport and keeps the
     permission gate's picture of instrument state complete.
 
+    **Started detached.** A hosting workstation's daemon is meant to outlive the
+    window that happened to start it: you open the wizard, add instruments,
+    close it, and other workspaces on the machine keep using the hardware. Under
+    managed mode the daemon died with the GUI, so every satellite lost its
+    instruments the moment the host's window was closed. An operator who wants
+    it stopped has an explicit Stop button.
+
     Deliberately quiet about failure. A workstation with no ``server.yaml`` has
-    simply not opted in, and a port already taken usually means another wizard
-    is up; neither should stop the GUI from launching, because the in-process
-    fallback still works. Returns the resulting status either way.
+    simply not opted in — that absence is what makes a workspace a client rather
+    than a host — and a port already taken usually means another wizard is up;
+    neither should stop the GUI from launching, because the in-process fallback
+    still works. Returns the resulting status either way.
     """
     status = server_status(config_dir)
     if status["running"] or not status["has_config"]:
         return status
     try:
-        return start_server(config_dir, detached=False)
+        return start_server(config_dir, detached=True)
     except ValueError as exc:
         logger.info("Not auto-starting instrument server: %s", exc)
         return server_status(config_dir)

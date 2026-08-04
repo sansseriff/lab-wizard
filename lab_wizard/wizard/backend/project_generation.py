@@ -4,7 +4,7 @@ from pathlib import Path
 import re
 import logging
 from textwrap import indent
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
@@ -19,6 +19,12 @@ from lab_wizard.lib.utilities.flat_resource_io import load_resources
 from lab_wizard.wizard.backend.get_measurements import (
     get_measurements,
     reqs_from_measurement,
+)
+from lab_wizard.wizard.backend.instrument_sources import (
+    LOCAL,
+    attributes_for_source,
+    ensure_source_registered,
+    resolve_source_url,
 )
 from lab_wizard.wizard.backend.models import Env, FilledReq
 from lab_wizard.wizard.backend.python_formatting import format_python_code
@@ -53,6 +59,18 @@ class SelectedResource(BaseSelection):
 
     resource_kind: Literal["instrument", "saver", "plotter"] = "instrument"
     channel_index: int | None = None
+    # Which source owns this instrument: ``local``, or a name from
+    # /api/instrument-sources. Savers and plotters are always local — they write
+    # this machine's database and draw on this machine's screen.
+    source: str = LOCAL
+    # The ``attribute_name`` on that source. Required for a routed selection,
+    # which has no params in this workspace to derive one from; ignored for a
+    # local one, where it is read off the tree.
+    attribute: str | None = None
+    # A routed selection may come from a flat leaf list with no tree position,
+    # so type/key are not always known here.
+    type: str = ""
+    key: str = ""
 
 
 class GenerateProjectRequest(BaseModel):
@@ -486,8 +504,7 @@ def _compose_setup(
 
 def _compose_setup_from_attribute(
     measurement_name: str,
-    inst_selected_map: dict[str, _NodeRef],
-    inst_selected_channels: dict[str, int | None],
+    attribute_for: dict[str, str],
     instrument_reqs: list[FilledReq],
     saver_reqs: list[FilledReq],
     plotter_reqs: list[FilledReq],
@@ -495,15 +512,22 @@ def _compose_setup_from_attribute(
     plotter_selections: list[SelectedResource],
     template_text: str,
 ) -> str:
-    """Generate setup using ``resources.from_attribute``.  Saver/plotter handling is the
-    same as in ``_compose_setup`` (they're keyed by user-given name, not by
-    attribute_name)."""
+    """Generate setup using ``resources.from_attribute``.
+
+    ``attribute_for`` maps each instrument variable to the ``attribute_name`` it
+    resolves through, already computed by the caller — a routed instrument has no
+    params in this workspace to read one from, so deriving it here is not
+    possible. This is the only style that works for a multi-source project,
+    because an attribute name is the one handle meaningful on both sides of the
+    wire.
+
+    Saver/plotter handling is the same as in ``_compose_setup``: they are keyed
+    by user-given name, not by attribute_name, and always resolve locally.
+    """
     if not instrument_reqs and not saver_reqs and not plotter_reqs:
         raise ValueError(f"No requirements found for measurement '{measurement_name}'")
     missing = [
-        r.variable_name
-        for r in instrument_reqs
-        if r.variable_name not in inst_selected_map
+        r.variable_name for r in instrument_reqs if not attribute_for.get(r.variable_name)
     ]
     if missing:
         raise ValueError(f"Missing required selections: {missing}")
@@ -520,24 +544,7 @@ def _compose_setup_from_attribute(
     instrument_assignments: list[str] = []
 
     for req in instrument_reqs:
-        leaf = inst_selected_map[req.variable_name]
-        ch_idx = inst_selected_channels.get(req.variable_name)
-        if ch_idx is not None:
-            ch_map = getattr(leaf.params, "channels", None)
-            if isinstance(ch_map, dict) and ch_idx in ch_map:
-                attr_name = getattr(ch_map[ch_idx], "attribute_name", "") or ""
-            else:
-                attr_name = ""
-        else:
-            attr_name = getattr(leaf.params, "attribute_name", "") or ""
-
-        if not attr_name:
-            raise ValueError(
-                f"from_attribute generation requires attribute_name to be set on "
-                f"{leaf.type}:{leaf.key} (resource '{req.variable_name}'). "
-                "Set it in the instrument config and regenerate."
-            )
-
+        attr_name = attribute_for[req.variable_name]
         local_name = f"{req.variable_name}_1"
         instrument_assignments.append(
             f"{local_name} = resources.from_attribute({attr_name!r})"
@@ -593,6 +600,136 @@ def _compose_setup_from_attribute(
     return rendered
 
 
+def _local_attribute_name(leaf: _NodeRef, channel_index: int | None) -> str:
+    """``attribute_name`` of a local selection, or ``""`` if it has none."""
+    if channel_index is not None:
+        ch_map = getattr(leaf.params, "channels", None)
+        if isinstance(ch_map, dict) and channel_index in ch_map:
+            return getattr(ch_map[channel_index], "attribute_name", "") or ""
+        return ""
+    return getattr(leaf.params, "attribute_name", "") or ""
+
+
+def _unnamed_local(
+    local_nodes: dict[str, _NodeRef], attribute_for: dict[str, str]
+) -> list[str]:
+    """Local selections with no ``attribute_name``, as ``type:key`` labels."""
+    return [
+        f"{local_nodes[var].type}:{local_nodes[var].key}"
+        for var, attr in attribute_for.items()
+        if not attr and var in local_nodes
+    ]
+
+
+class _Resolved(NamedTuple):
+    """Instrument selections split by where they come from."""
+
+    local_nodes: dict[str, _NodeRef]
+    local_channels: dict[str, int | None]
+    attribute_for: dict[str, str]
+    instrument_sources: dict[str, str]
+    routed: bool
+
+
+def _resolve_instrument_selections(
+    config_dir: Path,
+    selections: list[SelectedResource],
+    all_nodes: list[_NodeRef],
+) -> _Resolved:
+    """Validate every instrument selection against the source that owns it.
+
+    A local selection is resolved against this workspace's tree exactly as
+    before. A routed one cannot be — there are no params here — so it is checked
+    against the source's live answer instead. Re-asking costs one round trip and
+    turns a picker that has been open while a daemon stopped into a clear message
+    rather than a project that fails on first run.
+    """
+    local_nodes: dict[str, _NodeRef] = {}
+    local_channels: dict[str, int | None] = {}
+    attribute_for: dict[str, str] = {}
+    source_of_var: dict[str, str] = {}
+
+    offered: dict[str, dict[str, Any]] = {}
+    registered: dict[str, str] = {}
+
+    for sel in selections:
+        if sel.source == LOCAL:
+            leaf = _resolve_selection_node(sel, all_nodes)
+            local_nodes[sel.variable_name] = leaf
+            local_channels[sel.variable_name] = sel.channel_index
+            attribute_for[sel.variable_name] = _local_attribute_name(
+                leaf, sel.channel_index
+            )
+            source_of_var[sel.variable_name] = LOCAL
+            continue
+
+        if not sel.attribute:
+            raise ValueError(
+                f"Selection for '{sel.variable_name}' comes from source "
+                f"{sel.source!r} but carries no attribute name. An instrument on "
+                "another workspace or machine is referenced by attribute_name."
+            )
+        if sel.source not in offered:
+            offered[sel.source] = {
+                a.get("attribute_name"): a
+                for a in attributes_for_source(config_dir, sel.source)
+                if a.get("attribute_name")
+            }
+            # Record the name in the address book so the generated project can
+            # resolve it at run time without anyone typing a URL.
+            registered[sel.source] = ensure_source_registered(
+                config_dir, sel.source, resolve_source_url(config_dir, sel.source)
+            )
+        if sel.attribute not in offered[sel.source]:
+            raise ValueError(
+                f"Source {sel.source!r} no longer offers an instrument named "
+                f"{sel.attribute!r} (needed for '{sel.variable_name}'). Its config "
+                "may have changed since this page was loaded — reload and pick again."
+            )
+        attribute_for[sel.variable_name] = sel.attribute
+        source_of_var[sel.variable_name] = registered[sel.source]
+
+    routed = any(source != LOCAL for source in source_of_var.values())
+
+    # A routed project resolves *every* instrument by attribute name, including
+    # its local ones, so a local instrument without one has to be named first.
+    if routed:
+        unnamed = _unnamed_local(local_nodes, attribute_for)
+        if unnamed:
+            raise ValueError(
+                "This measurement mixes local and server instruments, so every "
+                "instrument is referenced by attribute_name — but "
+                f"{', '.join(unnamed)} has none. Set one in Manage Instruments "
+                "and try again."
+            )
+
+    # Routing is keyed on attribute name, so one name cannot mean two different
+    # instruments: the second entry would silently shadow the first.
+    owner: dict[str, str] = {}
+    for var, attr in attribute_for.items():
+        if not attr:
+            continue
+        source = source_of_var[var]
+        if attr in owner and owner[attr] != source:
+            raise ValueError(
+                f"Two sources both provide an instrument named {attr!r} "
+                f"({owner[attr]} and {source}). A project routes instruments by "
+                "attribute name, so one would shadow the other. Rename one of "
+                "them before using both in a measurement."
+            )
+        owner[attr] = source
+
+    return _Resolved(
+        local_nodes=local_nodes,
+        local_channels=local_channels,
+        attribute_for=attribute_for,
+        # Only meaningful when something is routed; a purely local project keeps
+        # an empty mapping and so an unchanged YAML.
+        instrument_sources=owner if routed else {},
+        routed=routed,
+    )
+
+
 def _measurement_param_defaults(measurement_name: str) -> dict[str, Any]:
     """Default ``measurement.params`` for a measurement, derived from its typed
     params model so the YAML and the schema can never drift.
@@ -618,6 +755,7 @@ def _default_project_yaml(
     instruments: dict[str, Any],
     savers: dict[str, Any],
     plotters: dict[str, Any],
+    instrument_sources: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return {
         "project": {
@@ -654,6 +792,14 @@ def _default_project_yaml(
                 key: model_to_commented_map(value, exclude_none=True)
                 for key, value in instruments.items()
             },
+            # Omitted entirely for a purely local project, so existing projects
+            # and their YAML are unchanged. Present only when something is
+            # routed, which is also what the setup file keys its behaviour off.
+            **(
+                {"instrument_sources": dict(instrument_sources)}
+                if instrument_sources
+                else {}
+            ),
         },
     }
 
@@ -682,16 +828,40 @@ def generate_measurement_project(
     instruments = load_instruments(config_dir)
     all_nodes = _walk_tree(instruments)
 
-    inst_selected_map: dict[str, _NodeRef] = {}
-    inst_selected_channels: dict[str, int | None] = {}
-    for sel in instrument_sels:
-        inst_selected_map[sel.variable_name] = _resolve_selection_node(sel, all_nodes)
-        inst_selected_channels[sel.variable_name] = sel.channel_index
+    resolved = _resolve_instrument_selections(config_dir, instrument_sels, all_nodes)
+    inst_selected_map = resolved.local_nodes
+    inst_selected_channels = resolved.local_channels
+
+    if resolved.routed and req.generation_style != "from_attribute":
+        # The other styles emit ``Cls.from_config(resources, key=<hash>)``, which
+        # addresses a params tree this workspace does not have for a routed
+        # instrument. attribute_name is the only handle that means the same thing
+        # on both sides of the wire.
+        logger.info(
+            "Selection spans %d source(s); generating in from_attribute style "
+            "instead of %s",
+            len({*resolved.instrument_sources.values()}),
+            req.generation_style,
+        )
+        req.generation_style = "from_attribute"
+
+    if req.generation_style == "from_attribute" and not resolved.routed:
+        # Chosen deliberately for an all-local project; same requirement, but the
+        # user has not been told anything about sources, so say it plainly.
+        unnamed = _unnamed_local(resolved.local_nodes, resolved.attribute_for)
+        if unnamed:
+            raise ValueError(
+                "from_attribute generation requires attribute_name to be set on "
+                f"{', '.join(unnamed)}. Set it in the instrument config and "
+                "regenerate."
+            )
 
     requirements = _requirements_for_measurement(req.measurement_name)
     instrument_reqs, saver_reqs, plotter_reqs = _split_requirements(requirements)
     template_text = _setup_template_text(req.measurement_name)
 
+    # Only local instruments contribute params. A routed one is owned by its
+    # server; copying a snapshot here would create a second copy to drift.
     instruments_subset = _build_subset_instruments_from_selected_nodes(
         [
             (leaf, inst_selected_channels.get(variable_name))
@@ -713,6 +883,7 @@ def generate_measurement_project(
         instruments_subset,
         savers_subset,
         plotters_subset,
+        resolved.instrument_sources,
     )
     yaml_path = project_dir / f"{project_dir.name}.yaml"
     y = YAML(typ="rt")
@@ -724,8 +895,7 @@ def generate_measurement_project(
     if req.generation_style == "from_attribute":
         setup_code = _compose_setup_from_attribute(
             req.measurement_name,
-            inst_selected_map,
-            inst_selected_channels,
+            resolved.attribute_for,
             instrument_reqs,
             saver_reqs,
             plotter_reqs,

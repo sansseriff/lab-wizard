@@ -84,6 +84,8 @@ from lab_wizard.wizard.backend.remote_servers import (
     list_remote_attributes,
 )
 from lab_wizard.wizard.backend.server_control import (
+    disable_hosting,
+    enable_hosting,
     ensure_server,
     server_status,
     start_server,
@@ -96,6 +98,7 @@ from lab_wizard.wizard.backend.server_control import (
 from pydantic import BaseModel as _PermBM, Field as _PermField
 from pathlib import Path
 from lab_wizard.wizard.backend.hardware_access import hardware_owner, run_discovery
+from lab_wizard.wizard.backend.instrument_sources import list_instrument_sources
 from lab_wizard.wizard.backend.remote_tree import (
     remote_events,
     remote_tree,
@@ -134,8 +137,9 @@ async def lifespan(app: FastAPI):
 
     # Find-or-start this workspace's instrument server, so hardware has exactly
     # one owner and the wizard is a client of it. Off the event loop because
-    # start_server waits briefly to confirm the child survived. Managed mode:
-    # stop_managed_children() below stops it when the wizard exits.
+    # start_server waits briefly to confirm the child survived. Started
+    # detached, so the daemon outlives this window and other workspaces on the
+    # machine keep their instruments when the host's GUI is closed.
     try:
         status = await asyncio.to_thread(ensure_server, str(env.config_dir))
         if status.get("running"):
@@ -366,6 +370,18 @@ def api_manage_instruments(env: Env = Depends(get_env)):
     return {"tree": tree, "metadata": metadata}
 
 
+@app.get("/api/instrument-sources")
+def api_instrument_sources(env: Env = Depends(get_env)):
+    """Every place this workspace can get an instrument from.
+
+    Local tree, other workspaces' daemons on this machine (full trees, editable),
+    and registered remote servers (named leaves only — a remote peer gets read +
+    call, never reconfiguration). Unreachable sources are reported rather than
+    raised so one rack being off does not block authoring against the others.
+    """
+    return list_instrument_sources(_config_dir(env))
+
+
 @app.get("/api/transport-status")
 def api_transport_status(env: Env = Depends(get_env)):
     """Per-root sharing/authority declarations plus what the server holds now.
@@ -582,6 +598,27 @@ class _ServerStartRequest(_PermBM):
 def api_server_status(env: Env = Depends(get_env)):
     """Return whether this workstation's instrument server is running."""
     return server_status(_config_dir(env))
+
+
+@app.post("/api/server/enable-hosting")
+def api_enable_hosting(env: Env = Depends(get_env)):
+    """Make this workspace a hardware host, serving this machine over ipc.
+
+    Creating the server config is the opt-in; a workspace without one is a
+    client, which is what keeps a cloned workspace from racing the host for the
+    same instruments. No address is chosen — add a bind only when another
+    machine needs to connect.
+    """
+    return enable_hosting(_config_dir(env))
+
+
+@app.post("/api/server/disable-hosting")
+def api_disable_hosting(env: Env = Depends(get_env)):
+    """Stop hosting and return this workspace to being a client."""
+    try:
+        return disable_hosting(_config_dir(env))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/server/start")

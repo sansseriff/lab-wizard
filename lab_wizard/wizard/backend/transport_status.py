@@ -71,6 +71,7 @@ def _machine_held(timeout_ms: int = 1500) -> dict[str, Any]:
 
     held_roots: set[str] = set()
     held_keys: dict[str, dict[str, Any]] = {}
+    serves_keys: dict[str, list[dict[str, Any]]] = {}
     servers: list[dict[str, Any]] = []
 
     for entry in list_local_servers():
@@ -92,10 +93,28 @@ def _machine_held(timeout_ms: int = 1500) -> dict[str, Any]:
         held_roots.update(held.get("held_roots") or [])
         for root, info in (held.get("exclusive_roots") or {}).items():
             key = (info or {}).get("transport_key")
-            if key and root in set(held.get("held_roots") or []):
+            if not key:
+                continue
+            if root in set(held.get("held_roots") or []):
                 held_keys[key] = {"root": root, "url": endpoints[0]}
+            # Every exclusive root a server *declares*, held or not. This is what
+            # lets a conflict name the server that could serve the rack instead
+            # — routing through it is the fix, not merely a different choice.
+            serves_keys.setdefault(key, []).append(
+                {
+                    "url": endpoints[0],
+                    "config_dir": entry.get("config_dir"),
+                    "workspace_path": entry.get("workspace_path"),
+                    "root": root,
+                }
+            )
 
-    return {"servers": servers, "held_roots": held_roots, "held_keys": held_keys}
+    return {
+        "servers": servers,
+        "held_roots": held_roots,
+        "held_keys": held_keys,
+        "serves_keys": serves_keys,
+    }
 
 
 def transport_overview(config_dir: str | Path) -> dict[str, Any]:
@@ -109,6 +128,7 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
     machine = _machine_held()
     held_roots = machine["held_roots"]
     held_keys = machine["held_keys"]
+    serves_keys = machine["serves_keys"]
 
     roots: dict[str, Any] = {}
     for path in registry.list_paths():
@@ -126,6 +146,8 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
             "transport_key": key,
             "held_by_server": root in held_roots or elsewhere is not None,
             "held_by": (elsewhere or {}).get("url"),
+            # Servers that could serve this rack instead of opening it locally.
+            "served_by": serves_keys.get(key, []) if key else [],
         }
 
     # Two roots resolving to one transport key are the same physical device
@@ -150,10 +172,16 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
 def conflicts_for_selection(
     config_dir: str | Path, selected_paths: list[str]
 ) -> dict[str, Any]:
-    """Would a *local* project using ``selected_paths`` contend with the server?
+    """Would a *local* project using ``selected_paths`` contend with a server?
 
-    ``selected_paths`` are ``inst://`` paths (or attribute-resolved paths) the
-    measurement will use. Only exclusive roots can conflict.
+    ``selected_paths`` are ``inst://`` paths the measurement will open **in its
+    own process** — so callers must pass only locally-sourced selections. An
+    instrument routed through a server cannot conflict by definition: the server
+    is its single owner and the project is one of its clients. That is also why
+    each conflict carries ``served_by``: re-routing the selection is the fix,
+    and the answer names which server to route it to.
+
+    Only exclusive roots can conflict.
     """
     overview = transport_overview(config_dir)
     roots = overview["roots"]
