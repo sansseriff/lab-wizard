@@ -211,3 +211,50 @@ def test_cli_clean_ignores_environment_override(
 
     assert not current.manifest.exists()
     assert other.manifest.exists()
+
+
+def test_health_reports_the_workspace_the_launcher_compares_against() -> None:
+    """The two sides of the identity check must read the same field.
+
+    /api/health advertises the workspace and the launcher compares it before
+    opening a window. If they disagree — as they did when one read a
+    non-existent Env.root — every start either crashes or, worse, silently
+    fails the comparison and refuses a server that was in fact its own.
+    """
+    from fastapi.testclient import TestClient
+
+    from lab_wizard.wizard.backend.main import app
+    from lab_wizard.wizard.backend.models import Env
+
+    with TestClient(app) as client:
+        reported = client.get("/api/health").json()
+
+    assert reported["status"] == "ok"
+    assert reported["workspace"] == str(Env.from_current_workspace().workspace_dir or "")
+    assert isinstance(reported["pid"], int)
+
+
+def test_init_explains_a_deleted_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deleting the directory the shell is in must not read as a pathlib bug.
+
+    Resolving a relative path needs os.getcwd(), which fails with ENOENT once
+    that directory is unlinked — so `wizard init` raised a traceback pointing
+    at pathlib, with nothing to suggest the shell was the problem.
+    """
+    import os
+
+    doomed = tmp_path / "gone"
+    doomed.mkdir()
+    monkeypatch.chdir(doomed)
+    doomed.rmdir()
+
+    with pytest.raises(FileNotFoundError, match="current directory no longer exists"):
+        initialize_workspace(".")
+
+    # An absolute path still works from a broken cwd — which is the advice given.
+    workspace, created = initialize_workspace(tmp_path / "fresh")
+    assert created is True
+    assert workspace.config_dir.is_dir()
+    os.chdir(tmp_path)

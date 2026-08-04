@@ -232,7 +232,7 @@ def health(request: Request):
     env = getattr(request.app.state, "env", None)
     return {
         "status": "ok",
-        "workspace": str(getattr(env, "root", "") or ""),
+        "workspace": str(getattr(env, "workspace_dir", "") or ""),
         "pid": os.getpid(),
     }
 
@@ -960,11 +960,17 @@ def api_create_custom_resource_project(
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="frontend")
 
 
-def _port_is_free(port: int, host: str = "127.0.0.1") -> bool:
+def _port_is_free(port: int, host: str = "0.0.0.0") -> bool:
+    """Whether the server could bind ``port``, tested the way it will bind it.
+
+    Deliberately mirrors the real bind: same host, and **no SO_REUSEADDR**. On
+    BSD/macOS that option lets a probe bind 127.0.0.1 while another process
+    holds 0.0.0.0 on the same port, so the probe reports free and the server
+    then fails to start — the exact collision this is meant to prevent.
+    """
     import socket as _socket
 
     with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
-        s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
         try:
             s.bind((host, port))
             return True
@@ -994,7 +1000,7 @@ def _choose_port(requested: int | None, default: int = 8884) -> int:
     import socket as _socket
 
     with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
+        s.bind(("0.0.0.0", 0))
         port = s.getsockname()[1]
     logger.info("Port %d is in use; serving this workspace on %d instead", default, port)
     return port
@@ -1177,8 +1183,10 @@ if __name__ == "__main__":
     should_spawn_ui = (not args.no_ui) and has_gui_context()
 
     # Refuse to show a window until the server answering is demonstrably ours.
-    _verify_own_server(server_port, str(runtime_env.root or ""))
-    logger.info("Wizard serving %s on port %d", runtime_env.root, server_port)
+    _verify_own_server(server_port, str(runtime_env.workspace_dir or ""))
+    logger.info(
+        "Wizard serving %s on port %d", runtime_env.workspace_dir, server_port
+    )
 
     if should_spawn_ui:
         # Then start window

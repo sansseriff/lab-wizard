@@ -108,9 +108,31 @@ def require_workspace(
     return workspace
 
 
+def _resolve_target(path: str | Path) -> Path:
+    """Resolve ``path``, explaining the one failure that reads as a bug.
+
+    Resolving a *relative* path needs ``os.getcwd()``, which fails with ENOENT
+    once the directory the shell is sitting in has been unlinked — deleting a
+    workspace, or any parent of it, from inside. The raw traceback points at
+    ``pathlib`` and gives no hint that the shell is the problem.
+    """
+    try:
+        return Path(path).expanduser().resolve()
+    except FileNotFoundError as exc:
+        try:
+            os.getcwd()
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                "The current directory no longer exists — it was probably "
+                "deleted while this shell was inside it. Change to a directory "
+                "that exists (an absolute path is safest) and try again."
+            ) from exc
+        raise
+
+
 def initialize_workspace(path: str | Path) -> tuple[Workspace, bool]:
     """Create an empty, user-owned workspace without overwriting files."""
-    root = Path(path).expanduser().resolve()
+    root = _resolve_target(path)
     root.mkdir(parents=True, exist_ok=True)
     manifest = root / MANIFEST_NAME
     created = not manifest.exists()
