@@ -26,7 +26,16 @@ def _run_parser() -> argparse.ArgumentParser:
         "--workspace",
         help="Workspace root or lab-wizard.toml (default: search current directory and parents)",
     )
-    parser.add_argument("--port", type=int, default=8884)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help=(
+            "Port for the wizard UI. Omit to prefer 8884 and fall back to a "
+            "free port, so a second workspace opens its own wizard rather than "
+            "colliding with the first."
+        ),
+    )
     parser.add_argument("--no-ui", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser
@@ -98,9 +107,11 @@ def main(argv: list[str] | None = None) -> None:
         sys.executable,
         "-m",
         "lab_wizard.wizard.backend.main",
-        "--port",
-        str(args.port),
     ]
+    # Only forward an explicit choice. Passing the default unconditionally made
+    # every workspace demand the same port, so the second one could not start.
+    if args.port is not None:
+        command += ["--port", str(args.port)]
     if args.no_ui:
         command.append("--no-ui")
     if args.debug:

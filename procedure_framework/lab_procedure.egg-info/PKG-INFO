@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: lab-procedure
+Version: 0.0.1
+Summary: Composable blocking procedure runner for laboratory measurements.
+Requires-Python: >=3.12

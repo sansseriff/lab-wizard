@@ -221,9 +221,20 @@ class UvicornServer(multiprocessing.Process):
 
 
 @app.get("/api/health")
-def health():
-    """Lightweight liveness probe used by start_window to detect server readiness."""
-    return {"status": "ok"}
+def health(request: Request):
+    """Liveness probe, and proof of *which* wizard is answering.
+
+    The workspace is included because several wizards can run on one machine.
+    Without it, a second instance whose port was taken would happily open a
+    window onto the first instance's server and show the wrong workspace's
+    instruments — which looks like a working app, not a failure.
+    """
+    env = getattr(request.app.state, "env", None)
+    return {
+        "status": "ok",
+        "workspace": str(getattr(env, "root", "") or ""),
+        "pid": os.getpid(),
+    }
 
 
 # --- Placeholder API routes for frontend pages ---
@@ -949,6 +960,82 @@ def api_create_custom_resource_project(
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="frontend")
 
 
+def _port_is_free(port: int, host: str = "127.0.0.1") -> bool:
+    import socket as _socket
+
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+        s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+            return True
+        except OSError:
+            return False
+
+
+def _choose_port(requested: int | None, default: int = 8884) -> int:
+    """Pick the port to serve on.
+
+    An explicit ``--port`` is honoured and fails loudly if taken — the user
+    asked for that port and silently using another would be worse. Otherwise the
+    familiar default is preferred when free, falling back to an OS-assigned one
+    so a second workspace opens its own wizard instead of colliding.
+    """
+    if requested is not None:
+        if not _port_is_free(requested):
+            raise SystemExit(
+                f"Port {requested} is already in use — most likely by another "
+                "Lab Wizard. Omit --port to have one chosen automatically."
+            )
+        return requested
+
+    if _port_is_free(default):
+        return default
+
+    import socket as _socket
+
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    logger.info("Port %d is in use; serving this workspace on %d instead", default, port)
+    return port
+
+
+def _verify_own_server(port: int, workspace: str, timeout: float = 15.0) -> None:
+    """Confirm the server on ``port`` is the one we just started.
+
+    Guards the failure that looks like success: if our child died and something
+    else holds the port, opening a window onto it would show another
+    workspace's instruments with no indication anything was wrong.
+    """
+    deadline = time.monotonic() + timeout
+    last: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(
+                f"http://localhost:{port}/api/health", timeout=1
+            ) as r:
+                if r.status == 200:
+                    import json as _json
+
+                    last = _json.loads(r.read().decode())
+                    if not workspace or last.get("workspace") == workspace:
+                        return
+                    raise SystemExit(
+                        f"Port {port} is served by a different Lab Wizard "
+                        f"(workspace {last.get('workspace')!r}), not this one "
+                        f"({workspace!r}). This workspace's server failed to "
+                        "start — check the log above for the reason."
+                    )
+        except SystemExit:
+            raise
+        except Exception:
+            time.sleep(0.05)
+    raise SystemExit(
+        f"This workspace's wizard did not come up on port {port} within "
+        f"{timeout:.0f}s. Check the log above for the reason."
+    )
+
+
 def _wait_for_server(url: str, timeout: float = 15.0) -> bool:
     """Poll a health URL until it returns 200 or the timeout expires."""
     deadline = time.monotonic() + timeout
@@ -1046,8 +1133,12 @@ def parse_arguments():
     parser.add_argument(
         "--port",
         type=int,
-        default=8884,
-        help="Port to bind the server (default: 8884). Use 0 to auto-pick a free port.",
+        default=None,
+        help=(
+            "Port to bind the server. Omit to prefer 8884 and fall back to a "
+            "free port if it is taken, so a second workspace gets its own "
+            "wizard. An explicit port fails if unavailable."
+        ),
     )
     return parser.parse_args()
 
@@ -1063,7 +1154,10 @@ if __name__ == "__main__":
 
     server_ip = "0.0.0.0"
     webview_ip = "localhost"
-    server_port = args.port  # allow override or auto-pick with 0
+    # Chosen here, in the parent, so the webview URL is guaranteed to match what
+    # the child binds. Previously the port was assumed, and a second workspace
+    # whose bind failed would open a window onto the *first* one's server.
+    server_port = _choose_port(args.port)
     conn_recv, conn_send = multiprocessing.Pipe()
     # init_event = multiprocessing.Event()  # Create an Event object
 
@@ -1081,6 +1175,10 @@ if __name__ == "__main__":
     # without IPC, so keep to explicit ports for now. If needed, add a pipe to report.
     url = f"http://{webview_ip}:{server_port}/"
     should_spawn_ui = (not args.no_ui) and has_gui_context()
+
+    # Refuse to show a window until the server answering is demonstrably ours.
+    _verify_own_server(server_port, str(runtime_env.root or ""))
+    logger.info("Wizard serving %s on port %d", runtime_env.root, server_port)
 
     if should_spawn_ui:
         # Then start window

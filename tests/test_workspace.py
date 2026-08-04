@@ -96,15 +96,38 @@ def test_bare_wizard_launches_from_initialized_workspace(
         cli.main(["--no-ui"])
 
     assert exc_info.value.code == 0
+    # No --port unless the user asked for one. Forwarding the default made every
+    # workspace demand port 8884, so a second wizard could not bind — and then
+    # opened a window onto the *first* one's server, showing the wrong
+    # workspace's instruments while looking like it had worked.
     assert launched["command"] == [
         cli.sys.executable,
         "-m",
         "lab_wizard.wizard.backend.main",
-        "--port",
-        "8884",
         "--no-ui",
     ]
     assert launched["env"][WORKSPACE_ENV] == str(workspace.root)  # type: ignore[index]
+
+
+def test_explicit_port_is_still_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit --port must reach the backend, which fails if it is taken."""
+    initialize_workspace(tmp_path)
+    monkeypatch.delenv(WORKSPACE_ENV, raising=False)
+    monkeypatch.chdir(tmp_path)
+    launched: dict[str, object] = {}
+
+    def fake_call(command: list[str], *, env: dict[str, str]) -> int:
+        launched["command"] = command
+        return 0
+
+    monkeypatch.setattr(cli.subprocess, "call", fake_call)
+    with pytest.raises(SystemExit):
+        cli.main(["--no-ui", "--port", "9001"])
+
+    assert "--port" in launched["command"]  # type: ignore[operator]
+    assert "9001" in launched["command"]  # type: ignore[operator]
 
 
 def test_clean_workspace_removes_only_managed_state(tmp_path: Path) -> None:
