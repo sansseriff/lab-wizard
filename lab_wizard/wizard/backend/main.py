@@ -393,7 +393,7 @@ def api_transport_conflicts(
 
 
 @app.get("/api/local-servers")
-def api_local_servers():
+def api_local_servers(env: Env = Depends(get_env)):
     """Every instrument server running on this machine.
 
     Not just this workspace's. A server started from another workspace holds
@@ -405,9 +405,17 @@ def api_local_servers():
         local_server_endpoints,
     )
 
+    # Flagged so the UI can distinguish "our own server" from "another
+    # workspace's" — the two mean different things to a user, and only the
+    # latter has a tree they cannot already see under Manage Instruments.
+    own = str(env.config_dir) if env.config_dir else None
     return {
         "servers": [
-            {**entry, "endpoints": local_server_endpoints(entry)}
+            {
+                **entry,
+                "endpoints": local_server_endpoints(entry),
+                "is_this_workspace": entry.get("config_dir") == own,
+            }
             for entry in list_local_servers()
         ]
     }

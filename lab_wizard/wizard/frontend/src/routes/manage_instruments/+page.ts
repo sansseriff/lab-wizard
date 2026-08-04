@@ -95,21 +95,35 @@ export const load: PageLoad = async () => {
 	// is around to ask, so a failure here costs badges, not the page.
 	let roots: Record<string, RootTransport> = {};
 	let hardwareOwner: 'wizard' | 'server' = 'wizard';
+	let otherWorkspaces = 0;
 	try {
-		const [status, owner] = await Promise.all([
+		const [status, owner, servers] = await Promise.all([
 			fetchWithConfig<{ roots: Record<string, RootTransport> }>(
 				'/api/transport-status',
 				'GET'
 			),
-			fetchWithConfig<{ owner: 'wizard' | 'server' }>('/api/hardware-owner', 'GET')
+			fetchWithConfig<{ owner: 'wizard' | 'server' }>('/api/hardware-owner', 'GET'),
+			fetchWithConfig<{ servers: { is_this_workspace: boolean }[] }>(
+				'/api/local-servers',
+				'GET'
+			)
 		]);
 		roots = status.roots ?? {};
 		hardwareOwner = owner.owner;
+		// This page only ever shows *this* workspace's tree. Other workspaces'
+		// servers have their own, which is a common point of confusion.
+		otherWorkspaces = (servers.servers ?? []).filter((s) => !s.is_this_workspace).length;
 	} catch {
 		// leave defaults
 	}
 
-	return { tree: data.tree ?? [], metadata: data.metadata ?? {}, roots, hardwareOwner };
+	return {
+		tree: data.tree ?? [],
+		metadata: data.metadata ?? {},
+		roots,
+		hardwareOwner,
+		otherWorkspaces
+	};
 };
 
 export const prerender = true;

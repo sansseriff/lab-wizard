@@ -19,6 +19,7 @@
 	let metadata: Record<string, InstrumentMeta> = $state(data.metadata ?? {});
 	let roots: Record<string, RootTransport> = $state(data.roots ?? {});
 	let hardwareOwner: 'wizard' | 'server' = $state(data.hardwareOwner ?? 'wizard');
+	let otherWorkspaces = $state(data.otherWorkspaces ?? 0);
 
 	// Roots are keyed by inst:// path, which is the config key with a prefix.
 	function transportBadge(node: TreeNodeItem): TransportBadge | null {
@@ -483,6 +484,21 @@
 		{/if}
 		<a class="text-indigo-600 hover:underline" href="/hardware_status">Hardware &amp; Servers →</a>
 	</div>
+
+	{#if otherWorkspaces > 0}
+		<!-- This page is this workspace's config only. Another workspace's server
+		     has its own tree, and looking for it here is the obvious mistake. -->
+		<div
+			class="rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-300"
+		>
+			This page shows <strong>this workspace's</strong> instruments only.
+			{otherWorkspaces} other workspace{otherWorkspaces === 1 ? '' : 's'} on this machine
+			{otherWorkspaces === 1 ? 'has' : 'have'} their own —
+			<a class="text-indigo-600 hover:underline" href="/remote_tree"
+				>view or edit those instead →</a
+			>
+		</div>
+	{/if}
 
 	{#if statusMessage}
 		<div
