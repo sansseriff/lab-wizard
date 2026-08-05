@@ -24,7 +24,10 @@ import json
 import re
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args, get_origin
+
+from lab_wizard.lib.instruments.general.behavior import behavior_name_for
+from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
 
 
 Kind = Literal["instrument", "saver", "plotter"]
@@ -300,6 +303,28 @@ def get_type_to_module_map(kind: Kind = "instrument") -> dict[str, dict[str, Any
     return scanned
 
 
+def _refresh_type_to_module_map(kind: Kind) -> dict[str, dict[str, Any]]:
+    """Rescan a resource folder after a lookup misses the in-memory map.
+
+    The instrument server is intentionally long lived.  A developer can add a
+    new Params class while it is running, leaving ``_type_to_module`` populated
+    with a perfectly valid, but now incomplete, snapshot.  The on-disk cache's
+    fingerprint does not help in that case because ``get_type_to_module_map``
+    returns the in-memory value first.
+
+    Missing lookups are uncommon and already headed for an exception, so a
+    rescan here gives hot-added resource types a chance to load without adding
+    a filesystem walk to every ordinary Params lookup.
+    """
+    root_dir = _root_dir(kind)
+    current_mtime, current_count = _get_folder_fingerprint(root_dir)
+    scanned = _scan_root(kind)
+    _type_to_module[kind] = scanned
+    _metadata_cache[kind] = None
+    _save_cache(kind, current_mtime, current_count, scanned)
+    return scanned
+
+
 def load_params_class(
     type_str: str, kind: Kind = "instrument", verbose: bool = False
 ) -> type:
@@ -314,6 +339,11 @@ def load_params_class(
         return cache[type_str]
 
     type_map = get_type_to_module_map(kind)
+
+    if type_str not in type_map:
+        # A server may have built its in-memory registry before this type's
+        # source file was added.  Refresh once before reporting it as unknown.
+        type_map = _refresh_type_to_module_map(kind)
 
     if type_str not in type_map:
         available = ", ".join(sorted(type_map.keys()))
@@ -407,6 +437,36 @@ def get_parent_chain(type_str: str, kind: Kind = "instrument") -> list[str]:
     return chain
 
 
+def _instrument_behavior_metadata(params: Any) -> tuple[str | None, str | None]:
+    """Return the behavior of an instrument and, when present, its channels.
+
+    Channel-provider subclasses may reuse a channel class defined by a base
+    driver (``Fake970`` intentionally reuses ``Sim970Channel``).  Publishing
+    the behavior contract avoids making clients guess a channel class name from
+    the Params module.
+    """
+    inst_cls = getattr(params, "inst", None)
+    if not isinstance(inst_cls, type):
+        return None, None
+
+    instrument_behavior = behavior_name_for(inst_cls, is_class=True)
+    channel_behavior: str | None = None
+    for base in getattr(inst_cls, "__orig_bases__", ()):
+        origin = get_origin(base)
+        if origin is None:
+            continue
+        try:
+            if not issubclass(origin, ChannelProvider):
+                continue
+        except TypeError:
+            continue
+        args = get_args(base)
+        if args and isinstance(args[0], type):
+            channel_behavior = behavior_name_for(args[0], is_class=True)
+            break
+    return instrument_behavior, channel_behavior
+
+
 def get_metadata(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
     """Return rich metadata for every discoverable type of the given kind.
 
@@ -433,14 +493,21 @@ def get_metadata(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
         defaults: dict[str, Any] = {}
         key_hint: str | None = None
         discovery_actions: list[dict[str, Any]] = []
+        behavior_abc: str | None = None
+        channel_behavior_abc: str | None = None
         try:
             cls = load_params_class(ts, kind=kind, verbose=False)
-            defaults = cls().model_dump()
+            default_params = cls()
+            defaults = default_params.model_dump()
             key_hint = getattr(cls, "key_hint", None)
             if has_hierarchy and hasattr(cls, "discovery_actions"):
                 discovery_actions = [
                     a.to_spec().model_dump() for a in cls.discovery_actions()
                 ]
+            if has_hierarchy:
+                behavior_abc, channel_behavior_abc = _instrument_behavior_metadata(
+                    default_params
+                )
         except Exception:
             pass
 
@@ -457,6 +524,8 @@ def get_metadata(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
             "defaults": defaults,
             "key_hint": key_hint,
             "discovery_actions": discovery_actions,
+            "behavior_abc": behavior_abc,
+            "channel_behavior_abc": channel_behavior_abc,
         }
 
     _metadata_cache[kind] = result

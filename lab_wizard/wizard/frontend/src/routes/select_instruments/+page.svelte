@@ -47,6 +47,8 @@
 		child_types: string[];
 		defaults: Record<string, any>;
 		key_hint: string | null;
+		behavior_abc?: string | null;
+		channel_behavior_abc?: string | null;
 	};
 	type AttributeEntry = {
 		attribute_name: string;
@@ -231,6 +233,12 @@
 		if (req.resource_kind !== 'instrument') return false;
 		const meta = source.metadata?.[type];
 		if (!meta) return false;
+		const requiredBehavior = shortBaseName(req.base_type);
+		if (
+			meta.behavior_abc === requiredBehavior ||
+			meta.channel_behavior_abc === requiredBehavior
+		) return true;
+		// Compatibility fallback for servers predating behavior metadata.
 		const instClass = classNameNoParams(meta.class_name);
 		const channelClass = `${instClass}Channel`;
 		return req.matching_instruments.some(

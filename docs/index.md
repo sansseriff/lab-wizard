@@ -49,6 +49,7 @@ graph TD
 | Understand the overall design | [Architecture](concepts/architecture.md) |
 | Understand how an instrument is modelled | [Instrument model](concepts/instrument-model.md) |
 | Understand the on-disk config tree | [Config & discovery](concepts/config-and-discovery.md) |
+| Run a measurement with no hardware attached | [Simulated instruments](concepts/simulated-instruments.md) |
 | Learn the GUI pages and workflows | [The wizard GUI](wizard/index.md) |
 | Run measurements on a remote machine's instruments | [Remote control](remote/architecture.md) |
 | Set up safety interlocks | [Permissions](remote/permissions.md) |

@@ -292,11 +292,27 @@
 		}
 	}
 
-	async function confirmNewParentKey(key: string) {
-		chainSteps[currentChainIndex].key = key;
-		chainSteps[currentChainIndex].resolved = true;
-		await saveResolvedParent(currentChainIndex);
-		advanceChain();
+	async function confirmNewParentKey(key: string): Promise<boolean> {
+		const stepIndex = currentChainIndex;
+		const step = chainSteps[stepIndex];
+		step.key = key;
+		step.resolved = true;
+		addLoading = true;
+		statusMessage = null;
+		try {
+			await saveResolvedParent(stepIndex);
+			advanceChain();
+			return true;
+		} catch (e: any) {
+			// Keep the entry screen and its value visible so a failed server edit
+			// cannot look like the button simply did nothing.
+			step.key = '';
+			step.resolved = false;
+			statusMessage = { text: e.message ?? `Could not add ${step.type}`, ok: false };
+			return false;
+		} finally {
+			addLoading = false;
+		}
 	}
 
 	function advanceChain() {
@@ -657,7 +673,9 @@
 			<!-- Step 10: Key entry for a new parent being created -->
 			{#if addStep === 10 && currentStepType}
 				<p class="mb-3 text-sm text-gray-600 dark:text-gray-300">
-					Enter a key for the new <span class="font-medium">{currentStepType}</span>:
+					<span class="font-medium">{chainSteps[0].type}</span> requires a new
+					<span class="font-medium">{currentStepType}</span> parent. Enter its
+					{metadata[currentStepType]?.key_hint?.toLowerCase() ?? 'address or slot'}:
 				</p>
 				<div class="flex gap-2">
 					<input
@@ -668,10 +686,9 @@
 					/>
 					<button
 						class="rounded-md bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
-						disabled={!tempKey.trim()}
-						onclick={() => {
-							confirmNewParentKey(tempKey.trim());
-							tempKey = '';
+						disabled={!tempKey.trim() || addLoading}
+						onclick={async () => {
+							if (await confirmNewParentKey(tempKey.trim())) tempKey = '';
 						}}>Next</button
 					>
 				</div>

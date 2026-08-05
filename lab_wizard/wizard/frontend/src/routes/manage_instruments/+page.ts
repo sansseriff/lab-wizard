@@ -64,6 +64,8 @@ export type InstrumentMeta = {
 	defaults: Record<string, any>;
 	key_hint: string | null;
 	discovery_actions: DiscoveryAction[];
+	behavior_abc?: string | null;
+	channel_behavior_abc?: string | null;
 };
 
 export type ManageData = {

@@ -45,6 +45,8 @@ packages = [
     "lab_wizard.lib.instruments.dbay",
     "lab_wizard.lib.instruments.dbay.addons",
     "lab_wizard.lib.instruments.dbay.modules",
+    "lab_wizard.lib.instruments.fake_rack",
+    "lab_wizard.lib.instruments.fake_rack.modules",
     "lab_wizard.lib.instruments.general",
     "lab_wizard.lib.instruments.sim900",
     "lab_wizard.lib.instruments.sim900.modules",

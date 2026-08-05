@@ -212,12 +212,21 @@ class WireServer:
             return actions[action].run(params or {}, parent=None).model_dump()
 
         parent_path = PATH_PREFIX + "/".join(step["key"] for step in chain)
+        root = root_path(parent_path)
+        was_held = root in self._registry.held_roots()
         with self._registry.transport_lock(parent_path):
             parent_inst = self._registry.resolve(parent_path)
-            # Deliberately not disconnected afterwards: the registry owns this
-            # object's lifetime, and the wizard's old code closed the port out
-            # from under anything else using it.
-            return actions[action].run(params or {}, parent=parent_inst).model_dump()
+            try:
+                return actions[action].run(
+                    params or {}, parent=parent_inst
+                ).model_dump()
+            finally:
+                # Discovery may have opened this rack only to perform the scan.
+                # Keeping that transient handle made the immediately following
+                # tree_add fail its held-rack safety check. Preserve a rack that
+                # was already live, but hand back one opened solely by discovery.
+                if not was_held:
+                    self._registry.release(root)
 
     def release(self, path: str) -> list[str]:
         """Disconnect and evict ``path`` and everything under it.

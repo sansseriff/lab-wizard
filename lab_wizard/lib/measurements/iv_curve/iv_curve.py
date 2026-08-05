@@ -64,7 +64,11 @@ class MeasureIVPoint(Step):
     def run(self) -> Status:
         assert self.context is not None
         sense_voltage = self.voltage_sense.measure()
-        current = sense_voltage / self.bias_resistance_ohm
+        # The sense lead sits across the device, so the bias resistor drops
+        # what the device does not. Dividing the *sensed* voltage by the bias
+        # resistance would instead report zero current everywhere the device
+        # is superconducting, which is most of an SNSPD IV curve.
+        current = (self.bias_voltage - sense_voltage) / self.bias_resistance_ohm
         self.context.data_bus.emit(
             Observation(
                 data={
