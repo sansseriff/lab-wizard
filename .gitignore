@@ -27,4 +27,5 @@ old/
 
 
 
-lab_wizard_repo.egg-info/
+# Python build metadata (setuptools regenerates these on every build)
+*.egg-info/
