@@ -27,6 +27,12 @@ from lab_wizard.lib.utilities.config_io import (
     to_commented_yaml_value,
 )
 from lab_wizard.wizard.backend.attribute_name_autogen import autogen_attribute_names
+from lab_wizard.wizard.backend.instrument_sources import (
+    LOCAL,
+    attributes_for_source,
+    ensure_source_registered,
+    resolve_source_url,
+)
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
     _NodeRef,
@@ -50,6 +56,19 @@ logger = logging.getLogger("lab_wizard.wizard.backend.custom_resource_generation
 class CustomResourceSelection(BaseSelection):
     # ``None`` means "use the whole instrument" (or single-channel instrument).
     channel_index: int | None = None
+    # Which source owns this instrument: ``local``, or a name from
+    # /api/instrument-sources.
+    source: str = LOCAL
+    # The ``attribute_name`` on that source. Required for a routed selection,
+    # which has no params in this workspace to derive one from.
+    attribute: str | None = None
+    # Behavior ABC the source reported, used as the static type of a routed
+    # resource — the runtime object is a proxy, so the concrete driver class
+    # would be a lie that type-checks.
+    behavior_abc: str | None = None
+    # A routed selection may come from a flat leaf list with no tree position.
+    type: str = ""
+    key: str = ""
 
 
 class GenerateCustomResourceRequest(BaseModel):
@@ -183,16 +202,50 @@ def _compose_explicit(
     return instantiation_lines, sorted_imports, final_exprs, final_types
 
 
+def _behavior_import(name: str | None) -> tuple[str, str] | None:
+    """``(module, class_name)`` for a behavior ABC, from the behavior registry.
+
+    Derived rather than tabulated, so a newly registered behavior is annotatable
+    in generated files without an edit here.
+    """
+    if not name:
+        return None
+    from lab_wizard.lib.instruments.general.behavior import behaviors
+
+    for registered, cls in behaviors():
+        if registered == name:
+            return (cls.__module__, registered)
+    return None
+
+
 def _compose_from_attribute(
     selections: list[CustomResourceSelection],
     var_names: list[str],
-    leaves: list[_NodeRef],
+    leaves: list[Any],
 ) -> tuple[list[str], list[tuple[str, str]], list[str], list[str]]:
-    """``resource_config.from_attribute("name")`` based generation. No instrument imports."""
+    """``resource_config.from_attribute("name")`` based generation. No instrument imports.
+
+    A routed selection has no ``_NodeRef`` — there are no params for it in this
+    workspace — so its attribute name comes straight off the selection and its
+    static type is the behavior ABC the source reported. The concrete driver
+    class is deliberately not claimed: the runtime object is a proxy.
+    """
 
     final_exprs: list[str] = []
     final_types: list[str] = []
+    behavior_imports: set[tuple[str, str]] = set()
     for sel, var_name, leaf in zip(selections, var_names, leaves):
+        if leaf is None:
+            final_exprs.append(f"resource_config.from_attribute({sel.attribute!r})")
+            # The behavior ABC is the honest static type: the runtime object is a
+            # proxy satisfying that interface, not the server's driver class.
+            pair = _behavior_import(sel.behavior_abc)
+            if pair is None:
+                final_types.append("object")
+            else:
+                behavior_imports.add(pair)
+                final_types.append(pair[1])
+            continue
         _validate_channel(leaf, sel.channel_index, var_name)
         attr_name = _channel_attribute_name(leaf, sel.channel_index)
         if not attr_name:
@@ -209,12 +262,12 @@ def _compose_from_attribute(
         final_exprs.append(f"resource_config.from_attribute({attr_name!r})")
         final_types.append(_selected_runtime_type(leaf, sel.channel_index))
 
-    return (
-        [],
-        sorted(_selected_runtime_imports(selections=selections, leaves=leaves)),
-        final_exprs,
-        final_types,
+    # Routed selections have no node to derive a driver import from.
+    local = [(sel, leaf) for sel, leaf in zip(selections, leaves) if leaf is not None]
+    imports = _selected_runtime_imports(
+        selections=[sel for sel, _ in local], leaves=[leaf for _, leaf in local]
     )
+    return ([], sorted(imports | behavior_imports), final_exprs, final_types)
 
 
 # ---------------------------------------------------------------------------
@@ -235,10 +288,10 @@ def _indent_block(lines: list[str], spaces: int) -> str:
 
 
 def _needs_resource_config_alias(body_lines: list[str]) -> bool:
-    """Whether to prepend ``resource_config = project.resources``.
+    """Whether to prepend a ``resource_config = ...`` line.
 
     Styles that reference ``resource_config`` but don't define it themselves
-    (production / from_attribute) need the alias prepended. The pedagogical
+    (production / from_attribute) need it prepended. The pedagogical
     YAML-expanded style already emits its own ``resource_config = project.resources``
     line, so we avoid inserting a duplicate.
     """
@@ -247,6 +300,24 @@ def _needs_resource_config_alias(body_lines: list[str]) -> bool:
         line.lstrip().startswith("resource_config =") for line in body_lines
     )
     return references and not already_defined
+
+
+def _resource_config_line(routed: bool) -> str:
+    """How the generated file obtains its resource source.
+
+    A purely local file reads the project's own tree, exactly as before. Once an
+    instrument lives on a server, the same file needs a composite: instruments
+    route per attribute while savers and plotters stay local. Resolving the
+    server by *name* through the address book keeps the file readable and free
+    of hard-coded socket paths.
+    """
+    if not routed:
+        return "resource_config = project.resources"
+    return (
+        "resource_config = CompositeResources.from_project(\n"
+        "        project, server_urls=load_server_urls(Path(__file__).resolve().parent)\n"
+        "    )"
+    )
 
 
 def _render_dataclass_file(
@@ -259,6 +330,7 @@ def _render_dataclass_file(
     import_pairs: list[tuple[str, str]],
     uses_project_yaml: bool = True,
     uses_cast: bool = False,
+    routed: bool = False,
 ) -> str:
     imports_block = _render_imports(import_pairs)
     field_lines = [f"{name}: {typ}" for name, typ in zip(var_names, final_types)]
@@ -284,6 +356,13 @@ def _render_dataclass_file(
                 "from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config",
             ]
         )
+        if routed:
+            parts.extend(
+                [
+                    "from lab_wizard.lib.client.composite_resources import CompositeResources",
+                    "from lab_wizard.lib.client.server_discovery import load_server_urls",
+                ]
+            )
     if imports_block:
         parts.append(imports_block)
     parts.extend(
@@ -298,7 +377,7 @@ def _render_dataclass_file(
             ]
         )
         if _needs_resource_config_alias(body_lines):
-            parts.append("    resource_config = project.resources")
+            parts.append(f"    {_resource_config_line(routed)}")
         parts.append(_indent_block(body_lines, 4))
     else:
         parts.extend(
@@ -344,6 +423,7 @@ def _render_simple_file(
     import_pairs: list[tuple[str, str]],
     uses_project_yaml: bool = True,
     uses_cast: bool = False,
+    routed: bool = False,
 ) -> str:
     imports_block = _render_imports(import_pairs)
     body_lines = instantiation_lines + [f"{var_name}: {final_type} = {final_expr}"]
@@ -359,6 +439,13 @@ def _render_simple_file(
                 "from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config",
             ]
         )
+        if routed:
+            parts.extend(
+                [
+                    "from lab_wizard.lib.client.composite_resources import CompositeResources",
+                    "from lab_wizard.lib.client.server_discovery import load_server_urls",
+                ]
+            )
     if imports_block:
         parts.append(imports_block)
     if uses_project_yaml:
@@ -370,7 +457,7 @@ def _render_simple_file(
             ]
         )
         if _needs_resource_config_alias(body_lines):
-            parts.append("    resource_config = project.resources")
+            parts.append(f"    {_resource_config_line(routed)}")
         parts.append(_indent_block(body_lines, 4))
     else:
         parts.extend(
@@ -405,7 +492,10 @@ def _render_simple_file(
 # ---------------------------------------------------------------------------
 
 
-def _custom_resource_yaml(instruments: dict[str, Any]) -> dict[str, Any]:
+def _custom_resource_yaml(
+    instruments: dict[str, Any],
+    instrument_sources: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Minimal project YAML for a custom resource — only the instruments tree.
 
     ``ResourceConfig`` defaults ``savers``/``plotters`` to empty dicts, so we
@@ -434,6 +524,13 @@ def _custom_resource_yaml(instruments: dict[str, Any]) -> dict[str, Any]:
                 key: model_to_commented_map(value, exclude_none=True)
                 for key, value in instruments.items()
             },
+            # Omitted entirely when nothing is routed, so a local custom
+            # resource's YAML is unchanged.
+            **(
+                {"instrument_sources": dict(instrument_sources)}
+                if instrument_sources
+                else {}
+            ),
         },
     }
 
@@ -469,9 +566,54 @@ def generate_custom_resource_project(
     instruments = load_instruments(config_dir)
     all_nodes = _walk_tree(instruments)
 
-    leaves: list[_NodeRef] = [
-        _resolve_selection_node(sel, all_nodes) for sel in req.selections
-    ]
+    # A routed selection has no node in this workspace's tree; ``None`` marks it
+    # so the composers can tell the two apart.
+    leaves: list[Any] = []
+    instrument_sources: dict[str, str] = {}
+    offered: dict[str, dict[str, Any]] = {}
+    registered: dict[str, str] = {}
+    for sel in req.selections:
+        if sel.source == LOCAL:
+            leaves.append(_resolve_selection_node(sel, all_nodes))
+            continue
+        if not sel.attribute:
+            raise ValueError(
+                f"Selection '{sel.variable_name}' comes from source {sel.source!r} "
+                "but carries no attribute name."
+            )
+        if sel.source not in offered:
+            offered[sel.source] = {
+                a.get("attribute_name"): a
+                for a in attributes_for_source(config_dir, sel.source)
+                if a.get("attribute_name")
+            }
+            registered[sel.source] = ensure_source_registered(
+                config_dir, sel.source, resolve_source_url(config_dir, sel.source)
+            )
+        entry = offered[sel.source].get(sel.attribute)
+        if entry is None:
+            raise ValueError(
+                f"Source {sel.source!r} no longer offers an instrument named "
+                f"{sel.attribute!r} (needed for '{sel.variable_name}'). Reload and "
+                "pick again."
+            )
+        # Trust the source's own answer over whatever the picker sent.
+        sel.behavior_abc = entry.get("behavior_abc") or sel.behavior_abc
+        instrument_sources[sel.attribute] = registered[sel.source]
+        leaves.append(None)
+
+    routed = bool(instrument_sources)
+    if routed and req.generation_style != "from_attribute":
+        # Every other style addresses a params tree that has no entry for a
+        # routed instrument.
+        logger.info(
+            "Selection spans %d source(s); generating in from_attribute style "
+            "instead of %s",
+            len(set(instrument_sources.values())),
+            req.generation_style,
+        )
+        req.generation_style = "from_attribute"
+
     var_names = _unique_var_names([sel.variable_name for sel in req.selections])
 
     logger.info(
@@ -488,7 +630,11 @@ def generate_custom_resource_project(
     elif req.generation_style == "from_attribute":
         mutations = autogen_attribute_names(
             instruments,
-            [(leaf, sel.channel_index) for sel, leaf in zip(req.selections, leaves)],
+            [
+                (leaf, sel.channel_index)
+                for sel, leaf in zip(req.selections, leaves)
+                if leaf is not None
+            ],
         )
         if mutations:
             logger.info(
@@ -540,6 +686,7 @@ def generate_custom_resource_project(
             import_pairs=import_pairs,
             uses_project_yaml=uses_project_yaml,
             uses_cast=uses_cast,
+            routed=routed,
         )
     else:
         setup_code = _render_simple_file(
@@ -550,10 +697,17 @@ def generate_custom_resource_project(
             import_pairs=import_pairs,
             uses_project_yaml=uses_project_yaml,
             uses_cast=uses_cast,
+            routed=routed,
         )
 
+    # Only local selections contribute params; a routed instrument's config is
+    # owned by its server, and a copy here would be a second copy to drift.
     subset = _build_subset_instruments_from_selected_nodes(
-        [(leaf, sel.channel_index) for sel, leaf in zip(req.selections, leaves)]
+        [
+            (leaf, sel.channel_index)
+            for sel, leaf in zip(req.selections, leaves)
+            if leaf is not None
+        ]
     )
     prefix = (
         _sanitize_identifier(req.project_prefix or "custom_resource")
@@ -563,7 +717,7 @@ def generate_custom_resource_project(
     logger.info("Created custom resource project directory %s", project_dir)
 
     yaml_path = project_dir / f"{project_dir.name}.yaml"
-    yaml_payload = _custom_resource_yaml(subset)
+    yaml_payload = _custom_resource_yaml(subset, instrument_sources)
     y = YAML(typ="rt")
     y.default_flow_style = False
     y_writer: Any = y

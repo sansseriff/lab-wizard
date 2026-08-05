@@ -29,7 +29,11 @@ from lab_wizard.wizard.backend.server_control import server_status
 
 logger = logging.getLogger("lab_wizard.wizard.backend.transport_status")
 
-__all__ = ["transport_overview", "conflicts_for_selection"]
+__all__ = [
+    "transport_overview",
+    "conflicts_for_selection",
+    "duplicate_transport_check",
+]
 
 
 def _loopback(bind: Optional[str]) -> Optional[str]:
@@ -167,6 +171,76 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
         "roots": roots,
         "duplicate_transports": duplicates,
     }
+
+
+def duplicate_transport_check(
+    type_str: str, key: str, *, config_dir: Optional[str | Path] = None
+) -> dict[str, Any]:
+    """Would adding this instrument point a second config at one device?
+
+    Two roots resolving to one ``transport_key`` are the same physical device
+    configured twice. Within one tree that is caught after the fact by
+    ``duplicate_transports``; *across* workspaces nothing looked at all, which is
+    the case that now matters — a satellite adding ``/dev/ttyUSB0`` to the host
+    daemon while its own tree already has it produces two owners of one serial
+    port, and the first symptom is a lease refusal at 2am.
+
+    Answered before the write, from the prospective params alone, so no hardware
+    is touched. A warning rather than a refusal: configuring one device twice is
+    occasionally deliberate, and the person doing it should decide.
+    """
+    from lab_wizard.lib.utilities.config_io import _apply_key_to_params
+    from lab_wizard.lib.utilities.params_discovery import load_params_class
+
+    try:
+        params = load_params_class(type_str)()
+        if key:
+            _apply_key_to_params(type_str, params, key)
+        getter = getattr(params, "transport_key", None)
+        wanted = getter() if callable(getter) else None
+    except Exception as exc:  # noqa: BLE001 - the dialog must still open
+        logger.debug("Could not derive a transport key for %s/%s: %s", type_str, key, exc)
+        return {"transport_key": None, "clashes": []}
+
+    if not wanted:
+        # No transport of its own — a child, or something with no addressable
+        # device. Nothing to collide with.
+        return {"transport_key": None, "clashes": []}
+
+    clashes: list[dict[str, Any]] = []
+    for entry in _machine_held()["servers"]:
+        held = _held_from(entry["url"])
+        for root, info in (held.get("exclusive_roots") or {}).items():
+            if (info or {}).get("transport_key") == wanted:
+                clashes.append(
+                    {
+                        "root": root,
+                        "workspace_path": entry.get("workspace_path"),
+                        "config_dir": entry.get("config_dir"),
+                        "url": entry.get("url"),
+                        "held": root in (held.get("held_roots") or []),
+                    }
+                )
+
+    if config_dir is not None:
+        # The local tree too — it has no server if this workspace is a client.
+        try:
+            local = InstrumentRegistry.from_config_dir(str(config_dir))
+            for root in {root_path(p) for p in local.list_paths()}:
+                if local.transport_for(root).get("transport_key") == wanted:
+                    clashes.append(
+                        {
+                            "root": root,
+                            "workspace_path": str(Path(config_dir).parent),
+                            "config_dir": str(config_dir),
+                            "url": None,
+                            "held": False,
+                        }
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Could not scan the local tree for duplicates: %s", exc)
+
+    return {"transport_key": wanted, "clashes": clashes}
 
 
 def conflicts_for_selection(

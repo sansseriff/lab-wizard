@@ -22,6 +22,14 @@ so a project runs the same way for everyone, is inspectable, and is
 reproducible six months later — none of which is true of a flag someone has to
 remember. An attribute with no entry defaults to ``local``, which keeps every
 existing project working untouched.
+
+**Savers and plotters never route.** Only instruments have a location; a saver
+writes to this machine's database and a plotter draws on this machine's screen,
+so both are served from the local project regardless of where the instruments
+live. They are exposed here as passthroughs because generated setup code says
+``DatabaseSaver.from_config(resources, key=...)`` against whatever resource
+source it was handed — without them, every project that routes an instrument
+anywhere would die on ``exp.savers[key]``.
 """
 
 from __future__ import annotations
@@ -47,10 +55,16 @@ class CompositeResources:
         local: Any = None,
         remotes: Optional[dict[str, Any]] = None,
         sources: Optional[dict[str, str]] = None,
+        default_source: str = LOCAL,
     ) -> None:
         self._local = local
         self._remotes = dict(remotes or {})
         self._sources = dict(sources or {})
+        # Where an attribute with no explicit entry comes from. ``local`` for a
+        # normal project — which is why existing projects need no mapping — and
+        # a server name for the ``--remote`` override, where *everything* is
+        # remote but savers and plotters must still resolve locally.
+        self._default_source = default_source
         self._cache: dict[str, Any] = {}
 
     # ------------------------- construction -------------------------
@@ -88,6 +102,52 @@ class CompositeResources:
 
         return cls(local=project.resources, remotes=remotes, sources=sources)
 
+    @classmethod
+    def all_remote(
+        cls,
+        project: Any,
+        url: str,
+        *,
+        name: str = "remote",
+        connect: Optional[Any] = None,
+    ) -> "CompositeResources":
+        """Route every *instrument* through one server, as ``--remote`` means.
+
+        Not the same as handing the project a bare ``RemoteResources``: savers
+        and plotters have no remote counterpart and must still come from the
+        local project, which is exactly what a composite with a remote default
+        gives us. Using one class for both routing modes also means generated
+        code has a single shape.
+        """
+        connect_fn = connect or _default_connect
+        return cls(
+            local=getattr(project, "resources", None),
+            remotes={name: connect_fn(url)},
+            sources={},
+            default_source=name,
+        )
+
+    # ------------------------- local-only resources -------------------------
+
+    @property
+    def savers(self) -> Any:
+        """Saver params from the local project. Never routed — see the module docstring."""
+        return self._local_section("savers")
+
+    @property
+    def plotters(self) -> Any:
+        """Plotter params from the local project. Never routed."""
+        return self._local_section("plotters")
+
+    def _local_section(self, name: str) -> Any:
+        section = getattr(self._local, name, None)
+        if section is None:
+            raise ValueError(
+                f"This project has no local {name}. Savers and plotters are always "
+                "resolved locally, even when every instrument is routed to a server."
+            )
+        return section
+
     # ------------------------- attribute API -------------------------
 
     @overload
@@ -101,7 +161,7 @@ class CompositeResources:
         if name in self._cache:
             return self._cache[name]
 
-        source = self._sources.get(name, LOCAL)
+        source = self._sources.get(name, self._default_source)
         if source == LOCAL:
             if self._local is None:
                 raise ValueError(
@@ -123,7 +183,7 @@ class CompositeResources:
 
     def source_of(self, name: str) -> str:
         """Which source owns ``name`` — for diagnostics and display."""
-        return self._sources.get(name, LOCAL)
+        return self._sources.get(name, self._default_source)
 
     # ------------------------- lifecycle -------------------------
 

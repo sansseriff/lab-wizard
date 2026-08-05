@@ -97,15 +97,21 @@ from lab_wizard.wizard.backend.server_control import (
 )
 from pydantic import BaseModel as _PermBM, Field as _PermField
 from pathlib import Path
-from lab_wizard.wizard.backend.hardware_access import hardware_owner, run_discovery
+from lab_wizard.wizard.backend.hardware_access import (
+    apply_tree_edit,
+    hardware_owner,
+    run_discovery,
+)
 from lab_wizard.wizard.backend.instrument_sources import list_instrument_sources
 from lab_wizard.wizard.backend.remote_tree import (
+    remote_discover,
     remote_events,
     remote_tree,
     remote_tree_edit,
 )
 from lab_wizard.wizard.backend.transport_status import (
     conflicts_for_selection,
+    duplicate_transport_check,
     transport_overview,
 )
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
@@ -499,6 +505,56 @@ def api_remote_tree_edit(req: _RemoteEditRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class _RemoteDiscoverRequest(_PermBM):
+    config_dir: str
+    type: str
+    action: str
+    params: dict = _PermField(default_factory=dict)
+    parent_chain: list = _PermField(default_factory=list)
+
+
+@app.post("/api/remote-tree/discover")
+def api_remote_discover(req: _RemoteDiscoverRequest):
+    """Run a discovery scan on another workspace's server.
+
+    The scan has to happen where the hardware is. Without it, adding an
+    instrument to another workspace would mean knowing its bus address by heart.
+    """
+    try:
+        return remote_discover(
+            req.config_dir,
+            type=req.type,
+            action=req.action,
+            params=req.params,
+            parent_chain=req.parent_chain,
+        )
+    except Exception as e:  # noqa: BLE001 - surfaced to the UI
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class _DuplicateCheckRequest(_PermBM):
+    type: str
+    key: str = ""
+    # Present when checking a local add; omitted when the target is a server.
+    include_local: bool = True
+
+
+@app.post("/api/transport-status/duplicate-check")
+def api_duplicate_transport(
+    req: _DuplicateCheckRequest, env: Env = Depends(get_env)
+):
+    """Would adding this instrument point a second config at one device?
+
+    Asked before the write. Two workspaces naming one serial port is a mistake
+    whose first symptom is otherwise a lease refusal in the middle of a run.
+    """
+    return duplicate_transport_check(
+        req.type,
+        req.key,
+        config_dir=_config_dir(env) if req.include_local else None,
+    )
+
+
 @app.post("/api/remote-tree/events")
 def api_remote_events(req: _RemoteTreeRequest):
     """Recent notable events recorded by that server."""
@@ -697,12 +753,21 @@ class _RemoveBody(_BM):
 
 @app.post("/api/manage-instruments/add")
 def api_add_instrument(body: _AddBody, env: Env = Depends(get_env)):
-    """Add an instrument (with optional parent chain creation)."""
+    """Add an instrument (with optional parent chain creation).
+
+    Routed through this workspace's server when one is running, so a local edit
+    gets the same held-rack refusal, registry reload and audit entry that an
+    edit from another workspace already got.
+    """
     config_dir = _config_dir(env)
     try:
         chain_dicts = [s.model_dump() for s in body.chain]
-        result = add_instrument_chain(config_dir, chain_dicts)
-        return result
+        return apply_tree_edit(
+            config_dir,
+            "add",
+            {"chain": chain_dicts},
+            lambda: add_instrument_chain(config_dir, chain_dicts),
+        )
     except Exception as e:
         logger.exception("Add instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
@@ -713,8 +778,12 @@ def api_reset_instrument(body: _ResetBody, env: Env = Depends(get_env)):
     """Reset an instrument's config to factory defaults (preserves children)."""
     config_dir = _config_dir(env)
     try:
-        result = reinitialize_instrument(config_dir, body.type, body.key)
-        return result
+        return apply_tree_edit(
+            config_dir,
+            "reset",
+            {"type": body.type, "key": body.key},
+            lambda: reinitialize_instrument(config_dir, body.type, body.key),
+        )
     except Exception as e:
         logger.exception("Reset instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
@@ -745,8 +814,12 @@ def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
     """Remove an instrument from config."""
     config_dir = _config_dir(env)
     try:
-        result = remove_instrument(config_dir, body.type, body.key)
-        return result
+        return apply_tree_edit(
+            config_dir,
+            "remove",
+            {"type": body.type, "key": body.key},
+            lambda: remove_instrument(config_dir, body.type, body.key),
+        )
     except Exception as e:
         logger.exception("Remove instrument API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterator, Optional
 
 from lab_wizard.lib.client.server_registry import (
@@ -33,9 +34,17 @@ from lab_wizard.lib.client.session import Session
 
 logger = logging.getLogger("lab_wizard.wizard.backend.remote_tree")
 
-__all__ = ["remote_tree", "remote_schema", "remote_events", "remote_tree_edit"]
+__all__ = [
+    "remote_tree",
+    "remote_schema",
+    "remote_events",
+    "remote_tree_edit",
+    "remote_discover",
+]
 
 _TIMEOUT_MS = 15_000
+# A bus scan is legitimately slow; the read timeout above would abort it.
+_DISCOVERY_TIMEOUT_MS = 120_000
 
 
 def _endpoint_for(config_dir: str) -> str:
@@ -45,8 +54,12 @@ def _endpoint_for(config_dir: str) -> str:
     a client cannot be talked into dialling something else — and so ipc is
     preferred, which is what grants edit rights.
     """
+    # Resolved on both sides: a server advertises its *resolved* config dir, so
+    # comparing raw strings misses whenever the caller's path crosses a symlink
+    # — on macOS every /tmp and /var path does.
+    wanted = str(Path(config_dir).expanduser().resolve())
     for entry in list_local_servers():
-        if entry.get("config_dir") == config_dir:
+        if str(Path(entry.get("config_dir", "")).expanduser().resolve()) == wanted:
             endpoints = local_server_endpoints(entry)
             if endpoints:
                 return endpoints[0]
@@ -58,8 +71,8 @@ def _endpoint_for(config_dir: str) -> str:
 
 
 @contextmanager
-def _session(config_dir: str) -> Iterator[Session]:
-    session = Session(_endpoint_for(config_dir), timeout_ms=_TIMEOUT_MS)
+def _session(config_dir: str, timeout_ms: int = _TIMEOUT_MS) -> Iterator[Session]:
+    session = Session(_endpoint_for(config_dir), timeout_ms=timeout_ms)
     try:
         yield session
     finally:
@@ -103,6 +116,37 @@ def remote_schema(config_dir: str) -> dict[str, Any]:
 def remote_events(config_dir: str, limit: int = 50) -> list[dict[str, Any]]:
     with _session(config_dir) as session:
         return session.call("events_recent", {"limit": limit})
+
+
+def remote_discover(
+    config_dir: str,
+    *,
+    type: str,
+    action: str,
+    params: dict[str, Any],
+    parent_chain: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Run a discovery action on the server hosting ``config_dir``.
+
+    Adding an instrument is rarely one call: the wizard scans a bus to find what
+    is actually plugged in, and the scan has to happen where the hardware is.
+    Without this, another workspace could only add instruments whose address it
+    already knew by heart — which is most of the reason the add form is worth
+    having at all.
+
+    Deliberately slow-tolerant: a GPIB sweep legitimately takes a while, and the
+    read timeouts used elsewhere in this module would abort a working scan.
+    """
+    with _session(config_dir, timeout_ms=_DISCOVERY_TIMEOUT_MS) as session:
+        return session.call(
+            "discover",
+            {
+                "type": type,
+                "action": action,
+                "params": params,
+                "parent_chain": parent_chain,
+            },
+        )
 
 
 def remote_tree_edit(

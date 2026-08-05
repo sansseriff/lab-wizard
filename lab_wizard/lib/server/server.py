@@ -6,6 +6,9 @@ Usage:
 The config file is a small YAML:
 
     server:
+      # Optional. Omit to serve only this machine over ipc:// (the endpoint is
+      # derived from config_dir, so no address is needed). Set it to accept
+      # clients from other machines, which get read + call but never edits.
       bind: tcp://0.0.0.0:12300
       # Optional. Directory containing an `instruments/` tree. Defaults to the
       # parent of this file's directory (i.e. the workspace config/). The server
@@ -36,6 +39,15 @@ from lab_wizard.lib.utilities.model_tree import load_project_config
 
 
 def _load_server_config(path: Path) -> dict[str, Any]:
+    """Load and validate a server config.
+
+    ``bind`` is optional. A workstation that only serves other workspaces on the
+    same machine needs no address at all: the ``ipc://`` endpoint is derived from
+    a hash of the config dir, so both ends compute it without configuration.
+    Requiring a tcp address there would mean choosing a port, defending it
+    against collisions, and exposing a socket, all for traffic that never leaves
+    the machine. Set ``bind`` only to accept clients from other machines.
+    """
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if not isinstance(cfg, dict) or "server" not in cfg:
@@ -43,8 +55,16 @@ def _load_server_config(path: Path) -> dict[str, Any]:
             f"Server config at {path} must be a YAML mapping with a 'server' key"
         )
     server = cfg["server"]
-    if "bind" not in server:
-        raise ValueError("server config must contain a 'bind' key")
+    if server is None:
+        # `server:` with an empty body is the minimal host declaration: ipc only.
+        cfg["server"] = server = {}
+    if not isinstance(server, dict):
+        raise ValueError(f"'server' in {path} must be a mapping")
+    if not server.get("bind") and not server.get("ipc", True):
+        raise ValueError(
+            f"Server config at {path} disables ipc and sets no 'bind', so it has "
+            "no way to accept clients. Set a bind address, or leave ipc enabled."
+        )
     return cfg
 
 
@@ -76,8 +96,9 @@ def main(argv: list[str] | None = None) -> int:
     config_path: Path = args.config.expanduser().resolve()
     cfg = _load_server_config(config_path)
 
-    bind: str = cfg["server"]["bind"]
     server_cfg = cfg["server"]
+    # None when this workstation hosts only for the machine it is on.
+    bind: str | None = server_cfg.get("bind") or None
 
     # Resolved up front (not only in the default branch) because the ipc
     # endpoint is derived from it, and a client computes the same path from its
@@ -132,10 +153,13 @@ def main(argv: list[str] | None = None) -> int:
     # over an ipc:// socket derived from the config dir, so they need no
     # discovery and are unaffected by the tcp bind being reconfigured. The
     # tcp:// bind stays for remote clients. One socket, two endpoints.
-    binds = [bind]
+    ipc_enabled = bool(server_cfg.get("ipc", True))
     ipc_endpoint = workspace_ipc_endpoint(config_dir)
-    if server_cfg.get("ipc", True):
-        binds.append(ipc_endpoint)
+    binds = ([bind] if bind else []) + ([ipc_endpoint] if ipc_enabled else [])
+    if not bind:
+        log.info(
+            "No tcp bind configured; serving this machine only over %s", ipc_endpoint
+        )
 
     server = WireServer(
         bind=binds,
@@ -158,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     advertise_server(
         config_dir,
         bind=bind,
-        ipc=ipc_endpoint if server_cfg.get("ipc", True) else None,
+        ipc=ipc_endpoint if ipc_enabled else None,
     )
     try:
         log.info("WireServer ready on %s — Ctrl-C to exit", ", ".join(binds))

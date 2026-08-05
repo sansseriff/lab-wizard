@@ -4,6 +4,8 @@ import importlib
 import inspect
 import logging
 
+from pydantic import BaseModel
+
 from lab_wizard.lib.plotters.plotter import GenericPlotter
 from lab_wizard.lib.savers.saver import GenericSaver
 from lab_wizard.wizard.backend.models import (
@@ -44,6 +46,67 @@ def _classify_field(field_type) -> tuple[str, bool, type | None]:
     return ("instrument", is_list, element)
 
 
+def _resources_class_for_template(env: Env, template_file: Path, verbose: bool = False):
+    """The ``*Resources`` dataclass a setup template declares, or ``None``.
+
+    The single place a measurement states what it needs — both its resource
+    roles and its typed params model — so everything derived from a measurement
+    reads it from here rather than keeping a parallel list.
+    """
+    rel_path = template_file.relative_to(env.base_dir)
+    module_name = "lab_wizard.lib." + str(rel_path.with_suffix("")).replace("/", ".")
+    if verbose:
+        logger.debug("Importing template module: %s", module_name)
+
+    module = importlib.import_module(module_name)
+
+    for name, obj in inspect.getmembers(module, inspect.isclass):
+        if (
+            name.endswith("Resources")
+            and hasattr(obj, "__annotations__")
+            and obj.__module__ == module.__name__
+        ):
+            return obj
+    return None
+
+
+def params_model_for_measurement(measurement: MeasurementInfo) -> Optional[type]:
+    """The typed params model a measurement declares, or ``None`` if it has none.
+
+    Read from the template's ``params`` annotation rather than a lookup table
+    keyed by measurement name. Measurements are *discovered* from the directory,
+    so any table of theirs is a second list that silently falls out of date: a
+    new measurement would appear in the UI, generate a project, and get an empty
+    ``measurement.params`` block with nothing reporting why.
+
+    Reading the annotation also means the default can never disagree with the
+    generated setup file, because it is literally the same declaration the file
+    constructs from.
+    """
+    template_file = _template_file_for(measurement.measurement_dir)
+    if not template_file.exists():
+        return None
+    lib_base = _find_lib_base(template_file.parent)
+    if lib_base is None:
+        return None
+
+    resources_class = _resources_class_for_template(Env(base_dir=lib_base), template_file)
+    if resources_class is None:
+        return None
+
+    model = resources_class.__annotations__.get("params")
+    if isinstance(model, type) and issubclass(model, BaseModel):
+        return model
+    if model is not None:
+        logger.warning(
+            "%s declares params as %r, which is not a pydantic model; the "
+            "generated project will have an empty params block",
+            template_file.name,
+            model,
+        )
+    return None
+
+
 def _extract_resources_from_template(
     env: Env, template_file: Path, verbose: bool = False
 ) -> List[FilledReq]:
@@ -59,22 +122,7 @@ def _extract_resources_from_template(
     if verbose:
         logger.debug("Running template resource extraction for %s", template_file)
 
-    rel_path = template_file.relative_to(env.base_dir)
-    module_name = "lab_wizard.lib." + str(rel_path.with_suffix("")).replace("/", ".")
-    if verbose:
-        logger.debug("Importing template module: %s", module_name)
-
-    module = importlib.import_module(module_name)
-
-    resources_class = None
-    for name, obj in inspect.getmembers(module, inspect.isclass):
-        if (
-            name.endswith("Resources")
-            and hasattr(obj, "__annotations__")
-            and obj.__module__ == module.__name__
-        ):
-            resources_class = obj
-            break
+    resources_class = _resources_class_for_template(env, template_file, verbose)
 
     if not resources_class:
         logger.warning("No Resources class found in %s", template_file)

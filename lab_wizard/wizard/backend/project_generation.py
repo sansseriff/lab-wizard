@@ -18,6 +18,7 @@ from lab_wizard.lib.utilities.config_io import (
 from lab_wizard.lib.utilities.flat_resource_io import load_resources
 from lab_wizard.wizard.backend.get_measurements import (
     get_measurements,
+    params_model_for_measurement,
     reqs_from_measurement,
 )
 from lab_wizard.wizard.backend.instrument_sources import (
@@ -105,13 +106,17 @@ def _base_type_info(base_type: Any) -> tuple[str, str]:
     raise ValueError(f"Could not resolve base type import for {base_type!r}")
 
 
-def _requirements_for_measurement(measurement_name: str) -> list[FilledReq]:
+def _measurement_info(measurement_name: str):
+    """Look up a discovered measurement by name, or raise."""
     lib_base = Path(__file__).resolve().parents[2] / "lib"
-    env = Env(base_dir=lib_base)
-    all_meas = get_measurements(env)
+    all_meas = get_measurements(Env(base_dir=lib_base))
     if measurement_name not in all_meas:
         raise ValueError(f"Unknown measurement: {measurement_name}")
-    return reqs_from_measurement(all_meas[measurement_name])
+    return all_meas[measurement_name]
+
+
+def _requirements_for_measurement(measurement_name: str) -> list[FilledReq]:
+    return reqs_from_measurement(_measurement_info(measurement_name))
 
 
 def _setup_template_text(measurement_name: str) -> str:
@@ -731,21 +736,36 @@ def _resolve_instrument_selections(
 
 
 def _measurement_param_defaults(measurement_name: str) -> dict[str, Any]:
-    """Default ``measurement.params`` for a measurement, derived from its typed
-    params model so the YAML and the schema can never drift.
+    """Default ``measurement.params`` for a measurement.
 
-    Each entry constructs the model with no overrides and dumps it to plain
-    JSON-compatible values. ``model_validate`` on the same model round-trips it.
+    Derived from the params model the measurement's own template declares, so
+    adding a measurement needs no edit here. This used to be a dict keyed by
+    measurement name while measurements themselves were discovered from the
+    directory — meaning a new one generated a project with an empty params
+    block and nothing said why.
+
+    The model is constructed with no overrides and dumped to plain JSON-
+    compatible values; ``model_validate`` on the same model round-trips it.
     """
-    from lab_wizard.lib.measurements.iv_curve.iv_curve_params import IVCurveParams
-    from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
+    try:
+        measurement = _measurement_info(measurement_name)
+    except ValueError:
+        # An unknown name is the caller's error to report, not this function's:
+        # generate_measurement_project resolves requirements first and raises
+        # there, so nothing reaches here with a bad name in the real flow.
+        logger.info("No measurement named '%s'; no param defaults", measurement_name)
+        return {}
 
-    params_models: dict[str, type[BaseModel]] = {
-        "iv_curve": IVCurveParams,
-        "pcr_curve": PCRCurveParams,
-    }
-    model = params_models.get(measurement_name)
+    model = params_model_for_measurement(measurement)
     if model is None:
+        # Legitimate for a measurement with no tunable parameters, so not an
+        # error — but worth saying, since the alternative reading is a typo in
+        # the template's params annotation.
+        logger.info(
+            "Measurement '%s' declares no params model; its project will have an "
+            "empty measurement.params block",
+            measurement_name,
+        )
         return {}
     return model().model_dump(mode="json")
 

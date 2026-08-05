@@ -63,6 +63,16 @@ def _workspace_name(path: Optional[str]) -> str:
     return Path(path).name or "server"
 
 
+def _dial_form(url: str) -> str:
+    """Normalize a URL for comparison.
+
+    A server binds ``0.0.0.0`` to accept anyone but is dialled on loopback, so
+    the same endpoint has two spellings; comparing them raw would treat one
+    server as two.
+    """
+    return url.replace("://0.0.0.0:", "://127.0.0.1:").replace("://*:", "://127.0.0.1:")
+
+
 def _unique(name: str, taken: set[str]) -> str:
     """A source name not already in use.
 
@@ -199,19 +209,26 @@ def list_instrument_sources(config_dir: str | Path) -> dict[str, Any]:
     """
     from lab_wizard.wizard.backend.remote_servers import load_remote_servers
 
-    config_dir = str(config_dir)
+    # Resolved, because a server advertises its resolved config dir; comparing
+    # raw strings would make this workspace's own daemon look like someone
+    # else's whenever the path crosses a symlink.
+    config_dir = str(Path(config_dir).expanduser().resolve())
     sources: list[dict[str, Any]] = [_local_source(config_dir)]
     taken: set[str] = {LOCAL}
     own_server: Optional[dict[str, Any]] = None
+    # Every endpoint any machine-local daemon answers on, so an address-book
+    # entry naming one of them is recognised as the same server.
+    on_this_machine: set[str] = set()
 
     for entry in list_local_servers():
         endpoints = local_server_endpoints(entry)
         if not endpoints:
             continue
+        on_this_machine.update(_dial_form(e) for e in endpoints)
         # ipc first (see local_server_endpoints) — the endpoint that grants
         # edit rights and needs no port.
         url = endpoints[0]
-        if entry.get("config_dir") == config_dir:
+        if str(Path(entry.get("config_dir", "")).expanduser().resolve()) == config_dir:
             own_server = {
                 "name": _unique(_workspace_name(entry.get("workspace_path")), taken),
                 "url": url,
@@ -222,6 +239,17 @@ def list_instrument_sources(config_dir: str | Path) -> dict[str, Any]:
         sources.append(_machine_source(entry, name, url))
 
     for server in load_remote_servers(config_dir):
+        # A daemon on this machine is already listed above, with a tree and edit
+        # rights. It also lands in the address book — generation registers it
+        # there so projects can resolve the name — so without this it would
+        # appear a second time, as a strictly worse read-only copy of itself.
+        if _dial_form(server["url"]) in on_this_machine:
+            logger.debug(
+                "Address-book entry %s points at a daemon on this machine; "
+                "already listed as a same-machine source",
+                server["name"],
+            )
+            continue
         sources.append(_remote_source(_unique(server["name"], taken), server["url"]))
 
     return {"sources": sources, "own_server": own_server}

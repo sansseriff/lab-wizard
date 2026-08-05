@@ -1,5 +1,10 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+
+from lab_wizard.lib.instruments.general.behavior import (
+    CONTAINER,
+    InstrumentBehavior,
+)
 from typing import (
     Any,
     TypeVar,
@@ -549,7 +554,7 @@ class Child(Instrument, ABC, Generic[R, P_child]):
 ChanT = TypeVar("ChanT")
 
 
-class ChannelProvider(ABC, Generic[ChanT]):
+class ChannelProvider(InstrumentBehavior, Generic[ChanT], specificity=CONTAINER):
     """Mixin for any instrument that internally manages a fixed collection of channel objects.
 
     Provides a small convenience API and an abstract contract that ``channels`` exists.

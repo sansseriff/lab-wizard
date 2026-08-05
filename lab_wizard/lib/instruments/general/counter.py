@@ -6,10 +6,12 @@ Date: June 4, 2025
 Abstract base class for counter instruments.
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+
+from lab_wizard.lib.instruments.general.behavior import TERMINAL, InstrumentBehavior
 
 
-class Counter(ABC):
+class Counter(InstrumentBehavior, specificity=TERMINAL):
     """
     Abstract base class for counter instruments.
 

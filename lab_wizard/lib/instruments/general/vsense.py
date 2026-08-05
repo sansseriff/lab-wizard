@@ -6,10 +6,12 @@ Date: June 4, 2025
 Abstract base class for sensing instruments (multimeters, counters, oscilloscopes, etc.)
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+
+from lab_wizard.lib.instruments.general.behavior import TERMINAL, InstrumentBehavior
 
 
-class VSense(ABC):
+class VSense(InstrumentBehavior, specificity=TERMINAL):
     """Abstract base class for single-channel sensing instruments.
 
     Rationale for simplification:

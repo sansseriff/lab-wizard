@@ -19,8 +19,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 import zmq
 
@@ -231,16 +232,26 @@ class WireServer:
     def tree_get(self) -> dict[str, Any]:
         """The instrument tree this server hosts, shaped for the wizard's UI.
 
-        Read-only. Deliberately the same shape ``/api/manage-instruments``
-        already returns, so the existing tree components render a remote
-        server's tree with no change beyond where the data came from.
+        Read-only, and **same-machine only**. The tree is the surface you edit
+        from: its hash keys, parent chains and per-root transport facts are what
+        ``tree_add`` / ``tree_remove`` operate on, and a remote peer may not
+        call those. Serving it over tcp would invite a client to render an
+        editable-looking hierarchy the wire then refuses to act on — so the
+        restriction lives here rather than in whichever page happens to ask.
 
-        Carries transport facts per root so a node can show whether it is
-        exclusive or shared and whether it is currently held — that is the
-        difference between "this rack is busy" and "this rack is configured".
+        A remote peer is not left blind: ``list_descriptions`` gives it one
+        entry per named leaf, which is exactly what read + call needs.
+
+        Deliberately the same shape ``/api/manage-instruments`` already returns,
+        so the existing tree components render another workspace's tree with no
+        change beyond where the data came from. Carries transport facts per root
+        so a node can show whether it is exclusive or shared and whether it is
+        currently held — the difference between "this rack is busy" and "this
+        rack is configured".
         """
         from lab_wizard.lib.utilities.config_io import get_configured_tree
 
+        require_local("Reading the instrument tree")
         config_dir = self._config_dir
         if config_dir is None:
             raise ValueError(
@@ -314,11 +325,11 @@ class WireServer:
 
         from lab_wizard.lib.utilities.config_io import add_instrument_chain
 
-        for step in chain:
-            self._refuse_if_held(step.get("key"), "reconfigure")
-
-        result = add_instrument_chain(config_dir, chain)
-        self._reload_tree("tree_add")
+        with self._tree_write_lock():
+            for step in chain:
+                self._refuse_if_held(step.get("key"), "reconfigure")
+            result = add_instrument_chain(config_dir, chain)
+            self._reload_tree("tree_add")
         self._events.record(
             "tree.add",
             "Added "
@@ -336,9 +347,10 @@ class WireServer:
 
         from lab_wizard.lib.utilities.config_io import remove_instrument
 
-        self._refuse_if_held(key, "remove")
-        result = remove_instrument(config_dir, type, key)
-        self._reload_tree("tree_remove")
+        with self._tree_write_lock():
+            self._refuse_if_held(key, "remove")
+            result = remove_instrument(config_dir, type, key)
+            self._reload_tree("tree_remove")
         self._events.record(
             "tree.remove",
             f"Removed {type} ({key}) from the instrument tree",
@@ -355,9 +367,10 @@ class WireServer:
 
         from lab_wizard.lib.utilities.config_io import reinitialize_instrument
 
-        self._refuse_if_held(key, "reset")
-        result = reinitialize_instrument(config_dir, type, key)
-        self._reload_tree("tree_reset")
+        with self._tree_write_lock():
+            self._refuse_if_held(key, "reset")
+            result = reinitialize_instrument(config_dir, type, key)
+            self._reload_tree("tree_reset")
         self._events.record(
             "tree.reset",
             f"Reset {type} ({key}) to defaults",
@@ -381,6 +394,22 @@ class WireServer:
             )
         return self._config_dir
 
+    def _roots_containing(self, key: str) -> set[str]:
+        """Root paths whose subtree contains a node with this hash ``key``.
+
+        A chain step or a removal target may name a *child*, whose key is a
+        segment somewhere inside a path rather than a root. Reconfiguring it
+        still rebuilds the index under its root, so the root is what must be
+        free — resolving the key to its owning root is the difference between
+        the guard firing and silently passing.
+        """
+        owners: set[str] = set()
+        for path in self._registry.list_paths():
+            body = path[len(PATH_PREFIX):]
+            if key in body.split("/"):
+                owners.add(root_path(path))
+        return owners
+
     def _refuse_if_held(self, key: Optional[str], verb: str) -> None:
         """Refuse to reconfigure a rack whose hardware is currently open.
 
@@ -391,15 +420,44 @@ class WireServer:
         new table — two locks for one physical bus, which is the Prologix
         desync. Requiring the rack to be free removes all three, and the fix is
         a Release away.
+
+        The key is resolved to whichever roots contain it. Testing
+        ``inst://<key>`` directly only ever matched a top-level ``use_existing``
+        step: a ``create_new`` step carries a raw hardware address and a child
+        step carries a child hash, so neither formed a real root path and the
+        check passed for exactly the edits most likely to disturb live hardware.
         """
         if not key:
             return
-        root = f"{PATH_PREFIX}{key}"
-        if root in self._registry.held_roots():
+        held = self._registry.held_roots()
+        blocking = sorted(self._roots_containing(key) & held)
+        if blocking:
             raise ValueError(
-                f"Cannot {verb} {root} while its hardware is open. Release it "
-                "first (Hardware & Servers → Release), then try again."
+                f"Cannot {verb} {', '.join(blocking)} while its hardware is open. "
+                "Release it first (Hardware & Servers → Release), then try again."
             )
+
+    @contextmanager
+    def _tree_write_lock(self) -> Iterator[None]:
+        """Hold every transport lock across a config change.
+
+        ``_refuse_if_held`` establishes that no rack is *currently* open, but on
+        its own that is a check-then-act: a call could resolve a path in the
+        window before the index is replaced. Holding the locks makes the check
+        and the swap one step.
+
+        Every root, not just the edited one — the reload replaces the whole lock
+        table, so a concurrent call on an *unrelated* root would end up holding a
+        lock from the old table while later calls take one from the new. Two
+        locks for one bus is the desync this exists to prevent. Tree writes are
+        rare and calls take exactly one lock, so acquiring in sorted order cannot
+        deadlock.
+        """
+        roots = sorted({root_path(p) for p in self._registry.list_paths()})
+        with ExitStack() as stack:
+            for root in roots:
+                stack.enter_context(self._registry.transport_lock(root))
+            yield
 
     def _refuse_if_leased(self, path: str) -> None:
         """Decline to open hardware another process has claimed.

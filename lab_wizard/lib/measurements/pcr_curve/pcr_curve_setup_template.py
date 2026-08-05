@@ -12,7 +12,6 @@ from typing import cast
 
 from lab_wizard.lib.client.composite_resources import CompositeResources
 from lab_wizard.lib.client.preflight import preflight_local_project
-from lab_wizard.lib.client.remote_resources import RemoteResources
 from lab_wizard.lib.client.server_discovery import load_server_urls
 from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
@@ -77,8 +76,11 @@ if __name__ == "__main__":
 
     resource_source: object | None = None
     if args.remote:
-        # Explicit override: route every instrument through one server.
-        resource_source = RemoteResources.connect(args.remote)
+        # Explicit override: route every *instrument* through one server. Savers
+        # and plotters stay local — they write this machine's database and draw
+        # on this machine's screen — which is why this is a composite rather
+        # than a bare RemoteResources.
+        resource_source = CompositeResources.all_remote(project, args.remote)
     elif project.resources.instrument_sources:
         # Per-attribute routing declared in the project YAML, so instruments may
         # be split between this machine and one or more servers.

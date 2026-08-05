@@ -32,13 +32,12 @@ import logging
 import threading
 from typing import Any, Callable, Optional, get_args, get_origin
 
+from lab_wizard.lib.instruments.general.behavior import behavior_name_for
 from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
 from lab_wizard.lib.instruments.general.transport import (
     DEFAULT_STATE_AUTHORITY,
     DEFAULT_TRANSPORT_SHARING,
 )
-from lab_wizard.lib.instruments.general.vsense import VSense
-from lab_wizard.lib.instruments.general.vsource import VSource
 from lab_wizard.lib.utilities.model_tree import ResourceConfig
 
 
@@ -61,34 +60,22 @@ def root_path(path: str) -> str:
     return f"{PATH_PREFIX}{body.split('/', 1)[0]}"
 
 
-# Order matters: most specific terminal behavior first. ``describe_*`` returns
-# the first ABC whose check matches.
-_BEHAVIOR_ABCS: tuple[tuple[str, type], ...] = (
-    ("VSource", VSource),
-    ("VSense", VSense),
-    ("ChannelProvider", ChannelProvider),
-)
-
-
 def _behavior_abc_name(obj: Any) -> str | None:
-    """Behavior ABC of a live object (isinstance check)."""
-    for name, abc in _BEHAVIOR_ABCS:
-        if isinstance(obj, abc):
-            return name
-    return None
+    """Behavior ABC of a live object (isinstance check).
+
+    The set of behaviors is not listed here. Each one registers itself when its
+    module is imported (see ``instruments/general/behavior.py``), and an object
+    cannot exist without its bases having been imported — so every behavior this
+    object satisfies is registered by the time we ask.
+    """
+    return behavior_name_for(obj)
 
 
 def _behavior_abc_for_class(cls: type | None) -> str | None:
     """Behavior ABC of an instrument *class* (issubclass check, no instance)."""
     if cls is None:
         return None
-    for name, abc in _BEHAVIOR_ABCS:
-        try:
-            if issubclass(cls, abc):
-                return name
-        except TypeError:
-            continue
-    return None
+    return behavior_name_for(cls, is_class=True)
 
 
 def _channel_class(parent_inst_cls: type | None) -> type | None:

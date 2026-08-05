@@ -6,9 +6,33 @@
 	import Plus from 'phosphor-svelte/lib/Plus';
 	import { fetchWithConfig } from '../../api';
 
+	type AttributeEntry = {
+		attribute_name: string;
+		path: string;
+		behavior_abc: string | null;
+		type_hint: string | null;
+	};
+	type InstrumentMeta = { type: string; class_name: string };
+	type Source = {
+		name: string;
+		kind: 'local' | 'machine' | 'remote';
+		label: string;
+		url: string | null;
+		tree: TreeItem[] | null;
+		metadata: Record<string, InstrumentMeta>;
+		attributes: AttributeEntry[];
+		reachable: boolean;
+		error: string | null;
+	};
 	type Selection = {
 		id: string;
 		variableName: string;
+		source: string;
+		sourceLabel: string;
+		sourceKind: 'local' | 'machine' | 'remote';
+		// Set for a routed selection; a local one is resolved from its tree path.
+		attribute: string | null;
+		behaviorAbc: string | null;
 		type: string;
 		key: string;
 		pathRootToLeaf: TreePathRef[];
@@ -19,6 +43,7 @@
 	};
 
 	type PendingChannelChoice = {
+		source: Source;
 		node: TreeItem;
 		pathRootToLeaf: TreePathRef[];
 		channelCount: number;
@@ -27,7 +52,11 @@
 	};
 
 	let { data } = $props();
-	const tree: TreeItem[] = (data?.tree ?? []) as TreeItem[];
+	const sources: Source[] = (data?.sources ?? []) as Source[];
+	// Sources offering a browsable tree: this workspace, and other workspaces'
+	// daemons on this machine. A remote machine is flat by design.
+	const treeSources = $derived(sources.filter((s) => s.tree !== null));
+	const flatSources = $derived(sources.filter((s) => s.tree === null));
 
 	let selections = $state<Selection[]>([]);
 	let pickingMode = $state(false);
@@ -54,8 +83,20 @@
 		return `sel_${selectionCounter}`;
 	}
 
-	function pathKey(path: TreePathRef[]): string {
-		return path.map((p) => `${p.type}:${p.key}`).join('|');
+	// Source-qualified: two workspaces can hold the same instrument at the same
+	// hash key, and comparing paths alone would confuse one for the other.
+	function pathKey(source: string, path: TreePathRef[]): string {
+		return `${source}::${path.map((p) => `${p.type}:${p.key}`).join('|')}`;
+	}
+
+	/** attribute_name of a tree node, or of one of its channels. */
+	function attributeOf(node: TreeItem, channelIndex: number | null): string | null {
+		if (channelIndex !== null) {
+			const channels = node.fields?.channels;
+			const channel = channels?.[channelIndex] ?? channels?.[String(channelIndex)];
+			return channel?.attribute_name || null;
+		}
+		return node.fields?.attribute_name || null;
 	}
 	function pathDisplay(path: TreePathRef[]): string {
 		return path.map((p) => `${p.type}(${p.key})`).join(' -> ');
@@ -77,6 +118,7 @@
 	}
 
 	function addSelectionFromNode(
+		source: Source,
 		node: TreeItem,
 		rootToLeaf: TreePathRef[],
 		channelIndex: number | null
@@ -89,19 +131,26 @@
 			pathRootToLeaf: rootToLeaf,
 			pathLeafToRoot: [...rootToLeaf].reverse(),
 			pathDisplay: pathDisplay(rootToLeaf),
-			pathKey: pathKey(rootToLeaf) + (channelIndex !== null ? `#ch${channelIndex}` : ''),
-			channelIndex
+			pathKey:
+				pathKey(source.name, rootToLeaf) + (channelIndex !== null ? `#ch${channelIndex}` : ''),
+			channelIndex,
+			source: source.name,
+			sourceLabel: source.label,
+			sourceKind: source.kind,
+			attribute: source.kind === 'local' ? null : attributeOf(node, channelIndex),
+			behaviorAbc: null
 		};
 		selections.push(sel);
 		// If we just added the second selection while file style is "simple", force dataclass
 		if (selections.length > 1 && fileStyle === 'simple') fileStyle = 'dataclass';
 	}
 
-	function onSelectTreeNode(node: TreeItem, rootToLeaf: TreePathRef[]) {
+	function onSelectTreeNode(source: Source, node: TreeItem, rootToLeaf: TreePathRef[]) {
 		if (!pickingMode) return;
 		const cc = channelCount(node);
 		if (cc > 1) {
 			pending = {
+				source,
 				node,
 				pathRootToLeaf: rootToLeaf,
 				channelCount: cc,
@@ -110,14 +159,37 @@
 			};
 			return;
 		}
-		addSelectionFromNode(node, rootToLeaf, null);
+		addSelectionFromNode(source, node, rootToLeaf, null);
 		pickingMode = false;
 		pending = null;
 	}
 
+	/** A named leaf from a remote machine: no tree position, nothing to expand. */
+	function onSelectAttribute(source: Source, entry: AttributeEntry) {
+		if (!pickingMode) return;
+		selections.push({
+			id: nextId(),
+			variableName: shortName(entry.attribute_name),
+			source: source.name,
+			sourceLabel: source.label,
+			sourceKind: source.kind,
+			attribute: entry.attribute_name,
+			behaviorAbc: entry.behavior_abc,
+			type: entry.type_hint ?? '',
+			key: '',
+			pathRootToLeaf: [],
+			pathLeafToRoot: [],
+			pathDisplay: `${entry.attribute_name} on ${source.label}`,
+			pathKey: `${source.name}::@${entry.attribute_name}`,
+			channelIndex: null
+		});
+		if (selections.length > 1 && fileStyle === 'simple') fileStyle = 'dataclass';
+		pickingMode = false;
+	}
+
 	function chooseWholeInstrument() {
 		if (!pending) return;
-		addSelectionFromNode(pending.node, pending.pathRootToLeaf, null);
+		addSelectionFromNode(pending.source, pending.node, pending.pathRootToLeaf, null);
 		pending = null;
 		pickingMode = false;
 	}
@@ -136,7 +208,7 @@
 		if (!pending) return;
 		const indices = Array.from(pending.picked).sort((a, b) => a - b);
 		for (const idx of indices) {
-			addSelectionFromNode(pending.node, pending.pathRootToLeaf, idx);
+			addSelectionFromNode(pending.source, pending.node, pending.pathRootToLeaf, idx);
 		}
 		pending = null;
 		pickingMode = false;
@@ -146,10 +218,10 @@
 		selections = selections.filter((s) => s.id !== id);
 	}
 
-	function selectionLabelForAny(_node: TreeItem, path: TreePathRef[]): string | null {
-		const k = pathKey(path);
+	function selectionLabelForAny(source: Source, path: TreePathRef[]): string | null {
+		const k = pathKey(source.name, path);
 		const labels = selections
-			.filter((s) => pathKey(s.pathRootToLeaf) === k)
+			.filter((s) => pathKey(s.source, s.pathRootToLeaf) === k)
 			.map((s) =>
 				s.channelIndex !== null ? `${s.variableName} [ch${s.channelIndex}]` : s.variableName
 			);
@@ -181,7 +253,10 @@
 					type: s.type,
 					key: s.key,
 					path: s.pathLeafToRoot,
-					channel_index: s.channelIndex
+					channel_index: s.channelIndex,
+					source: s.source,
+					attribute: s.attribute,
+					behavior_abc: s.behaviorAbc
 				})),
 				project_prefix: projectPrefix.trim() || 'custom_resource',
 				generation_style: generationStyle,
@@ -333,6 +408,14 @@
 								placeholder="variable_name"
 							/>
 							<div class="text-[11px] text-gray-600 dark:text-gray-300">
+								{#if s.source !== 'local'}
+									<span
+										class="mr-1 rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300"
+										title="Used through this server rather than opened by the generated file"
+									>
+										{s.sourceLabel}
+									</span>
+								{/if}
 								{s.pathDisplay}
 								{#if s.channelIndex !== null}
 									<span class="ml-1">ch: {s.channelIndex}</span>
@@ -415,10 +498,10 @@
 		</div>
 	{/if}
 
-	<!-- Tree -->
+	<!-- Sources -->
 	<section class="space-y-2" class:opacity-40={!pickingMode} class:pointer-events-none={!pickingMode}>
 		<div class="flex items-center justify-between">
-			<h2 class="text-lg font-medium">Configured tree</h2>
+			<h2 class="text-lg font-medium">Where instruments come from</h2>
 			<div class="text-xs text-gray-600 dark:text-gray-300">
 				{#if pickingMode}
 					Selection mode: <span class="font-medium">click any node</span>
@@ -427,27 +510,94 @@
 				{/if}
 			</div>
 		</div>
-		<ScrollArea
-			class="relative overflow-hidden rounded-xl border border-gray-200 bg-white/70 p-3 shadow-sm transition-opacity dark:border-white/10 dark:bg-gray-800/70"
-			orientation="vertical"
-			viewportClasses="h-full max-h-[420px] w-full"
-		>
-			{#if tree.length === 0}
-				<div class="px-2 py-3 text-sm text-gray-600 dark:text-gray-300">
-					No configured instruments found.
+
+		{#each treeSources as source (source.name)}
+			<div class="rounded-xl border border-gray-200 bg-white/70 shadow-sm dark:border-white/10 dark:bg-gray-800/70">
+				<div class="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
+					<span class="text-sm font-medium">{source.label}</span>
+					{#if source.kind === 'machine'}
+						<span
+							class="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300"
+							title="Used through that workspace's server, so it never contends with local hardware."
+						>
+							through server
+						</span>
+					{/if}
 				</div>
-			{:else}
-				{#each tree as node}
-					<TreeNode
-						{node}
-						isSelectable={pickingMode && pending === null}
-						isCompatible={() => true}
-						selectionLabel={(n, p) => selectionLabelForAny(n, p)}
-						onSelect={onSelectTreeNode}
-					/>
-				{/each}
-			{/if}
-		</ScrollArea>
+				<ScrollArea
+					class="relative overflow-hidden p-3"
+					orientation="vertical"
+					viewportClasses="h-full max-h-[320px] w-full"
+				>
+					{#if !source.reachable}
+						<div class="px-2 py-3 text-sm text-amber-700 dark:text-amber-400">
+							Not reachable: {source.error ?? 'no answer'}
+						</div>
+					{:else if (source.tree ?? []).length === 0}
+						<div class="px-2 py-3 text-sm text-gray-600 dark:text-gray-300">
+							No instruments configured here.
+						</div>
+					{:else}
+						{#each source.tree ?? [] as node (node.key)}
+							<TreeNode
+								{node}
+								isSelectable={pickingMode && pending === null}
+								isCompatible={() => true}
+								selectionLabel={(_n, p) => selectionLabelForAny(source, p)}
+								onSelect={(n, p) => onSelectTreeNode(source, n, p)}
+							/>
+						{/each}
+					{/if}
+				</ScrollArea>
+			</div>
+		{/each}
+
+		<!-- Remote machines: named leaves only. A tcp peer gets read + call, so
+		     there is no tree to browse and nothing to reconfigure. -->
+		{#each flatSources as source (source.name)}
+			<div class="rounded-xl border border-gray-200 bg-white/70 shadow-sm dark:border-white/10 dark:bg-gray-800/70">
+				<div class="flex items-center justify-between border-b border-gray-100 px-3 py-2 dark:border-gray-700">
+					<span class="text-sm font-medium">{source.label}</span>
+					<span class="font-mono text-[10px] text-gray-400">{source.url}</span>
+				</div>
+				<div class="max-h-[320px] overflow-y-auto p-3">
+					{#if !source.reachable}
+						<div class="px-2 py-2 text-sm text-amber-700 dark:text-amber-400">
+							Not reachable: {source.error ?? 'no answer'}
+						</div>
+					{:else if source.attributes.length === 0}
+						<div class="px-2 py-2 text-sm text-gray-600 dark:text-gray-300">
+							No named instruments there.
+						</div>
+					{:else}
+						<div class="grid gap-1.5 sm:grid-cols-2">
+							{#each source.attributes as entry (entry.attribute_name)}
+								<button
+									class="rounded border border-gray-200 px-3 py-2 text-left text-sm hover:border-indigo-300 disabled:opacity-50 dark:border-gray-600"
+									disabled={!pickingMode || pending !== null}
+									onclick={() => onSelectAttribute(source, entry)}
+								>
+									<div class="font-mono text-xs font-medium">{entry.attribute_name}</div>
+									<div class="text-[11px] text-gray-500">
+										{entry.type_hint ?? 'instrument'}
+										{#if entry.behavior_abc}· {entry.behavior_abc}{/if}
+									</div>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			</div>
+		{/each}
+
+		{#if treeSources.length === 0 && flatSources.length === 0}
+			<div class="rounded-xl border border-gray-200 px-3 py-4 text-sm text-gray-600 dark:border-white/10 dark:text-gray-300">
+				No instrument sources found. Add instruments in
+				<a class="text-indigo-600 hover:underline" href="/manage_instruments">Manage Instruments</a>,
+				or register a server on
+				<a class="text-indigo-600 hover:underline" href="/manage_remote_servers">Remote Servers</a>.
+			</div>
+		{/if}
 	</section>
 
 	{#if createResult}

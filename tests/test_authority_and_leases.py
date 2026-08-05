@@ -64,6 +64,43 @@ def test_a_same_machine_client_on_tcp_gets_the_smaller_set():
         reset_current_peer(token)
 
 
+def test_reading_the_tree_is_same_machine_only(tmp_path):
+    """A remote peer gets named leaves, never the hierarchy.
+
+    The tree is the surface you edit from — its hash keys and parent chains are
+    what tree_add/tree_remove operate on, and those are refused over tcp. Serving
+    it anyway would invite a client to draw an editable-looking hierarchy the
+    wire will not act on, so the restriction belongs on the wire rather than in
+    whichever page happens to ask.
+    """
+    registry = InstrumentRegistry.from_instruments({})
+    server = WireServer(
+        bind=["ipc:///tmp/a.sock"], registry=registry, config_dir=str(tmp_path)
+    )
+
+    token = set_current_peer(Peer(transport="tcp", identity="elsewhere"))
+    try:
+        with pytest.raises(LocalOnlyError):
+            server.tree_get()
+        # Still allowed what read + call actually needs.
+        assert server.list_descriptions() == []
+        assert server.list_attributes() == {}
+    finally:
+        reset_current_peer(token)
+
+
+def test_an_ipc_peer_may_read_the_tree(tmp_path):
+    registry = InstrumentRegistry.from_instruments({})
+    server = WireServer(
+        bind=["ipc:///tmp/a.sock"], registry=registry, config_dir=str(tmp_path)
+    )
+    token = set_current_peer(Peer(transport="ipc", identity="same-machine"))
+    try:
+        assert server.tree_get()["config_dir"] == str(tmp_path)
+    finally:
+        reset_current_peer(token)
+
+
 def test_wire_server_splits_sockets_by_transport():
     """One socket per transport, because ZMQ cannot report arrival endpoint."""
     registry = InstrumentRegistry.from_instruments({})

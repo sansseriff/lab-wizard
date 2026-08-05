@@ -148,8 +148,17 @@ def main() -> int:
     from typing import Type, cast
 
     from lab_wizard.lib.client.proxies.base import RemoteProxy
+    from lab_wizard.lib.instruments.general.behavior import (
+        TERMINAL,
+        InstrumentBehavior,
+        _REGISTERED as _BEHAVIOR_TABLE,
+    )
 
-    class FakeBehavior(ABC):
+    def _unregister_behavior(cls: type) -> None:
+        """Drop a test-only behavior so it cannot leak into other tests."""
+        _BEHAVIOR_TABLE.pop(cls, None)
+
+    class FakeBehavior(InstrumentBehavior, specificity=TERMINAL):
         @abstractmethod
         def do_thing(self, x: float, y: float) -> float: ...
 
@@ -192,13 +201,11 @@ def main() -> int:
     # proxies/registry.py; here we do it ad-hoc for the test and restore on
     # exit so we don't leak state into other tests.
     from lab_wizard.lib.client.proxies.registry import PROXY_BY_BEHAVIOR_ABC
-    import lab_wizard.lib.server.registry as _server_reg
 
+    # Declaring FakeBehavior above already registered it server-side, so only
+    # the client's proxy table needs the ad-hoc entry. In production both sides
+    # are wired at import time in proxies/registry.py.
     PROXY_BY_BEHAVIOR_ABC["FakeBehavior"] = cast(Type[RemoteProxy], RemoteFake)
-    _orig_behavior_abcs = _server_reg._BEHAVIOR_ABCS  # pyright: ignore[reportPrivateUsage]
-    _server_reg._BEHAVIOR_ABCS = (  # pyright: ignore[reportPrivateUsage]
-        ("FakeBehavior", FakeBehavior),
-    ) + _orig_behavior_abcs
 
     resources2 = RemoteResources.connect(bind, timeout_ms=3000)
     try:
@@ -239,8 +246,8 @@ def main() -> int:
         )
     finally:
         resources2.close()
-        _server_reg._BEHAVIOR_ABCS = _orig_behavior_abcs  # pyright: ignore[reportPrivateUsage]
         PROXY_BY_BEHAVIOR_ABC.pop("FakeBehavior", None)
+        _unregister_behavior(FakeBehavior)
 
     server.stop()
     server_thread.join(timeout=2)

@@ -6,6 +6,7 @@ type TreeItem = {
     key: string;
     fields: Record<string, any>;
     children: Record<string, TreeItem>;
+    num_channels?: number;
 };
 
 type InstrumentMeta = {
@@ -21,20 +22,39 @@ type InstrumentMeta = {
     key_hint: string | null;
 };
 
-type ManageData = {
-    tree: TreeItem[];
+type AttributeEntry = {
+    attribute_name: string;
+    path: string;
+    behavior_abc: string | null;
+    type_hint: string | null;
+};
+
+/** One place instruments can come from. See backend/instrument_sources.py.
+ *
+ * `tree` is null for a remote-machine source: a tcp peer gets read + call and
+ * never reconfiguration, so it is offered as a flat list of named leaves.
+ */
+type Source = {
+    name: string;
+    kind: 'local' | 'machine' | 'remote';
+    label: string;
+    url: string | null;
+    config_dir: string | null;
+    tree: TreeItem[] | null;
     metadata: Record<string, InstrumentMeta>;
+    attributes: AttributeEntry[];
+    editable: boolean;
+    reachable: boolean;
+    error: string | null;
 };
 
 export const load = async () => {
-    if (!browser) {
-        return { tree: [] as TreeItem[], metadata: {} as Record<string, InstrumentMeta> };
-    }
-    const manageData = await fetchWithConfig<ManageData>('/api/manage-instruments', 'GET');
-    return {
-        tree: manageData?.tree ?? [],
-        metadata: manageData?.metadata ?? {}
-    };
+    if (!browser) return { sources: [] as Source[] };
+    const sourceData = await fetchWithConfig<{ sources: Source[] }>(
+        '/api/instrument-sources',
+        'GET'
+    );
+    return { sources: sourceData?.sources ?? [] };
 };
 
 export const prerender = true;

@@ -6,12 +6,13 @@ Date: June 4, 2025
 Abstract base class for source instruments (voltage/current sources, signal generators, etc.)
 """
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
+from lab_wizard.lib.instruments.general.behavior import TERMINAL, InstrumentBehavior
 from lab_wizard.lib.instruments.general.state_effects import Arg
 
 
-class VSource(ABC):
+class VSource(InstrumentBehavior, specificity=TERMINAL):
     """
     Abstract base class for all source instruments.
 
