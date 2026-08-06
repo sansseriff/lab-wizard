@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 import logging
 
 logger = logging.getLogger(__name__)
-from pydantic import Field, model_validator
+from pydantic import Field, SerializeAsAny, model_validator
 
-from lab_wizard.lib.instruments.sim900.sim900 import Sim900, Sim900Params
-from lab_wizard.lib.instruments.andoAQ8201A.andoAQ8201A import AndoAQ8201AParams
+from lab_wizard.lib.instruments.general.prologix_children import PrologixChildParams
 from lab_wizard.lib.instruments.general.parent_child import (
     Parent,
     ParentParams,
     ParentFactory,
     Child,
-    ChildParams,
     CanInstantiate,
     USBLike,
     Discoverable,
@@ -26,12 +24,6 @@ from lab_wizard.lib.instruments.general.discovery import (
 )
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixControllerDep
 from lab_wizard.lib.instruments.general.serial import SerialDep, LocalSerialDep
-
-
-# Union of possible child param types on a serial bus (extend as needed)
-PrologixChildParams = Annotated[
-    Sim900Params | AndoAQ8201AParams, Field(discriminator="type")
-]
 
 
 class PrologixGPIBParams(
@@ -52,7 +44,7 @@ class PrologixGPIBParams(
         default=0.15,
         description="(seconds) pyserial read timeout; also drives ++read_tmo_ms",
     )
-    children: dict[str, PrologixChildParams] = Field(
+    children: dict[str, SerializeAsAny[PrologixChildParams]] = Field(
         default_factory=dict,
     )
 
@@ -60,8 +52,8 @@ class PrologixGPIBParams(
     def _validate(self):
         return self
 
-    @property
-    def inst(self) -> type["PrologixGPIB"]:  # type: ignore[override]
+    @classmethod
+    def resource_class(cls) -> type["PrologixGPIB"]:
         return PrologixGPIB
 
     def create_inst(self) -> "PrologixGPIB":
@@ -144,7 +136,7 @@ class PrologixGPIB(
 
     def instantiate_child(self, child_params: Any, *, key: str | None = None) -> Child[Any, Any]:
         gpib_dep = self._dep.addressed(int(child_params.gpib_address))
-        child = child_params.inst(gpib_dep, child_params)  # type: ignore[arg-type]
+        child = type(child_params).resource_class()(gpib_dep, child_params)  # type: ignore[arg-type]
         if key is not None:
             self.children[key] = child
         return child

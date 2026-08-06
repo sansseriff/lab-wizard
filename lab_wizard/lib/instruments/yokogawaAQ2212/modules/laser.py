@@ -2,19 +2,20 @@ from __future__ import annotations
 
 from typing import Literal
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
+from lab_wizard.lib.instruments.yokogawaAQ2212.children import YokogawaAQ2212ModuleParams
 from lab_wizard.lib.instruments.yokogawaAQ2212.comm import YokoAQ2212SlotDep
 
 _c = 299792458.0  # speed of light m/s
 
 
-class LaserParams(SlotLike, ChildParams["Laser"]):
+class LaserParams(SlotLike, YokogawaAQ2212ModuleParams):
     type: Literal["yoko_laser"] = "yoko_laser"
     attribute_name: str = ""
     offline: bool = False
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Laser
 
 
@@ -23,10 +24,6 @@ class Laser(Child[YokoAQ2212SlotDep, LaserParams]):
         self._dep = dep
         self.params = params
         self.slot = dep.slot
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.yokogawaAQ2212.yokogawaAQ2212.YokogawaAQ2212"
 
     def get_status(self) -> int:
         return int(self._dep.query(f"SOUR{self.slot}:POW:STAT?"))

@@ -56,7 +56,9 @@ def create_instrument_resources(
 if __name__ == "__main__":
     import argparse
 
-    from lab_wizard.lib.measurements.iv_curve.iv_curve import IVCurveMeasurement
+    # The wizard copies the procedure beside this setup file so the generated
+    # project is the editable, runnable source of truth.
+    from iv_curve import IVCurveMeasurement
 
     parser = argparse.ArgumentParser()
     parser.add_argument(

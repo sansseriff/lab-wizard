@@ -14,7 +14,7 @@ Configuration comes from the typed
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from lab_procedure import (
     Observation,
@@ -37,9 +37,18 @@ from lab_wizard.lib.task_adapters.instrument_steps import (
 )
 
 if TYPE_CHECKING:
-    from lab_wizard.lib.measurements.iv_curve.iv_curve_setup_template import (
-        IVCurveResources,
-    )
+    from lab_wizard.lib.measurements.iv_curve.iv_curve_params import IVCurveParams
+    from lab_wizard.lib.plotters.plotter import GenericPlotter
+    from lab_wizard.lib.savers.saver import GenericSaver
+
+    class IVCurveResources(Protocol):
+        """Resource contract shared by generated local and composite setups."""
+
+        voltage_source: VSource
+        voltage_sense: VSense
+        savers: list[GenericSaver]
+        plotters: list[GenericPlotter]
+        params: IVCurveParams
 
 
 class MeasureIVPoint(Step):

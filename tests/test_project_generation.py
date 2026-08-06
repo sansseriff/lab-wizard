@@ -102,8 +102,12 @@ def test_generate_project_creates_subset_yaml_and_setup(tmp_path: Path) -> None:
 
     yaml_path = Path(out["yaml_file"])
     setup_path = Path(out["setup_file"])
+    measurement_path = Path(out["measurement_file"])
     assert yaml_path.exists()
     assert setup_path.exists()
+    assert measurement_path.exists()
+    assert measurement_path.name == "iv_curve.py"
+    assert "class IVCurveMeasurement" in measurement_path.read_text(encoding="utf-8")
 
     y = YAML(typ="safe")
     loader: Any = y
@@ -125,6 +129,7 @@ def test_generate_project_creates_subset_yaml_and_setup(tmp_path: Path) -> None:
 
     setup_text = setup_path.read_text(encoding="utf-8")
     ast.parse(setup_text)
+    assert "from iv_curve import IVCurveMeasurement" in setup_text
     assert (
         "from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928"
         in setup_text

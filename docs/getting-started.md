@@ -109,7 +109,9 @@ Each generated project is a timestamped folder under `projects/` containing:
 
 - a `*.yaml` file with the selected subset of instrument/saver/plotter config, and
 - a generated `*_setup.py` that initializes and wires those resources for the
-  measurement.
+  measurement, and
+- a copied `<measurement>.py` containing the editable procedure that the setup
+  runs.
 
 ## Repository and generated workspace layout
 

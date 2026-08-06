@@ -42,6 +42,7 @@ from typing import Any, Dict, Optional, Tuple, List, cast, Iterable
 import hashlib
 import re
 import logging
+import threading
 
 import coolname
 from pydantic import BaseModel
@@ -49,7 +50,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
 # Auto-discovery of Params classes (replaces manual TYPE_REGISTRY)
-from lab_wizard.lib.utilities.params_discovery import load_params_class
+from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
 # KeyLike mixins — used for generic key derivation without hardcoding type strings
 from lab_wizard.lib.instruments.general.parent_child import (
@@ -70,10 +71,27 @@ logger = logging.getLogger("lab_wizard.lib.utilities.config_io")
 _yaml: Any = YAML(typ="rt")
 _yaml.default_flow_style = False
 
+# A ruamel round-trip ``YAML`` object is *not* reentrant: its parser, composer
+# and constructor keep per-document state on the instance itself. Two threads
+# calling ``load`` on one instance interleave that state and produce garbage —
+# in practice a half-built mapping ("Missing/invalid 'type'") or a spurious
+# ``DuplicateKeyError`` on a file that is perfectly well-formed.
+#
+# That matters here because FastAPI dispatches sync endpoints to a threadpool,
+# so any page issuing several config-reading requests at once can collide. The
+# failure is load-dependent, which is what makes it worth a lock rather than a
+# note: it looks like a corrupt config file rather than a race.
+#
+# Reads and writes share one lock. These files are a few hundred bytes, so
+# serialising them costs nothing measurable, and it additionally rules out a
+# reader observing a half-written file.
+_yaml_lock = threading.RLock()
+
 
 def _read_yaml(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
-        loaded: Any = _yaml.load(f)
+        with _yaml_lock:
+            loaded: Any = _yaml.load(f)
         return cast(Dict[str, Any], loaded or {})
 
 
@@ -88,7 +106,8 @@ def _write_yaml(path: Path, data: Any) -> None:
     else:
         data_to_dump = data
     with path.open("w", encoding="utf-8") as f:
-        _yaml.dump(data_to_dump, f)
+        with _yaml_lock:
+            _yaml.dump(data_to_dump, f)
 
 
 def _field_description(model: BaseModel, field_name: str) -> str | None:

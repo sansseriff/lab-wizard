@@ -50,9 +50,19 @@ class Params2Inst(Generic[E_co], ABC):
     such as a communication object from a parent instrument.
     """
 
-    @property
-    @abstractmethod
-    def inst(self) -> type[E_co]: ...
+    @classmethod
+    def resource_class(cls) -> type[E_co]:
+        """Return the runtime class described by this Params class.
+
+        The relationship belongs to the class, not to an individual config.
+        The temporary fallback keeps external Params classes using the former
+        ``inst`` property functional during the API transition.
+        """
+        instance = cls()  # type: ignore[call-arg]
+        legacy = getattr(instance, "inst", None)
+        if isinstance(legacy, type):
+            return legacy
+        raise NotImplementedError(f"{cls.__name__} must define resource_class()")
 
 
 class CanInstantiate(Generic[P_co], ABC):
@@ -68,7 +78,7 @@ class CanInstantiate(Generic[P_co], ABC):
 
     @abstractmethod
     def create_inst(self) -> P_co:
-        # this typically calls self.inst.from_params(self) or similar, possibly using internal deps
+        # this typically calls type(self).resource_class().from_params(self)
         pass
 
     def transport_sharing(self) -> TransportSharing:
@@ -267,14 +277,9 @@ class ChildParams(Instrument, BaseModel, Params2Inst[I_co], Generic[I_co]):
             raise ValueError("Missing required 'type' field")
         return self
 
-    @property
-    @abstractmethod
-    def inst(self) -> type[I_co]: ...
-
-    """
-    This needs to be here even though a very similar property exist in Params2Inst. The key is that
-    here we're specifying that .inst doesn't just return an Instrument, it returns specifically a Child
-    """
+    @classmethod
+    def resource_class(cls) -> type[I_co]:
+        return super().resource_class()
 
 
 R = TypeVar("R", bound=Dependency)
@@ -290,15 +295,43 @@ class ParentParams(BaseModel, Params2Inst[PR_co], Generic[PR_co, R, P]):
     R: Dependency type (e.g., Comm)
     P: ChildParams subtype for children
 
-    REQUIRED IN EVERY CONCRETE SUBCLASS — define a typed children field:
-        children: dict[str, YourChildParamsUnion] = Field(default_factory=dict)
+    REQUIRED IN EVERY CONCRETE SUBCLASS — define a nominal child-family field:
+        children: dict[str, SerializeAsAny[YourChildFamily]] = Field(default_factory=dict)
 
-    This cannot be defined here because each subclass needs a different
-    Annotated union type for Pydantic's discriminator to work. Forgetting
-    it causes a runtime AttributeError on first child access.
+    Raw dictionaries are discriminated through the runtime resource catalog;
+    Pydantic then enforces membership in the annotated nominal family.
     """
 
     enabled: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def parse_registered_children(cls, data: Any) -> Any:
+        """Resolve raw child dictionaries by their catalog discriminator.
+
+        Parent fields use a nominal Params family rather than a closed union,
+        so adding a child driver does not require editing its parent module.
+        The catalog performs the discriminated lookup; normal Pydantic field
+        validation then rejects a resolved child from the wrong family.
+        Already-instantiated children pass through unchanged.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("children"), dict):
+            return data
+        children = data["children"]
+        parsed: dict[Any, Any] = {}
+        changed = False
+        for key, child in children.items():
+            if isinstance(child, dict) and isinstance(child.get("type"), str):
+                from lab_wizard.lib.utilities.resource_catalog import load_params_class
+
+                child_cls = load_params_class(child["type"])
+                parsed[key] = child_cls.model_validate(child)
+                changed = True
+            else:
+                parsed[key] = child
+        if not changed:
+            return data
+        return {**data, "children": parsed}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -317,8 +350,7 @@ class ParentParams(BaseModel, Params2Inst[PR_co], Generic[PR_co, R, P]):
         if not has_children:
             raise TypeError(
                 f"{cls.__name__} inherits ParentParams but does not define a "
-                "'children' field. Add: "
-                "children: dict[str, YourChildUnion] = Field(default_factory=dict)"
+                "'children' field with its accepted nominal Params family"
             )
 
     @model_validator(mode="after")
@@ -328,9 +360,9 @@ class ParentParams(BaseModel, Params2Inst[PR_co], Generic[PR_co, R, P]):
             raise ValueError("Missing required 'type' field")
         return self
 
-    @property
-    @abstractmethod
-    def inst(self) -> type[PR_co]: ...
+    @classmethod
+    def resource_class(cls) -> type[PR_co]:
+        return super().resource_class()
 
 
 class Parent(Instrument, ABC, Generic[R, P]):
@@ -498,22 +530,6 @@ class Child(Instrument, ABC, Generic[R, P_child]):
     ``parent.make_child(key)`` → type-check → return.
     """
 
-    @property
-    @abstractmethod
-    def parent_class(self) -> str:
-        """Fully-qualified class name of the expected parent instrument class.
-
-        !! This property is read statically by params_discovery.py (see
-        _PARENT_CLASS_RETURN regex) to build the parent-child metadata used
-        by the wizard UI and get_parent_chain(). It is NOT called at runtime.
-
-        Removing or renaming this property breaks instrument discovery silently.
-        The return string MUST be a fully-qualified dotted path, e.g.:
-            "lab_wizard.lib.instruments.sim900.sim900.Sim900"
-        !!
-        """
-        pass
-
     @classmethod
     def from_config(cls: type[C], parent: Any, *, key: str) -> C:
         """Construct or retrieve the child instrument for the given hash key.
@@ -557,7 +573,9 @@ ChanT = TypeVar("ChanT")
 class ChannelProvider(InstrumentBehavior, Generic[ChanT], specificity=CONTAINER):
     """Mixin for any instrument that internally manages a fixed collection of channel objects.
 
-    Provides a small convenience API and an abstract contract that ``channels`` exists.
+    Provides a small convenience API and a runtime-visible contract for both
+    ``channels`` and their element class. ``channel_class`` is explicit because
+    generic arguments are not preserved reliably through indirect inheritance.
     Instruments like Sim970, Dac4D, Dac16D inherit from this to guarantee a stable
     interface for higher-level code (measurement orchestration, UI, etc.).
 
@@ -570,7 +588,8 @@ class ChannelProvider(InstrumentBehavior, Generic[ChanT], specificity=CONTAINER)
     method invoked only for channels a client actually uses.
     """
 
-    # Subclasses must set: self.channels: list[ChanT] (dense, one per hardware channel)
+    # Subclasses set both declarations; ordinary subclasses inherit channel_class.
+    channel_class: ClassVar[type]
     channels: list[ChanT]
 
     @property

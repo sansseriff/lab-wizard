@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Tuple, get_args, get_origin
+from typing import Dict, List, Optional, get_args, get_origin
 from pathlib import Path
 import importlib
 import inspect
@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from lab_wizard.lib.plotters.plotter import GenericPlotter
 from lab_wizard.lib.savers.saver import GenericSaver
+from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
 from lab_wizard.wizard.backend.models import (
     FilledReq, MeasurementInfo, Env, MatchingReq,
 )
@@ -191,73 +192,47 @@ def reqs_from_measurement(measurement: MeasurementInfo, verbose: bool = False) -
     return required
 
 
-def _iter_py_modules_under(package_root: Path, package_name: str) -> List[Tuple[str, Path]]:
-    """List importable module names and file paths under a given package root.
+def discover_matching_instruments(
+    env: Env, base_type: type, verbose: bool = False
+) -> List[MatchingReq]:
+    """Match registered instruments/channels using catalog behavior metadata.
 
-    Only returns leaf modules (files) not packages themselves (except __init__ modules).
+    The old implementation imported every Python file beneath ``instruments``
+    for every request.  Runtime catalog auditing has already performed the
+    authoritative ``issubclass`` checks and persisted their wire-safe result.
     """
-    modules: List[Tuple[str, Path]] = []
-    for path in package_root.rglob("*.py"):
-        if path.name.startswith("__pycache__"):
-            continue
-        # Build module name relative to base_dir that matches Python imports
-        rel = path.relative_to(package_root)
-        mod_name = (package_name + "." + str(rel.with_suffix("")).replace("/", ".")).replace("..", ".")
-        modules.append((mod_name, path))
-    return modules
-
-
-def discover_matching_instruments(env: Env, base_type: type, verbose: bool = False) -> List[MatchingReq]:
-    """Discover instrument classes in lib/instruments that inherit from base_type.
-
-    Scans the full instruments package tree so top-level instruments
-    (for example keysight53220A) and nested channel classes can participate.
-    """
-    matches: List[MatchingReq] = []
-
-    instruments_dir = env.instruments_dir
-
-    package_name = "lab_wizard.lib.instruments"
-    for module_name, file_path in _iter_py_modules_under(instruments_dir, package_name):
-        if verbose:
-            logger.debug("Attempting instrument module import: %s", module_name)
-        try:
-            module = importlib.import_module(module_name)
-        except Exception as e:
-            logger.warning("Failed to import %s: %s", module_name, e)
-            continue
-
-        # Scan classes defined in this module
-        for name, obj in inspect.getmembers(module, inspect.isclass):
-            # Only consider classes defined in this module
-            if obj.__module__ != module.__name__:
+    behavior_name = getattr(base_type, "__name__", str(base_type))
+    found: dict[str, MatchingReq] = {}
+    for info in get_instrument_metadata().values():
+        for prefix, behavior_key in (
+            ("resource", "behavior_abc"),
+            ("channel", "channel_behavior_abc"),
+        ):
+            if info.get(behavior_key) != behavior_name:
                 continue
-
-            # Skip private/internal classes
-            if name.startswith("_"):
+            module_name = info.get(f"{prefix}_module")
+            class_name = info.get(f"{prefix}_class_name")
+            if not isinstance(module_name, str) or not isinstance(class_name, str):
                 continue
+            module_prefix = "lab_wizard.lib.instruments."
+            if module_name.startswith(module_prefix):
+                relative = Path(*module_name[len(module_prefix):].split(".")).with_suffix(".py")
+                file_path = env.instruments_dir / relative
+            else:
+                file_path = env.instruments_dir
+            qualname = f"{module_name}.{class_name}"
+            found.setdefault(
+                qualname,
+                MatchingReq(
+                    module=module_name,
+                    class_name=class_name,
+                    qualname=qualname,
+                    file_path=file_path,
+                    friendly_name=class_name,
+                ),
+            )
 
-            # Skip explicit stand-ins/placeholders
-            if getattr(obj, "ignore_in_cli", False):
-                continue
-
-            # Some files have parameter models etc.; we only care about subclasses
-            try:
-                if issubclass(obj, base_type) and obj is not base_type:
-                    qual = f"{obj.__module__}.{obj.__qualname__}"
-                    friendly = getattr(obj, "friendly_name", name)
-                    matches.append(
-                        MatchingReq(
-                            module=module.__name__,
-                            class_name=name,
-                            qualname=qual,
-                            file_path=file_path,
-                            friendly_name=str(friendly),
-                        )
-                    )
-            except TypeError:
-                # obj is not a new-style class that can be used with issubclass
-                continue
+    matches = sorted(found.values(), key=lambda match: match.qualname)
 
     logger.info("Discovered %d matches for base type %s", len(matches), base_type)
     if verbose:

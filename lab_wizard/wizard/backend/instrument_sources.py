@@ -96,7 +96,7 @@ def _unique(name: str, taken: set[str]) -> str:
 def _local_source(config_dir: str) -> dict[str, Any]:
     from lab_wizard.lib.server.registry import InstrumentRegistry
     from lab_wizard.lib.utilities.config_io import get_configured_tree
-    from lab_wizard.lib.utilities.params_discovery import get_instrument_metadata
+    from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
 
     try:
         registry = InstrumentRegistry.from_config_dir(config_dir)

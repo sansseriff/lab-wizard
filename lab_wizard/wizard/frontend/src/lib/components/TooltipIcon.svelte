@@ -19,7 +19,7 @@
 {#if href}
 	<a
 		{href}
-		class={`group inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 ${className}`}
+		class={`group inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 ${className}`}
 		{...rest}
 		aria-label={label}
 		title={label}
@@ -28,7 +28,7 @@
 	</a>
 {:else}
 	<button
-		class={`group inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700 ${className}`}
+		class={`group inline-flex h-9 w-9 items-center justify-center rounded-md border border-transparent bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 ${className}`}
 		{...rest}
 		aria-label={label}
 		title={label}

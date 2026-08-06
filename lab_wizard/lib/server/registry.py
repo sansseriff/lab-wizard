@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Callable, Optional, get_args, get_origin
+from typing import Any, Callable, Optional
 
 from lab_wizard.lib.instruments.general.behavior import behavior_name_for
 from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
@@ -79,27 +79,27 @@ def _behavior_abc_for_class(cls: type | None) -> str | None:
 
 
 def _channel_class(parent_inst_cls: type | None) -> type | None:
-    """Extract the channel element class from ``ChannelProvider[Chan]``.
-
-    A ``ChannelProvider`` subclass parameterizes the generic with its channel
-    type (e.g. ``ChannelProvider[Dac4DChannel]``); we read that argument from
-    ``__orig_bases__`` so the channel's behavior ABC can be determined without
-    instantiating the parent.
-    """
-    if parent_inst_cls is None:
+    """Return a provider's explicit, normally inherited channel class."""
+    if parent_inst_cls is None or not issubclass(parent_inst_cls, ChannelProvider):
         return None
-    for base in getattr(parent_inst_cls, "__orig_bases__", ()):
-        origin = get_origin(base)
-        if origin is None:
-            continue
+    candidate = getattr(parent_inst_cls, "channel_class", None)
+    return candidate if isinstance(candidate, type) else None
+
+
+def _params_resource_class(params: Any | None) -> type | None:
+    """Resolve the class-level Params contract, with legacy extension support."""
+    if params is None:
+        return None
+    getter = getattr(type(params), "resource_class", None)
+    if callable(getter):
         try:
-            if issubclass(origin, ChannelProvider):
-                args = get_args(base)
-                if args and isinstance(args[0], type):
-                    return args[0]
-        except TypeError:
-            continue
-    return None
+            candidate = getter()
+            if isinstance(candidate, type):
+                return candidate
+        except (NotImplementedError, TypeError):
+            pass
+    candidate = getattr(params, "inst", None)
+    return candidate if isinstance(candidate, type) else None
 
 
 def _teardown(path: str, obj: Any) -> None:
@@ -269,7 +269,7 @@ class InstrumentRegistry:
             # Register a path for every hardware channel (dense), with params
             # attached only for configured indices (sparse mapping).
             num_channels = int(getattr(type(params), "num_channels", 0) or 0)
-            chan_cls = _channel_class(getattr(params, "inst", None))
+            chan_cls = _channel_class(_params_resource_class(params))
             chan_abc = _behavior_abc_for_class(chan_cls)
             chan_type_hint = chan_cls.__name__ if chan_cls is not None else None
             for i in range(num_channels):
@@ -299,7 +299,7 @@ class InstrumentRegistry:
             raise ValueError(f"Duplicate path {path!r}")
         self._factories[path] = factory
         if node_class is None and behavior_abc is None and type_hint is None:
-            inst_cls = getattr(params, "inst", None) if params is not None else None
+            inst_cls = _params_resource_class(params)
             if isinstance(inst_cls, type):
                 node_class = inst_cls
                 behavior_abc = _behavior_abc_for_class(inst_cls)

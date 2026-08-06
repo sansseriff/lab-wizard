@@ -58,7 +58,13 @@ def server_session(
     session: Optional[Session] = None
     probe_ms = min(_PROBE_TIMEOUT_MS, timeout_ms)
     for endpoint in local_endpoints(config_dir):
-        probe = Session(endpoint, timeout_ms=probe_ms)
+        # `auto_reconnect` retries once on timeout, which is right for a working
+        # session whose server restarted underneath it — and exactly wrong for a
+        # liveness probe, whose entire job is to answer "is anyone there?"
+        # quickly. Left on, every dead endpoint costs *twice* the probe timeout,
+        # and a workspace with no server pays that for each endpoint before any
+        # page depending on this can render.
+        probe = Session(endpoint, timeout_ms=probe_ms, auto_reconnect=False)
         try:
             probe.call("list_paths")
         except Exception as exc:  # noqa: BLE001 - no server here is normal
@@ -66,12 +72,11 @@ def server_session(
             probe.close()
             continue
 
+        # The probe answered, but it has retries disabled, so it is not the
+        # session to hand back for real work.
         logger.debug("Using instrument server at %s", endpoint)
-        if timeout_ms == probe_ms:
-            session = probe
-        else:
-            probe.close()
-            session = Session(endpoint, timeout_ms=timeout_ms)
+        probe.close()
+        session = Session(endpoint, timeout_ms=timeout_ms)
         break
 
     try:

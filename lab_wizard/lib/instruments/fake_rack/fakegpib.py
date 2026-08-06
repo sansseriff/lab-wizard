@@ -26,9 +26,9 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, SerializeAsAny
 
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
+from lab_wizard.lib.instruments.fake_rack.children import FakeGpibChildParams
 from lab_wizard.lib.instruments.fake_rack.virtual_rack import (
     FakePrologixSerial,
     VirtualGpibBus,
@@ -50,11 +50,6 @@ from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIB
 from lab_wizard.lib.instruments.general.transport import TransportSharing
 
 logger = logging.getLogger("lab_wizard.lib.instruments.fake_rack.fakegpib")
-
-# One child type today, so no discriminator is needed yet; widen to an
-# ``Annotated[A | B, Field(discriminator="type")]`` union the moment a second
-# simulated mainframe appears, exactly as PrologixChildParams does.
-FakeGpibChildParams = Fake900Params
 
 # Default port for a simulated controller. It is not a device file, and is not
 # meant to look like one: a config tree should say plainly which racks are real.
@@ -83,10 +78,10 @@ class FakeGpibParams(
         default=0.15,
         description="(seconds) read timeout; simulated reads answer immediately",
     )
-    children: dict[str, FakeGpibChildParams] = Field(default_factory=dict)
+    children: dict[str, SerializeAsAny[FakeGpibChildParams]] = Field(default_factory=dict)
 
-    @property
-    def inst(self) -> type["FakeGpib"]:  # type: ignore[override]
+    @classmethod
+    def resource_class(cls) -> type["FakeGpib"]:
         return FakeGpib
 
     def create_inst(self) -> "FakeGpib":

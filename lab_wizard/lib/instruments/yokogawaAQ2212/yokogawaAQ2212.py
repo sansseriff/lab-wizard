@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, SerializeAsAny
 
 from lab_wizard.lib.instruments.general.parent_child import (
     CanInstantiate,
@@ -13,15 +13,9 @@ from lab_wizard.lib.instruments.general.parent_child import (
     ParentParams,
 )
 from lab_wizard.lib.instruments.yokogawaAQ2212.comm import YokoAQ2212Dep, YokoAQ2212SlotDep
-from lab_wizard.lib.instruments.yokogawaAQ2212.modules.attenuator import AttenuatorParams
-from lab_wizard.lib.instruments.yokogawaAQ2212.modules.laser import LaserParams
-from lab_wizard.lib.instruments.yokogawaAQ2212.modules.power_meter import PowerMeterParams
-from lab_wizard.lib.instruments.yokogawaAQ2212.modules.switch import SwitchParams
+from lab_wizard.lib.instruments.yokogawaAQ2212.children import YokogawaAQ2212ModuleParams
 
-YokoAQ2212ChildParams = Annotated[
-    LaserParams | AttenuatorParams | SwitchParams | PowerMeterParams,
-    Field(discriminator="type"),
-]
+YokoAQ2212ChildParams = YokogawaAQ2212ModuleParams
 
 
 class YokogawaAQ2212Params(
@@ -33,10 +27,10 @@ class YokogawaAQ2212Params(
     ip_address: str = "10.7.0.13"
     ip_port: int = 50000
     offline: bool = False
-    children: dict[str, YokoAQ2212ChildParams] = Field(default_factory=dict)
+    children: dict[str, SerializeAsAny[YokogawaAQ2212ModuleParams]] = Field(default_factory=dict)
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return YokogawaAQ2212
 
     def create_inst(self) -> "YokogawaAQ2212":
@@ -73,7 +67,7 @@ class YokogawaAQ2212(
 
     def instantiate_child(self, params: Any, *, key: str | None = None) -> Child[Any, Any]:
         slot_dep = self.dep.slot(int(params.slot))
-        child = params.inst(slot_dep, params)  # type: ignore[arg-type]
+        child = type(params).resource_class()(slot_dep, params)  # type: ignore[arg-type]
         if key is not None:
             self.children[key] = child
         return child

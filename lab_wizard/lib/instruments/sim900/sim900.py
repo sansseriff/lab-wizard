@@ -1,37 +1,33 @@
 """SIM900 mainframe and child-module construction."""
 
-from typing import Annotated, Literal, Any
-from pydantic import Field
+from typing import Literal, Any
+from pydantic import Field, SerializeAsAny
 
 from lab_wizard.lib.instruments.general.parent_child import (
     Parent,
     ParentParams,
     Child,
-    ChildParams,
     GPIBAddressLike,
     Discoverable,
 )
+from lab_wizard.lib.instruments.general.prologix_children import PrologixChildParams
+from lab_wizard.lib.instruments.sim900.children import Sim900ModuleParams
 from lab_wizard.lib.instruments.general.discovery import (
     DiscoveryAction,
     NoParams,
     SelfCandidate,
     SelfCandidatesResult,
 )
-from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
-from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
-from lab_wizard.lib.instruments.sim900.modules.sim921 import Sim921Params
 from lab_wizard.lib.instruments.sim900.comm import Sim900MainframeDep
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixAddressedInstrumentDep
 
-Sim900ChildParams = Annotated[
-    Sim928Params | Sim970Params | Sim921Params, Field(discriminator="type")
-]
+Sim900ChildParams = Sim900ModuleParams
 
 
 class Sim900Params(
     GPIBAddressLike,
     ParentParams["Sim900", Sim900MainframeDep, Sim900ChildParams],
-    ChildParams["Sim900"],
+    PrologixChildParams,
     Discoverable,
 ):
     """Parameters for SIM900 mainframe (hybrid Parent + Child).
@@ -42,11 +38,11 @@ class Sim900Params(
     stable without exposing raw addresses in generated Python files.
     """
 
-    children: dict[str, Sim900ChildParams] = Field(default_factory=dict)
+    children: dict[str, SerializeAsAny[Sim900ModuleParams]] = Field(default_factory=dict)
     type: Literal["sim900"] = "sim900"
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Sim900
 
     # -- Discovery ----------------------------------------------------------
@@ -102,10 +98,6 @@ class Sim900(Parent[Sim900MainframeDep, Sim900ChildParams], Child[Any, Any]):
         self.children: dict[str, Child[Any, Any]] = {}
 
     @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.general.prologix_gpib.PrologixGPIB"
-
-    @property
     def dep(self) -> Sim900MainframeDep:
         return self._dep
 
@@ -118,7 +110,7 @@ class Sim900(Parent[Sim900MainframeDep, Sim900ChildParams], Child[Any, Any]):
 
     def instantiate_child(self, params: Any, *, key: str | None = None) -> Child[Any, Any]:
         slot_dep = self._dep.slot(int(params.slot), offline=bool(getattr(params, "offline", False)))
-        child = params.inst(slot_dep, params)  # type: ignore[arg-type]
+        child = type(params).resource_class()(slot_dep, params)  # type: ignore[arg-type]
         if key is not None:
             self.children[key] = child
         return child

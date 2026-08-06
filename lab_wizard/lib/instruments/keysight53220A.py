@@ -126,8 +126,8 @@ class Keysight53220AParams(ChannelsLike, IPLike, BaseModel, CanInstantiate["Keys
     num_channels: ClassVar[int] = 2
     channels: dict[int, Keysight53220AChannelParams] = Field(default_factory=dict)
 
-    @property
-    def inst(self) -> type[Keysight53220A]:
+    @classmethod
+    def resource_class(cls) -> type[Keysight53220A]:
         return Keysight53220A
 
     def create_inst(self) -> Keysight53220A:
@@ -146,6 +146,8 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
     Uses LocalVisaDep for VISA communication. Channels are exposed via
     the ChannelProvider interface (e.g., inst[0].count(), inst[1].read_counts()).
     """
+
+    channel_class = Keysight53220AChannel
 
     def __init__(self, dep: VisaDep, params: Keysight53220AParams):
         self._dep = dep

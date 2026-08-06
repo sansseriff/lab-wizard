@@ -44,19 +44,20 @@ parent must implement is `make_child(key)`:
 ### `Child`
 
 A [`Child`](../../lab_wizard/lib/instruments/general/parent_child.py) is created
-by its parent. It declares one static property, `parent_class`, returning the
-fully-qualified dotted path of its expected parent class:
+by its parent. Its Params class inherits the nominal Params family accepted by
+that parent:
 
 ```python
-@property
-def parent_class(self) -> str:
-    return "lab_wizard.lib.instruments.dbay.dbay.DBay"
+class DBayModuleParams(ChildParams[Any]): ...
+
+class Dac4DParams(SlotLike, DBayModuleParams): ...
 ```
 
-!!! warning "`parent_class` is read statically, not at runtime"
-    `params_discovery` parses this string out of the **source code** with a regex
-    (`_PARENT_CLASS_RETURN`) to build the parent/child map the GUI uses. It is
-    never called at runtime. Renaming or removing it silently breaks discovery.
+The parent's typed `children` field accepts that family. The runtime catalog
+uses ordinary `issubclass` checks to build the graph, so there is no parallel
+string hierarchy to keep synchronized. A new child joins the rack by inheriting
+its family in its own Python file; the parent does not enumerate every concrete
+child.
 
 `Child.from_config(parent, key=...)` is concrete: it checks the parent's cache,
 delegates to `parent.make_child(key)`, and type-checks the result.
@@ -68,7 +69,8 @@ output channels; a SIM970 has sensing channels). These mix in
 [`ChannelProvider[ChanT]`](../../lab_wizard/lib/instruments/general/parent_child.py),
 which provides `channels`, `num_channels`, `get_channel(i)`, indexing
 (`inst[i]`), and iteration. Each channel object itself implements a behavior ABC
-(e.g. `Dac4DChannel(VSource)`).
+(e.g. `Dac4DChannel(VSource)`). A provider also declares the runtime-visible
+`channel_class = Dac4DChannel`; normal subclasses inherit it.
 
 The channel **count and per-channel config** live in the parent's `Params`
 (`channels: list[Dac4DChannelParams]`); each channel params can carry its own
@@ -106,7 +108,7 @@ required resource types.
 - Its `Instrument` inherits `ParentFactory`, providing `from_params(params)` and
   `from_config(resources, key=...)`.
 
-`params_discovery` keys off these: a `Params` class inheriting `CanInstantiate`
+The runtime catalog keys off these: a `Params` class inheriting `CanInstantiate`
 is a **top-level** instrument; one inheriting `ChildParams` is a **child**.
 
 ### KeyLike mixins — how addressing becomes a key
@@ -140,10 +142,10 @@ class DBayParams(IPLike, ParentParams["DBay", DBayClient, DBayChildParams],
     type: Literal["dbay"] = "dbay"
     ip_address: str = "10.7.0.4"
     ip_port: int = 8345
-    children: dict[str, DBayChildParams] = Field(default_factory=dict)
+    children: dict[str, SerializeAsAny[DBayModuleParams]] = Field(default_factory=dict)
     def create_inst(self) -> "DBay": return DBay.from_params(self)
 
-class Dac4DParams(SlotLike, ChildParams["Dac4D"]):
+class Dac4DParams(SlotLike, DBayModuleParams):
     type: Literal["dac4D"] = "dac4D"
     channels: list[Dac4DChannelParams] = Field(
         default_factory=lambda: [Dac4DChannelParams() for _ in range(4)])
@@ -152,9 +154,8 @@ class Dac4DChannel(VSource):           # one channel = one VSource
     def set_voltage(self, voltage): self.module.set_voltage(self.channel_index, voltage)
 ```
 
-Note the typed unions: `DBayParams.children` is a `dict[str, DBayChildParams]`
-where `DBayChildParams` is an `Annotated[... , Field(discriminator="type")]`
-union. Pydantic uses the `type` discriminator to parse each child into the right
-class when loading YAML. **Every concrete `ParentParams` subclass must declare its
-own typed `children` field** — the base class enforces this at class-creation
-time.
+`SerializeAsAny` retains every concrete child field during serialization.
+Before field validation, `ParentParams` resolves raw child dictionaries through
+the runtime catalog using their `type` discriminator. Pydantic then verifies
+that the resolved class belongs to `DBayModuleParams`; a SIM900 module, for
+example, is rejected even though it is otherwise a valid `ChildParams` class.

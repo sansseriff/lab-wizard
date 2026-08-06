@@ -2,18 +2,19 @@ from __future__ import annotations
 
 from typing import Literal
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
+from lab_wizard.lib.instruments.yokogawaAQ2212.children import YokogawaAQ2212ModuleParams
 from lab_wizard.lib.instruments.yokogawaAQ2212.comm import YokoAQ2212SlotDep
 
 
-class AttenuatorParams(SlotLike, ChildParams["Attenuator"]):
+class AttenuatorParams(SlotLike, YokogawaAQ2212ModuleParams):
     type: Literal["yoko_attenuator"] = "yoko_attenuator"
     attribute_name: str = ""
     offline: bool = False
     wavelength_nm: float = 1550.0
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Attenuator
 
 
@@ -22,10 +23,6 @@ class Attenuator(Child[YokoAQ2212SlotDep, AttenuatorParams]):
         self._dep = dep
         self.params = params
         self.slot = dep.slot
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.yokogawaAQ2212.yokogawaAQ2212.YokogawaAQ2212"
 
     def get_attenuation(self) -> float:
         return float(self._dep.query(f"INP{self.slot}:ATT?"))

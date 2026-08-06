@@ -74,7 +74,7 @@ and the wizard offers every configured instrument that **is-a** that behavior.
 
 `POST /api/create-measurement-project` (→
 [`generate_measurement_project`](../../lab_wizard/wizard/backend/project_generation.py))
-does two things:
+does three things:
 
 1. **Writes a project YAML** containing only the *subset* of config you selected
    — the chosen instrument lineages (leaf back to root), savers, and plotters —
@@ -86,9 +86,12 @@ does two things:
    - `resource_fields` — the dataclass field declarations,
    - `instantiation` — the construction lines,
    - `return_fields` — wiring the constructed objects into the `Resources`.
+3. **Copies the measurement source** (`<name>.py`) into the project. The
+   generated setup imports this sibling module, so edits made inside the project
+   are the code that runs.
 
 The project folder is timestamped, e.g. `projects/iv_curve_20260528_143012/`,
-containing `<folder>.yaml` and `<name>_setup.py`.
+containing `<folder>.yaml`, `<name>_setup.py`, and `<name>.py`.
 
 ### Two generation styles
 
@@ -108,20 +111,13 @@ channel's `attribute_name` (from_attribute).
 
 ```bash
 cd projects/iv_curve_20260528_143012
-python iv_curve_setup.py             # local: loads the project YAML
-python iv_curve_setup.py --remote tcp://lab-server:12300   # remote
+uv run iv_curve_setup.py             # local: loads the project YAML
+uv run iv_curve_setup.py --remote tcp://lab-server:12300   # remote
 ```
 
-The template's `__main__` block builds either an `Exp` (from the project YAML) or
-a `RemoteResources` (from `--remote`), constructs the resources, and runs the
-measurement. The same code runs both ways because measurements consume behavior
-ABCs, which both local instruments and [remote proxies](../remote/architecture.md)
-satisfy.
-
-!!! warning "Measurement run-logic is not yet wired to savers/plotters"
-    The wizard correctly *plumbs* savers and plotters into the generated
-    `Resources`, but the current measurement classes (e.g.
-    [`iv_curve.py`](../../lab_wizard/lib/measurements/iv_curve/iv_curve.py)) do not
-    yet call `saver.write_measurement(...)` or `plotter.plot(...)`, and reference
-    some legacy attributes that no longer exist. Treat the measurement classes as
-    in-progress. See the [Roadmap](../roadmap.md).
+The template's `__main__` block uses local resources, a per-attribute
+`CompositeResources`, or the all-remote override, then runs the sibling
+measurement module. The same procedure works in each mode because measurements
+consume behavior ABCs, which both local instruments and
+[remote proxies](../remote/architecture.md) satisfy. Observations flow through
+the procedure data bus to the configured saver and plotter adapters.

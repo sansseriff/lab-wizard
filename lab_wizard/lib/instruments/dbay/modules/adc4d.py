@@ -1,7 +1,8 @@
 from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, Field
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, ChannelsLike, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, ChannelProvider, ChannelsLike, SlotLike
+from lab_wizard.lib.instruments.dbay.children import DBayModuleParams
 from lab_wizard.lib.instruments.general.vsense import VSense
 
 
@@ -36,18 +37,20 @@ entry will be given an attribute_name string.
 """
 
 
-class Adc4DParams(ChannelsLike, SlotLike, ChildParams["Adc4D"]):
+class Adc4DParams(ChannelsLike, SlotLike, DBayModuleParams):
     type: Literal["adc4D"] = "adc4D"
     name: str = "Adc4D"
     num_channels: ClassVar[int] = 4
     channels: dict[int, Adc4DChannelParams] = Field(default_factory=dict)
 
-    @property
-    def inst(self):  # type: ignore[override]
+    @classmethod
+    def resource_class(cls):
         return Adc4D
 
 
 class Adc4D(Child[Any, Adc4DParams], ChannelProvider[Adc4DChannel]):
+    channel_class = Adc4DChannel
+
     def __init__(self, module: Any, params: Adc4DParams):
         self.module = module
         self.params = params
@@ -55,10 +58,6 @@ class Adc4D(Child[Any, Adc4DParams], ChannelProvider[Adc4DChannel]):
             Adc4DChannel(module, i, params.channels.get(i, Adc4DChannelParams()))
             for i in range(params.num_channels)
         ]
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.dbay.dbay.DBay"
 
     @property
     def dep(self) -> Any:

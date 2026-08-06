@@ -39,8 +39,8 @@ class DatabaseSaverParams(SaverParams):
         description="Cryostat to associate runs with — auto-created if missing.",
     )
 
-    @property
-    def inst(self) -> type["DatabaseSaver"]:
+    @classmethod
+    def resource_class(cls) -> type["DatabaseSaver"]:
         return DatabaseSaver
 
 

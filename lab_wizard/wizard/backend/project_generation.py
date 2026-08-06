@@ -120,17 +120,30 @@ def _requirements_for_measurement(measurement_name: str) -> list[FilledReq]:
 
 
 def _setup_template_text(measurement_name: str) -> str:
-    lab_wizard_root = Path(__file__).resolve().parents[2]
     template = (
-        lab_wizard_root
-        / "lib"
-        / "measurements"
-        / measurement_name
+        _measurement_info(measurement_name).measurement_dir
         / f"{measurement_name}_setup_template.py"
     )
     if not template.exists():
         raise ValueError(f"Missing setup template: {template}")
     return template.read_text(encoding="utf-8")
+
+
+def _measurement_source_text(measurement_name: str) -> str:
+    """Return the runnable measurement source shipped with a project.
+
+    The setup template describes resource wiring, while this file contains the
+    procedure itself. Keeping both in the generated directory makes the
+    generated project the editable unit users run, instead of silently running
+    a different copy from the installed ``lab_wizard`` package.
+    """
+    source = (
+        _measurement_info(measurement_name).measurement_dir
+        / f"{measurement_name}.py"
+    )
+    if not source.exists():
+        raise ValueError(f"Missing measurement source: {source}")
+    return source.read_text(encoding="utf-8")
 
 
 def _replace_wizard_block(template_text: str, block_name: str, content: str) -> str:
@@ -879,6 +892,7 @@ def generate_measurement_project(
     requirements = _requirements_for_measurement(req.measurement_name)
     instrument_reqs, saver_reqs, plotter_reqs = _split_requirements(requirements)
     template_text = _setup_template_text(req.measurement_name)
+    measurement_source = _measurement_source_text(req.measurement_name)
 
     # Only local instruments contribute params. A routed one is owned by its
     # server; copying a snapshot here would create a second copy to drift.
@@ -940,7 +954,14 @@ def generate_measurement_project(
     setup_path = project_dir / f"{req.measurement_name}_setup.py"
     setup_code = format_python_code(setup_code)
     setup_path.write_text(setup_code, encoding="utf-8")
-    logger.info("Generated project artifacts yaml=%s setup=%s", yaml_path, setup_path)
+    measurement_path = project_dir / f"{req.measurement_name}.py"
+    measurement_path.write_text(measurement_source, encoding="utf-8")
+    logger.info(
+        "Generated project artifacts yaml=%s setup=%s measurement=%s",
+        yaml_path,
+        setup_path,
+        measurement_path,
+    )
 
     return {
         "status": "ok",
@@ -949,4 +970,5 @@ def generate_measurement_project(
         "measurement_name": req.measurement_name,
         "yaml_file": str(yaml_path),
         "setup_file": str(setup_path),
+        "measurement_file": str(measurement_path),
     }

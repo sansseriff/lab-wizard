@@ -19,9 +19,9 @@ from lab_wizard.lib.instruments.fake_rack.virtual_rack import (
 )
 from lab_wizard.lib.instruments.general.parent_child import (
     ChannelsLike,
-    ChildParams,
     SlotLike,
 )
+from lab_wizard.lib.instruments.fake_rack.children import Fake900ModuleParams
 from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970
 
 
@@ -41,7 +41,7 @@ class Fake970ChannelParams(BaseModel):
     max_retries: int = 3
 
 
-class Fake970Params(ChannelsLike, SlotLike, ChildParams["Fake970"]):
+class Fake970Params(ChannelsLike, SlotLike, Fake900ModuleParams):
     """Parameters for the simulated voltmeter module."""
 
     type: Literal["fake970"] = "fake970"
@@ -54,8 +54,8 @@ class Fake970Params(ChannelsLike, SlotLike, ChildParams["Fake970"]):
     )
     channels: dict[int, Fake970ChannelParams] = Field(default_factory=dict)
 
-    @property
-    def inst(self):  # type: ignore[override]
+    @classmethod
+    def resource_class(cls):
         return Fake970
 
     def virtual_module(self, model: SnspdModel) -> VirtualSlotModule:
@@ -75,7 +75,3 @@ class Fake970(Sim970):
     :class:`~lab_wizard.lib.instruments.sim900.modules.sim970.Sim970Channel`
     objects and satisfy ``VSense`` exactly as the real ones do.
     """
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.fake_rack.fake900.Fake900"

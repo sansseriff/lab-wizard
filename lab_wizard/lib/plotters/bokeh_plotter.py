@@ -22,8 +22,8 @@ class BokehPlotterParams(PlotterParams):
     )
     figure_size: tuple[int, int] = Field(default=(800, 600), description="(width, height) in pixels")
 
-    @property
-    def inst(self) -> type["BokehPlotter"]:
+    @classmethod
+    def resource_class(cls) -> type["BokehPlotter"]:
         return BokehPlotter
 
 

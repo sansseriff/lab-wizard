@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
+from lab_wizard.lib.instruments.andoAQ8201A.children import AndoAQ8201AModuleParams
 from lab_wizard.lib.instruments.andoAQ8201A.comm import AndoAQ8201ASlotDep
 
 
-class Switch412Params(SlotLike, ChildParams["Switch412"]):
+class Switch412Params(SlotLike, AndoAQ8201AModuleParams):
     type: Literal["ando_switch412"] = "ando_switch412"
     attribute_name: str = ""
     offline: bool = False
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Switch412
 
 
@@ -23,10 +24,6 @@ class Switch412(Child[AndoAQ8201ASlotDep, Switch412Params]):
         self._dep = dep
         self.params = params
         self.slot = dep.slot
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.andoAQ8201A.andoAQ8201A.AndoAQ8201A"
 
     def set_switch(self, switch: str) -> None:
         """Select switch A or B."""

@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from lab_wizard.lib.utilities.params_discovery import (
+from lab_wizard.lib.utilities.resource_catalog import (
     Kind,
     get_parent_chain,
     get_type_to_module_map,
@@ -95,7 +95,7 @@ def _validate_parent_chain(leaf: _NodeRef) -> None:
     expected_types = [leaf.type] + get_parent_chain(leaf.type)
     if actual_types != expected_types:
         raise ValueError(
-            "Tree lineage does not match parent_class chain for leaf "
+            "Tree lineage does not match the registered parent chain for leaf "
             f"{leaf.type}:{leaf.key}. Actual={actual_types}, expected={expected_types}"
         )
 

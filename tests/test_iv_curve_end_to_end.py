@@ -177,7 +177,12 @@ def _expected_curve() -> list[tuple[float, float]]:
 def test_generated_setup_wires_the_simulated_rack(tmp_path: Path) -> None:
     out = _generate_project(tmp_path)
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
+    measurement_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
     ast.parse(setup_text)
+    ast.parse(measurement_text)
+
+    assert "from iv_curve import IVCurveMeasurement" in setup_text
+    assert "class IVCurveMeasurement" in measurement_text
 
     assert (
         "from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpib"

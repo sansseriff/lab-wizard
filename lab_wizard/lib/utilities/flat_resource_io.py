@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Literal
 from lab_wizard.lib.utilities.config_io import (
     _read_yaml, _write_yaml, model_to_commented_map,
 )
-from lab_wizard.lib.utilities.params_discovery import (
+from lab_wizard.lib.utilities.resource_catalog import (
     Kind, load_params_class,
 )
 

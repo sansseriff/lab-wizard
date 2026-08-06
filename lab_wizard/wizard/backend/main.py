@@ -57,7 +57,7 @@ from lab_wizard.lib.utilities.flat_resource_io import (
     update_resource_fields as _flat_update_resource_fields,
     get_configured_resources_tree,
 )
-from lab_wizard.lib.utilities.params_discovery import (
+from lab_wizard.lib.utilities.resource_catalog import (
     get_instrument_metadata,
     get_saver_metadata,
     get_plotter_metadata,
@@ -109,6 +109,7 @@ from lab_wizard.wizard.backend.remote_tree import (
     remote_tree,
     remote_tree_edit,
 )
+from lab_wizard.wizard.backend.projects import list_projects
 from lab_wizard.wizard.backend.transport_status import (
     conflicts_for_selection,
     duplicate_transport_check,
@@ -365,6 +366,16 @@ def _projects_dir(env: Env) -> Path:
     if env.projects_dir is None:
         raise RuntimeError("Workspace projects directory was not resolved")
     return env.projects_dir
+
+
+@app.get("/api/projects")
+def api_list_projects(env: Env = Depends(get_env)):
+    """Projects this workspace has already generated, newest first.
+
+    Read back off disk from the YAML generation already writes, so this records
+    no new state and cannot disagree with what is actually there.
+    """
+    return {"projects": list_projects(_projects_dir(env))}
 
 
 @app.get("/api/manage-instruments")
@@ -861,7 +872,7 @@ def _walk_parent_chain(chain: list[dict], env: Env):
 @app.post("/api/manage-instruments/discover")
 def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
     """Run a discovery action defined on an instrument's Params class."""
-    from lab_wizard.lib.utilities.params_discovery import load_params_class
+    from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
     cls = load_params_class(body.type)
     actions = {a.name: a for a in cls.discovery_actions()}
@@ -919,7 +930,7 @@ class _ApplyChildrenBody(_BM):
 @app.post("/api/manage-instruments/apply-children")
 def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
     """Add discovered children to an existing parent instrument in config."""
-    from lab_wizard.lib.utilities.params_discovery import load_params_class
+    from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
     config_dir = _config_dir(env)
     instruments = load_instruments(config_dir)
@@ -1045,7 +1056,7 @@ def api_create_measurement_project(
     body: GenerateProjectRequest,
     env: Env = Depends(get_env),
 ):
-    """Create a new timestamped project folder with subset YAML + setup code."""
+    """Create a project with subset YAML, resource setup, and measurement code."""
     try:
         return generate_measurement_project(
             config_dir=Path(_config_dir(env)),

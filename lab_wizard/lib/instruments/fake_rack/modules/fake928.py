@@ -19,11 +19,12 @@ from lab_wizard.lib.instruments.fake_rack.virtual_rack import (
     VirtualSlotModule,
     VirtualVoltageSource,
 )
-from lab_wizard.lib.instruments.general.parent_child import ChildParams, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import SlotLike
+from lab_wizard.lib.instruments.fake_rack.children import Fake900ModuleParams
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928
 
 
-class Fake928Params(SlotLike, ChildParams["Fake928"]):
+class Fake928Params(SlotLike, Fake900ModuleParams):
     """Parameters for the simulated voltage source module.
 
     Mirrors :class:`~lab_wizard.lib.instruments.sim900.modules.sim928.Sim928Params`
@@ -40,8 +41,8 @@ class Fake928Params(SlotLike, ChildParams["Fake928"]):
     )
     attribute_name: str | None = ""
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Fake928
 
     def virtual_module(self, model: SnspdModel) -> VirtualSlotModule:
@@ -57,7 +58,3 @@ class Fake928(Sim928):
     :class:`Sim928`. Only the declared parent differs, because a simulated
     module belongs to a simulated mainframe.
     """
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.fake_rack.fake900.Fake900"

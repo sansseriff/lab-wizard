@@ -20,8 +20,8 @@ class MplPlotterParams(PlotterParams):
     figure_size: tuple[int, int] = Field(default=(8, 6), description="(width, height) in inches")
     dpi: int = Field(default=100, description="Dots per inch for rendering")
 
-    @property
-    def inst(self) -> type["MplPlotter"]:
+    @classmethod
+    def resource_class(cls) -> type["MplPlotter"]:
         return MplPlotter
 
 

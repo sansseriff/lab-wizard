@@ -7,7 +7,7 @@ import yaml
 from pydantic import BaseModel, Field, SerializeAsAny, model_validator
 from ruamel.yaml import YAML as RuamelYAML
 
-from lab_wizard.lib.utilities.params_discovery import (
+from lab_wizard.lib.utilities.resource_catalog import (
     load_params_class,
     load_saver_params_class,
     load_plotter_params_class,

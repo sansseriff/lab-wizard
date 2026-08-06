@@ -35,7 +35,7 @@ graph TD
     subgraph GUI
         FE[SvelteKit frontend] --> BE[FastAPI backend]
     end
-    BE --> UTIL[lib/utilities<br/>config_io, params_discovery, model_tree]
+    BE --> UTIL[lib/utilities<br/>config_io, resource_catalog, model_tree]
     UTIL --> INST[lib/instruments<br/>Params + Instrument classes]
     BE --> GEN[wizard/backend<br/>project_generation, get_measurements]
     GEN --> MEAS[lib/measurements<br/>templates + measurement classes]
@@ -48,7 +48,7 @@ graph TD
    [Instrument model](instrument-model.md).
 2. **Utilities layer** (`lib/utilities`) — loads/saves the config tree
    (`config_io`), auto-discovers instrument types from source
-   (`params_discovery`), and parses project YAML into a runnable tree
+   (`resource_catalog`), and parses project YAML into a runnable tree
    (`model_tree`). See [Config & discovery](config-and-discovery.md).
 3. **Application layer** (`lib/measurements`, `lib/savers`, `lib/plotters`,
    `lib/server`, `lib/client`) — what you actually do with instruments.
@@ -86,7 +86,7 @@ sequenceDiagram
     W->>C: write YAML (config_io)
     U->>W: Create measurement (pick resources)
     W->>C: load_instruments + load_resources
-    W->>P: write project.yaml + <m>_setup.py
+    W->>P: write project.yaml + <m>_setup.py + <m>.py
     U->>R: python <m>_setup.py
     R->>P: load_exp_from_yaml(project.yaml)
     R->>R: build instruments, run, save/plot

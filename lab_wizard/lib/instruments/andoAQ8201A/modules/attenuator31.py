@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
+from lab_wizard.lib.instruments.andoAQ8201A.children import AndoAQ8201AModuleParams
 from lab_wizard.lib.instruments.andoAQ8201A.comm import AndoAQ8201ASlotDep
 
 
-class Attenuator31Params(SlotLike, ChildParams["Attenuator31"]):
+class Attenuator31Params(SlotLike, AndoAQ8201AModuleParams):
     type: Literal["ando_attenuator31"] = "ando_attenuator31"
     attribute_name: str = ""
     offline: bool = False
@@ -14,8 +15,8 @@ class Attenuator31Params(SlotLike, ChildParams["Attenuator31"]):
     max_attenuation: float = 60.0
     wavelength_nm: float = 1550.0
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Attenuator31
 
 
@@ -26,10 +27,6 @@ class Attenuator31(Child[AndoAQ8201ASlotDep, Attenuator31Params]):
         self._dep = dep
         self.params = params
         self.slot = dep.slot
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.andoAQ8201A.andoAQ8201A.AndoAQ8201A"
 
     def get_status(self) -> tuple[int, float]:
         """Returns (wavelength_nm, attenuation_db)."""

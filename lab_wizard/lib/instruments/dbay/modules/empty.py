@@ -1,14 +1,15 @@
 from typing import Literal, Any
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
+from lab_wizard.lib.instruments.dbay.children import DBayModuleParams
 
 
-class EmptyParams(SlotLike, ChildParams["Empty"]):
+class EmptyParams(SlotLike, DBayModuleParams):
     type: Literal["empty"] = "empty"
     name: str = "empty"
 
-    @property
-    def inst(self):  # type: ignore[override]
+    @classmethod
+    def resource_class(cls):
         return Empty
 
 
@@ -20,10 +21,6 @@ class Empty(Child[Any, EmptyParams]):
 
     def __str__(self) -> str:
         return "Empty slot"
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.dbay.dbay.DBay"
 
     @property
     def dep(self) -> Any:

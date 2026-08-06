@@ -190,7 +190,7 @@ def duplicate_transport_check(
     occasionally deliberate, and the person doing it should decide.
     """
     from lab_wizard.lib.utilities.config_io import _apply_key_to_params
-    from lab_wizard.lib.utilities.params_discovery import load_params_class
+    from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
     try:
         params = load_params_class(type_str)()

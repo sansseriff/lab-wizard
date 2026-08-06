@@ -1,11 +1,12 @@
 from lab_wizard.lib.instruments.general.vsource import VSource
 from typing import Literal, Any
 from pydantic import Field
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
+from lab_wizard.lib.instruments.sim900.children import Sim900ModuleParams
 from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 
 
-class Sim928Params(SlotLike, ChildParams["Sim928"]):
+class Sim928Params(SlotLike, Sim900ModuleParams):
     """Parameters for SIM928 voltage source module.
 
     ``slot`` (via SlotLike) holds the physical slot number within the SIM900
@@ -20,8 +21,8 @@ class Sim928Params(SlotLike, ChildParams["Sim928"]):
     )
     attribute_name: str | None = ""
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Sim928
 
 
@@ -35,10 +36,6 @@ class Sim928(Child[Any, Sim928Params], VSource):
     Safety-state declarations are inherited from VSource (set_voltage records
     "voltage", turn_on/turn_off record "output").
     """
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
     def __init__(self, dep: Sim900SlotDep, params: Sim928Params):
         self.dep = dep

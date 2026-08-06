@@ -1,0 +1,24 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="body" x1="512" y1="100" x2="512" y2="924" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6A5DF5"/>
+      <stop offset="1" stop-color="#3E30D8"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="512" y1="100" x2="512" y2="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- macOS app-icon geometry: an 824x824 body inset 100 on each side of a
+       1024 canvas, corner radius 185.4. Those are Apple's template numbers, so
+       the icon lines up with every other app in the Dock. -->
+  <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4" fill="url(#body)"/>
+  <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4" fill="url(#sheen)"/>
+
+  <!-- The mark, reversed out in white and scaled to sit optically centred. -->
+  <g transform="translate(230.8 247.2) scale(1.212)" fill="none" stroke="#FFFFFF" stroke-width="33" stroke-linejoin="round">
+    <path d="M413.504 340.132C413.504 347.632 371.004 368.632 225.504 368.632C149.504 370.914 49.5035 351.132 50.5035 340.132C51.5035 329.132 139.004 313.132 151.504 302.132C164.004 291.132 146.503 224.634 196.503 142.134C236.503 76.1343 315.004 45.1346 351.003 68.6347C298.503 68.6347 290.003 142.133 287.003 182.134C287.003 182.134 287.003 266.135 324.504 307.632C340.796 325.661 413.504 332.632 413.504 340.132Z"/>
+    <path d="M134.003 310.635L220.003 288.635" stroke-linecap="round"/>
+  </g>
+</svg>

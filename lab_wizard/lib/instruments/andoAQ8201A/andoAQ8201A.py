@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, SerializeAsAny
+
+from lab_wizard.lib.instruments.andoAQ8201A.children import AndoAQ8201AModuleParams
+from lab_wizard.lib.instruments.general.prologix_children import PrologixChildParams
 
 from lab_wizard.lib.instruments.general.parent_child import (
     Child,
-    ChildParams,
     GPIBAddressLike,
     Parent,
     ParentParams,
@@ -20,19 +22,13 @@ from lab_wizard.lib.instruments.general.discovery import (
 )
 from lab_wizard.lib.instruments.general.prologix_comm import PrologixAddressedInstrumentDep
 from lab_wizard.lib.instruments.andoAQ8201A.comm import AndoAQ8201AFrameDep
-from lab_wizard.lib.instruments.andoAQ8201A.modules.attenuator31 import Attenuator31Params
-from lab_wizard.lib.instruments.andoAQ8201A.modules.switch412 import Switch412Params
-
-AndoAQ8201AChildParams = Annotated[
-    Attenuator31Params | Switch412Params,
-    Field(discriminator="type"),
-]
+AndoAQ8201AChildParams = AndoAQ8201AModuleParams
 
 
 class AndoAQ8201AParams(
     GPIBAddressLike,
     ParentParams["AndoAQ8201A", AndoAQ8201AFrameDep, AndoAQ8201AChildParams],
-    ChildParams["AndoAQ8201A"],
+    PrologixChildParams,
     Discoverable,
 ):
     """Parameters for Ando AQ8201A mainframe (hybrid Parent + Child).
@@ -43,10 +39,10 @@ class AndoAQ8201AParams(
 
     type: Literal["ando_aq8201a"] = "ando_aq8201a"
     offline: bool = False
-    children: dict[str, AndoAQ8201AChildParams] = Field(default_factory=dict)
+    children: dict[str, SerializeAsAny[AndoAQ8201AModuleParams]] = Field(default_factory=dict)
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return AndoAQ8201A
 
     # -- Discovery ----------------------------------------------------------
@@ -101,10 +97,6 @@ class AndoAQ8201A(
         self.children: dict[str, Child[Any, Any]] = {}
 
     @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.general.prologix_gpib.PrologixGPIB"
-
-    @property
     def dep(self) -> AndoAQ8201AFrameDep:
         return self._dep
 
@@ -116,7 +108,7 @@ class AndoAQ8201A(
 
     def instantiate_child(self, params: Any, *, key: str | None = None) -> Child[Any, Any]:
         slot_dep = self._dep.slot(int(params.slot), offline=bool(getattr(params, "offline", False)))
-        child = params.inst(slot_dep, params)  # type: ignore[arg-type]
+        child = type(params).resource_class()(slot_dep, params)  # type: ignore[arg-type]
         if key is not None:
             self.children[key] = child
         return child

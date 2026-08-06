@@ -46,6 +46,8 @@ class _FakeChannel(VSource):
 
 
 class _FakeLeaf(ChannelProvider[_FakeChannel]):
+    channel_class = _FakeChannel
+
     def __init__(self, n_channels: int) -> None:
         _CALLS.append("leaf")
         self.channels = [_FakeChannel() for _ in range(n_channels)]

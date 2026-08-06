@@ -200,7 +200,7 @@ class WireServer:
         is done under the root's transport lock so a scan cannot interleave with
         an ordinary call on the same bus.
         """
-        from lab_wizard.lib.utilities.params_discovery import load_params_class
+        from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
         cls = load_params_class(type)
         actions = {a.name: a for a in cls.discovery_actions()}
@@ -521,7 +521,7 @@ class WireServer:
         and schema; the client renders it. That is what stops a client offering
         an instrument the server cannot instantiate.
         """
-        from lab_wizard.lib.utilities.params_discovery import get_instrument_metadata
+        from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
 
         return {
             "instrument_metadata": get_instrument_metadata(),

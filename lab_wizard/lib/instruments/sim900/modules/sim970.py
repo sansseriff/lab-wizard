@@ -3,11 +3,11 @@ from pydantic import BaseModel, Field
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.parent_child import (
     Child,
-    ChildParams,
     ChannelProvider,
     ChannelsLike,
     SlotLike,
 )
+from lab_wizard.lib.instruments.sim900.children import Sim900ModuleParams
 from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
 import time
 import numpy as np
@@ -25,7 +25,7 @@ class Sim970ChannelParams(BaseModel):
     max_retries: int = 3
 
 
-class Sim970Params(ChannelsLike, SlotLike, ChildParams["Sim970"]):
+class Sim970Params(ChannelsLike, SlotLike, Sim900ModuleParams):
     """Parameters for SIM970 module.
 
     ``slot`` (via SlotLike) holds the physical slot number within the SIM900
@@ -42,8 +42,8 @@ class Sim970Params(ChannelsLike, SlotLike, ChildParams["Sim970"]):
     num_channels: ClassVar[int] = 4
     channels: dict[int, Sim970ChannelParams] = Field(default_factory=dict)
 
-    @property
-    def inst(self):  # type: ignore[override]
+    @classmethod
+    def resource_class(cls):
         return Sim970
 
 
@@ -89,6 +89,8 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
     from_config is inherited from Child base class — no override needed.
     """
 
+    channel_class = Sim970Channel
+
     def __init__(self, dep: Sim900SlotDep, params: Sim970Params):
         self._dep = dep
         self.params = params
@@ -97,10 +99,6 @@ class Sim970(Child[Any, Sim970Params], ChannelProvider[Sim970Channel]):
             Sim970Channel(dep, i, params.channels.get(i, Sim970ChannelParams()))
             for i in range(params.num_channels)
         ]
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.sim900.sim900.Sim900"
 
     @property
     def dep(self) -> Sim900SlotDep:  # type: ignore[override]

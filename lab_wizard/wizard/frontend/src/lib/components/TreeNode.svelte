@@ -81,13 +81,13 @@
 <div class="relative" style="padding-left: {depth > 0 ? 1.25 : 0}rem;">
 	{#if depth > 0}
 		<div
-			class="absolute top-0 bottom-0 left-0 w-px bg-gray-300 dark:bg-gray-600"
+			class="absolute top-0 bottom-0 left-0 w-px bg-surface-3"
 			style="left: 0.125rem;"
 		></div>
 	{/if}
 
 	<div
-		class="group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition hover:bg-gray-100 dark:hover:bg-gray-800 {isSelectable && !compatible ? 'opacity-45' : ''} {selected ? 'bg-gray-200 dark:bg-gray-700' : ''} {isSelectable && compatible ? 'cursor-pointer' : ''}"
+		class="group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition hover:bg-surface-2 {isSelectable && !compatible ? 'opacity-45' : ''} {selected ? 'bg-surface-2' : ''} {isSelectable && compatible ? 'cursor-pointer' : ''}"
 		role={isSelectable ? 'button' : undefined}
 		aria-disabled={isSelectable && !compatible}
 		onclick={handleSelect}
@@ -100,7 +100,7 @@
 	>
 		{#if hasChildren}
 			<button
-				class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200"
+				class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted hover:text-ink"
 				onclick={() => (expanded = !expanded)}
 			>
 				{#if expanded}
@@ -113,11 +113,11 @@
 			<span class="h-5 w-5 shrink-0"></span>
 		{/if}
 
-		<span class="font-medium text-gray-900 dark:text-gray-100">{node.type}</span>
-		<span class="text-xs text-gray-500 dark:text-gray-400">({node.key})</span>
+		<span class="font-medium text-ink">{node.type}</span>
+		<span class="text-xs text-muted">({node.key})</span>
 		{#if selectBadge}
 			<span
-				class="rounded px-1.5 py-0.5 text-[10px] bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300"
+				class="rounded px-1.5 py-0.5 text-[10px] bg-accent-wash text-accent-strong"
 			>
 				{selectBadge}
 			</span>
@@ -127,8 +127,8 @@
 			<span
 				class="rounded px-1.5 py-0.5 text-[10px] font-medium {transport.transport_sharing ===
 				'shared'
-					? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
-					: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'}"
+					? 'bg-ok-wash text-ok'
+					: 'bg-warn-wash text-warn'}"
 				title={transport.transport_sharing === 'shared'
 					? 'Behind a server that already multiplexes it — several programs may use it at once'
 					: 'One process at a time can hold this transport'}
@@ -137,7 +137,7 @@
 			</span>
 			{#if transport.state_authority === 'subscribed'}
 				<span
-					class="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:bg-sky-900/40 dark:text-sky-300"
+					class="rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium text-accent-strong"
 					title="State is read from the process that owns this hardware, not inferred from our own commands"
 				>
 					subscribed
@@ -145,7 +145,7 @@
 			{/if}
 			{#if transport.held_by_server}
 				<span
-					class="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300"
+					class="rounded bg-crit-wash px-1.5 py-0.5 text-[10px] font-medium text-crit"
 					title="A server has this hardware open right now"
 				>
 					in use
@@ -156,7 +156,7 @@
 		<div class="ml-auto flex gap-1 opacity-0 transition group-hover:opacity-100">
 			{#if onReset}
 				<button
-					class="rounded p-1 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+					class="rounded p-1 text-muted hover:bg-surface-2 hover:text-ink-2"
 					title="Reset to defaults"
 					onclick={() => onReset?.(node)}
 				>
@@ -165,7 +165,7 @@
 			{/if}
 			{#if onRemove}
 				<button
-					class="rounded p-1 text-gray-500 hover:bg-red-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-red-900/40 dark:hover:text-red-400"
+					class="rounded p-1 text-muted hover:bg-crit-wash hover:text-crit"
 					title="Remove"
 					onclick={() => onRemove?.(node)}
 				>

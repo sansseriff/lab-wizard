@@ -1,6 +1,6 @@
 import logging
-from typing import Any, Annotated, Literal
-from pydantic import BaseModel, Field
+from typing import Any, Literal
+from pydantic import BaseModel, Field, SerializeAsAny
 
 from dbay import DBayClient
 
@@ -18,10 +18,7 @@ from lab_wizard.lib.instruments.general.discovery import (
     DiscoveredChild,
     DiscoveryAction,
 )
-from lab_wizard.lib.instruments.dbay.modules.dac4d import Dac4DParams, Dac4D
-from lab_wizard.lib.instruments.dbay.modules.dac16d import Dac16DParams, Dac16D
-from lab_wizard.lib.instruments.dbay.modules.adc4d import Adc4DParams, Adc4D
-from lab_wizard.lib.instruments.dbay.modules.empty import EmptyParams, Empty
+from lab_wizard.lib.instruments.dbay.children import DBayModuleParams
 
 
 # Map DBay server module types (core.type in the GUI snapshot) to child Params
@@ -34,10 +31,7 @@ _CHILD_TYPE_MAP: dict[str, str] = {
     "adc4D": "adc4D",
 }
 
-DBayChildParams = Annotated[
-    Dac4DParams | Dac16DParams | Adc4DParams | EmptyParams,
-    Field(discriminator="type"),
-]
+DBayChildParams = DBayModuleParams
 
 
 class DBayDiscoverChildrenParams(BaseModel):
@@ -69,10 +63,10 @@ class DBayParams(
     retain_changes: bool = Field(
         default=True, description="GUI mode: revert on cleanup if False"
     )
-    children: dict[str, DBayChildParams] = Field(default_factory=dict)
+    children: dict[str, SerializeAsAny[DBayModuleParams]] = Field(default_factory=dict)
 
-    @property
-    def inst(self):  # type: ignore[override]
+    @classmethod
+    def resource_class(cls):
         return DBay
 
     def create_inst(self) -> "DBay":
@@ -253,15 +247,15 @@ class DBay(
                 ADC4D as adc4D_mod,
             )
 
-            if isinstance(params, Dac4DParams):
+            if params.type == "dac4D":
                 module = self.client.attach_module(slot, dac4D_mod)
-            elif isinstance(params, Dac16DParams):
+            elif params.type == "dac16D":
                 module = self.client.attach_module(slot, dac16D_mod)
-            elif isinstance(params, Adc4DParams):
+            elif params.type == "adc4D":
                 module = self.client.attach_module(slot, adc4D_mod)
             else:
                 module = None
-        child = params.inst(module, params)
+        child = type(params).resource_class()(module, params)
         if key is not None:
             self.children[key] = child
         return child

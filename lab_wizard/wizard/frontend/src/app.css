@@ -1,21 +1,151 @@
 @import 'tailwindcss';
 
-/* Theme tokens (light by default) */
+/* ============================================================================
+   Design tokens
+   ----------------------------------------------------------------------------
+   The palette is derived from the wizard-hat mark in `logo.svg`: #4F41EF,
+   roughly hsl(245 84% 60%). That indigo is the brand constant — it is what the
+   logo is drawn in and it never changes between themes.
+
+   `--accent` is a separate token because the raw brand colour does not carry
+   enough contrast as body-sized text on white (~4.3:1). Marks and fills use
+   `--brand`; text and borders use `--accent`, which is the same hue pulled
+   darker in light mode and lighter in dark mode.
+
+   Neutrals are biased toward the brand hue rather than being pure greys, so the
+   chrome reads as belonging to the same family as the logo.
+
+   Semantic colours (ok / warn / crit) are deliberately outside the indigo
+   family: "running", "contended" and "blocked" must never be confused with
+   "this is interactive".
+   ========================================================================== */
+
 :root {
-	--bg: #f9fafb; /* gray-50 */
-	--text: #111827; /* gray-900 */
-	--card: #ffffff; /* white */
-	--muted: #6b7280; /* gray-500 */
-	--primary: #4f46e5; /* indigo-600 */
+	--brand: #4f41ef;
+
+	--ground: #f7f7fb;
+	--surface: #ffffff;
+	--surface-2: #f0f0f7;
+	--surface-3: #e5e5f0;
+
+	--ink: #16162b;
+	--ink-2: #3d3d5c;
+	--muted: #6c6c8a;
+
+	--line: #e2e2ec;
+	--line-2: #c9c9da;
+
+	--accent: #4536d9;
+	--accent-strong: #2f2394;
+	--accent-wash: #ecebfd;
+	/* Text that sits *on* an accent fill. The dark theme lightens the accent for
+	   contrast against a dark ground, which flips this to a dark ink — white on
+	   a pale indigo is the contrast failure this token exists to prevent. */
+	--on-accent: #ffffff;
+
+	--ok: #17794a;
+	--ok-wash: #e4f3ea;
+	--warn: #8a5a00;
+	--warn-wash: #f8f0dc;
+	--crit: #b02a26;
+	--crit-wash: #fae8e6;
+
+	--shadow: 0 1px 2px rgb(22 22 43 / 0.05), 0 1px 8px rgb(22 22 43 / 0.04);
+
+	color-scheme: light dark;
 }
 
-/* Dark mode via class on html */
-.dark {
-	--bg: #0b1020; /* custom deep gray/blue */
-	--text: #f3f4f6; /* gray-100 */
-	--card: #0f172a; /* slate-900 */
-	--muted: #9ca3af; /* gray-400 */
-	--primary: #6366f1; /* indigo-500 */
+/* The OS preference is the default signal. `:root.light` opts back out so an
+   explicit light choice still wins inside a dark-preferring OS. */
+@media (prefers-color-scheme: dark) {
+	:root:not(.light) {
+		--ground: #0c0c16;
+		--surface: #13131f;
+		--surface-2: #1a1a29;
+		--surface-3: #232335;
+
+		--ink: #e8e8f2;
+		--ink-2: #b6b6cc;
+		--muted: #8484a0;
+
+		--line: #232336;
+		--line-2: #33334d;
+
+		--accent: #8f86f5;
+		--accent-strong: #b3acfa;
+		--accent-wash: #1a1740;
+		--on-accent: #0c0c16;
+
+		--ok: #4fbe87;
+		--ok-wash: #10261b;
+		--warn: #d9a03c;
+		--warn-wash: #2a2110;
+		--crit: #e8817a;
+		--crit-wash: #2c1613;
+
+		--shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 10px rgb(0 0 0 / 0.25);
+	}
+}
+
+/* Explicit class override, so a future theme toggle beats the media query in
+   both directions. */
+:root.dark {
+	--ground: #0c0c16;
+	--surface: #13131f;
+	--surface-2: #1a1a29;
+	--surface-3: #232335;
+
+	--ink: #e8e8f2;
+	--ink-2: #b6b6cc;
+	--muted: #8484a0;
+
+	--line: #232336;
+	--line-2: #33334d;
+
+	--accent: #8f86f5;
+	--accent-strong: #b3acfa;
+	--accent-wash: #1a1740;
+	--on-accent: #0c0c16;
+
+	--ok: #4fbe87;
+	--ok-wash: #10261b;
+	--warn: #d9a03c;
+	--warn-wash: #2a2110;
+	--crit: #e8817a;
+	--crit-wash: #2c1613;
+
+	--shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 10px rgb(0 0 0 / 0.25);
+}
+
+/* `@theme inline` emits utilities that reference the custom property rather
+   than copying its value, so `bg-surface` follows the theme at runtime instead
+   of being frozen at build time. */
+@theme inline {
+	--color-brand: var(--brand);
+
+	--color-ground: var(--ground);
+	--color-surface: var(--surface);
+	--color-surface-2: var(--surface-2);
+	--color-surface-3: var(--surface-3);
+
+	--color-ink: var(--ink);
+	--color-ink-2: var(--ink-2);
+	--color-muted: var(--muted);
+
+	--color-line: var(--line);
+	--color-line-2: var(--line-2);
+
+	--color-accent: var(--accent);
+	--color-accent-strong: var(--accent-strong);
+	--color-accent-wash: var(--accent-wash);
+	--color-on-accent: var(--on-accent);
+
+	--color-ok: var(--ok);
+	--color-ok-wash: var(--ok-wash);
+	--color-warn: var(--warn);
+	--color-warn-wash: var(--warn-wash);
+	--color-crit: var(--crit);
+	--color-crit-wash: var(--crit-wash);
 }
 
 html {
@@ -23,6 +153,161 @@ html {
 }
 
 body {
-	background: var(--bg);
-	color: var(--text);
+	background: var(--ground);
+	color: var(--ink);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Identifiers — hash keys, bind addresses, inst:// roots — are content in this
+   app, not decoration, so give them a real monospace face. */
+.mono,
+code,
+kbd {
+	font-family: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono',
+		monospace;
+	font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* ============================================================================
+   Controls
+   ----------------------------------------------------------------------------
+   Buttons and inputs appear a few hundred times across these pages. Spelling
+   them out in utilities each time is where the old markup drifted — a dozen
+   near-identical button styles, none quite matching. One definition each keeps
+   them honest, and keeps the pages readable enough to see their structure.
+   ========================================================================== */
+
+@layer components {
+	.lw-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		border-radius: 0.25rem;
+		border: 1px solid var(--line-2);
+		background: var(--surface);
+		color: var(--ink);
+		padding: 0.375rem 0.75rem;
+		font-size: 0.78rem;
+		font-weight: 550;
+		line-height: 1.25rem;
+		cursor: pointer;
+		transition:
+			background-color 0.12s ease,
+			border-color 0.12s ease;
+	}
+	.lw-btn:hover:not(:disabled) {
+		background: var(--surface-2);
+		border-color: var(--muted);
+	}
+	.lw-btn:disabled {
+		opacity: 0.45;
+		cursor: default;
+	}
+
+	.lw-btn-primary {
+		background: var(--accent);
+		border-color: var(--accent);
+		color: var(--on-accent);
+	}
+	.lw-btn-primary:hover:not(:disabled) {
+		background: var(--accent);
+		border-color: var(--accent);
+		filter: brightness(1.08);
+	}
+
+	.lw-btn-danger {
+		background: var(--crit);
+		border-color: var(--crit);
+		color: #fff;
+	}
+	.lw-btn-danger:hover:not(:disabled) {
+		background: var(--crit);
+		border-color: var(--crit);
+		filter: brightness(1.08);
+	}
+
+	.lw-btn-sm {
+		padding: 0.15rem 0.45rem;
+		font-size: 0.72rem;
+		line-height: 1rem;
+	}
+
+	.lw-input,
+	.lw-select {
+		width: 100%;
+		border-radius: 0.25rem;
+		border: 1px solid var(--line-2);
+		background: var(--surface);
+		color: var(--ink);
+		padding: 0.35rem 0.5rem;
+		font-size: 0.78rem;
+		line-height: 1.15rem;
+	}
+	.lw-input:focus,
+	.lw-select:focus {
+		outline: 2px solid var(--accent);
+		outline-offset: -1px;
+		border-color: var(--accent);
+	}
+	.lw-input:disabled,
+	.lw-select:disabled {
+		opacity: 0.6;
+	}
+	.lw-input::placeholder {
+		color: var(--muted);
+	}
+
+	/* Field label — the small uppercase-free caption above an input. */
+	.lw-label {
+		display: block;
+		font-size: 0.7rem;
+		font-weight: 550;
+		color: var(--muted);
+		margin-bottom: 0.2rem;
+	}
+
+	/* Data table shared by Projects, Hardware ownership and the rules list. */
+	.lw-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.78rem;
+	}
+	.lw-table th {
+		text-align: left;
+		font-size: 0.65rem;
+		font-weight: 650;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted);
+		padding: 0.55rem 0.85rem;
+		border-bottom: 1px solid var(--line);
+		white-space: nowrap;
+	}
+	.lw-table td {
+		padding: 0.55rem 0.85rem;
+		border-bottom: 1px solid var(--line);
+		vertical-align: top;
+	}
+	.lw-table tbody tr:last-child td {
+		border-bottom: 0;
+	}
+	.lw-table tbody tr:hover {
+		background: var(--surface-2);
+	}
 }

@@ -10,7 +10,7 @@ This page covers three closely-related mechanisms:
 - how Lab Wizard **loads and saves** that tree
   ([`config_io.py`](../../lab_wizard/lib/utilities/config_io.py)),
 - how instrument types are **auto-discovered** from source
-  ([`params_discovery.py`](../../lab_wizard/lib/utilities/params_discovery.py))
+  ([`resource_catalog.py`](../../lab_wizard/lib/utilities/resource_catalog.py))
   and how the GUI **probes hardware**
   ([`discovery.py`](../../lab_wizard/lib/instruments/general/discovery.py)).
 
@@ -114,24 +114,30 @@ then saves the whole tree.
 ## Type discovery (source scanning) { #type-discovery }
 
 Lab Wizard never maintains a manual registry of instrument types. Instead,
-[`params_discovery.py`](../../lab_wizard/lib/utilities/params_discovery.py)
-**scans the source tree** for `Params` classes and builds a `type → module` map.
+[`resource_catalog.py`](../../lab_wizard/lib/utilities/resource_catalog.py)
+maintains an automatic source index and a runtime-validated catalog.
 
 A class is registered if it:
 
 - lives under `lib/instruments/` (or `lib/savers/`, `lib/plotters/`),
-- inherits an allowed base (`CanInstantiate`/`ChildParams` for instruments,
-  `SaverParams`/`PlotterParams` for the flat kinds), and
 - declares a `type: Literal["..."]` discriminator field.
 
-The scan is **regex-based on source text** (it does not import every module),
-which is fast and avoids import side effects. Results are cached to
-`~/.cache/lab_wizard/params_cache_<kind>.json`, invalidated by a folder
-fingerprint (max mtime + file count). `load_params_class("dbay")` then lazily
-imports and returns the class.
+The first stage parses source with Python's AST and records only candidate
+locations; it never imports a driver. The second stage imports candidates and
+validates their real Python/Pydantic relationships (`issubclass`, the `type`
+field, parent families, runtime class, and channel class). Both the source index
+and validated semantic metadata are cached under `~/.cache/lab_wizard/` with a
+schema version and per-file fingerprint. An unchanged wizard startup can render
+its choices without importing the complete driver library. New or changed files
+are detected automatically, and `load_params_class("dbay")` imports only the
+class being used.
+
+The generated cache is disposable acceleration data, never a registry a user
+edits. Deleting it causes a rebuild from Python source.
 
 `get_metadata(kind)` produces the rich per-type metadata the GUI needs: defaults,
-`key_hint`, parent chain, child types, and discovery-action specs.
+`key_hint`, Python-derived parent chain, child types, behaviors, channel
+behaviors, and discovery-action specs.
 
 !!! note "Three kinds, one mechanism"
     The same discovery machinery serves instruments, savers, and plotters via a

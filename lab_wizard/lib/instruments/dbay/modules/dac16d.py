@@ -1,7 +1,8 @@
 from typing import Any, ClassVar, Literal, List
 from pydantic import BaseModel, Field
 
-from lab_wizard.lib.instruments.general.parent_child import Child, ChildParams, ChannelProvider, ChannelsLike, SlotLike
+from lab_wizard.lib.instruments.general.parent_child import Child, ChannelProvider, ChannelsLike, SlotLike
+from lab_wizard.lib.instruments.dbay.children import DBayModuleParams
 from lab_wizard.lib.instruments.general.vsource import VSource
 
 
@@ -36,18 +37,20 @@ class Dac16DChannel(VSource):
         return True
 
 
-class Dac16DParams(ChannelsLike, SlotLike, ChildParams["Dac16D"]):
+class Dac16DParams(ChannelsLike, SlotLike, DBayModuleParams):
     type: Literal["dac16D"] = "dac16D"
     name: str = "Dac16D"
     num_channels: ClassVar[int] = 16
     channels: dict[int, Dac16DChannelParams] = Field(default_factory=dict)
 
-    @property
-    def inst(self):  # type: ignore[override]
+    @classmethod
+    def resource_class(cls):
         return Dac16D
 
 
 class Dac16D(Child[Any, Dac16DParams], ChannelProvider[Dac16DChannel]):
+    channel_class = Dac16DChannel
+
     def __init__(self, module: Any, params: Dac16DParams):
         self.module = module
         self.params = params
@@ -55,10 +58,6 @@ class Dac16D(Child[Any, Dac16DParams], ChannelProvider[Dac16DChannel]):
             Dac16DChannel(module, i, params.channels.get(i, Dac16DChannelParams()))
             for i in range(params.num_channels)
         ]
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.dbay.dbay.DBay"
 
     @property
     def dep(self) -> Any:

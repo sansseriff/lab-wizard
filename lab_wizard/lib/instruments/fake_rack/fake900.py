@@ -16,12 +16,14 @@ detectors.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import Field, SerializeAsAny
 
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
+from lab_wizard.lib.instruments.fake_rack.children import (
+    Fake900ModuleParams,
+    FakeGpibChildParams,
+)
 from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
 from lab_wizard.lib.instruments.fake_rack.virtual_rack import (
     VirtualGpibDevice,
@@ -35,7 +37,6 @@ from lab_wizard.lib.instruments.general.discovery import (
     SelfCandidatesResult,
 )
 from lab_wizard.lib.instruments.general.parent_child import (
-    ChildParams,
     Discoverable,
     GPIBAddressLike,
     ParentParams,
@@ -43,28 +44,26 @@ from lab_wizard.lib.instruments.general.parent_child import (
 from lab_wizard.lib.instruments.sim900.comm import Sim900MainframeDep
 from lab_wizard.lib.instruments.sim900.sim900 import Sim900
 
-Fake900ChildParams = Annotated[
-    Fake928Params | Fake970Params, Field(discriminator="type")
-]
+Fake900ChildParams = Fake900ModuleParams
 
 
 class Fake900Params(
     GPIBAddressLike,
     ParentParams["Fake900", Sim900MainframeDep, Fake900ChildParams],
-    ChildParams["Fake900"],
+    FakeGpibChildParams,
     Discoverable,
 ):
     """Parameters for the simulated mainframe (hybrid Parent + Child)."""
 
-    children: dict[str, Fake900ChildParams] = Field(default_factory=dict)
+    children: dict[str, SerializeAsAny[Fake900ModuleParams]] = Field(default_factory=dict)
     type: Literal["fake900"] = "fake900"
     device: SnspdModelParams = Field(
         default_factory=SnspdModelParams,
         description="The simulated detector this mainframe's modules are wired to",
     )
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return Fake900
 
     # -- Simulation ---------------------------------------------------------
@@ -129,7 +128,3 @@ class Fake900(Sim900):
     Slot routing, child instantiation, and the ``CONN``/escape framing are all
     inherited from :class:`Sim900`; only the declared parent differs.
     """
-
-    @property
-    def parent_class(self) -> str:
-        return "lab_wizard.lib.instruments.fake_rack.fakegpib.FakeGpib"
