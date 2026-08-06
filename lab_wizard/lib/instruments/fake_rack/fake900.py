@@ -12,6 +12,11 @@ are connected to *the same* detector, and one shared
 :class:`~lab_wizard.lib.instruments.fake_rack.snspd.SnspdModel` per mainframe
 is exactly that circuit. Two mainframes on one fake bus are two independent
 detectors.
+
+Anything wired to this detector from *outside* the rack — a simulated counter
+on its own transport, say — cannot be reached by ownership, so it joins by name
+instead: see :mod:`lab_wizard.lib.instruments.fake_rack.wiring` and the
+``detector_name`` field below.
 """
 
 from __future__ import annotations
@@ -24,7 +29,8 @@ from lab_wizard.lib.instruments.fake_rack.children import (
     Fake900ModuleParams,
     FakeGpibChildParams,
 )
-from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
+from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModelParams
+from lab_wizard.lib.instruments.fake_rack.wiring import shared_detector
 from lab_wizard.lib.instruments.fake_rack.virtual_rack import (
     VirtualGpibDevice,
     VirtualSim900,
@@ -61,6 +67,13 @@ class Fake900Params(
         default_factory=SnspdModelParams,
         description="The simulated detector this mainframe's modules are wired to",
     )
+    detector_name: str = Field(
+        default="",
+        description=(
+            "Name the detector to share it with instruments outside this rack "
+            "(e.g. a fake_counter reading the same device); empty keeps it private"
+        ),
+    )
 
     @classmethod
     def resource_class(cls):
@@ -75,8 +88,13 @@ class Fake900Params(
         selected only a voltage source gets a rack with only that module —
         addressing the empty slot then goes unanswered, as it would on real
         hardware.
+
+        The detector is private unless ``detector_name`` names it, in which case
+        instruments outside this rack — a simulated counter, typically — can be
+        wired to the same device. See
+        :mod:`lab_wizard.lib.instruments.fake_rack.wiring`.
         """
-        model = SnspdModel(self.device)
+        model = shared_detector(self.detector_name, self.device)
         modules: dict[int, VirtualSlotModule] = {}
         for child in self.children.values():
             builder = getattr(child, "virtual_module", None)

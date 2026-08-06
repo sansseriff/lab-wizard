@@ -18,7 +18,7 @@ from lab_wizard.lib.measurements.iv_curve.iv_curve_params import (
     IVSafetyParams,
 )
 from lab_wizard.lib.measurements.iv_curve.iv_curve_setup_template import IVCurveResources
-from lab_wizard.lib.measurements.pcr_curve.pcr_curve import PCRCurve
+from lab_wizard.lib.measurements.pcr_curve.pcr_curve import PCRCurveMeasurement
 from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import (
     PCRBiasParams,
     PCRCurveParams,
@@ -31,19 +31,36 @@ from lab_wizard.lib.measurements.general.sweep_params import ExplicitSweepParams
 from lab_wizard.lib.savers.saver import StandInSaver
 
 
-class FakeCounter(Counter):
-    """Counter that returns a fixed number of counts per gate."""
+class StubCounter(Counter):
+    """Counter that returns a fixed number of counts per gate.
+
+    A stub, not a simulation: it exists to check what the measurement does with
+    a count. The simulated counter that produces counts from detector physics
+    is ``fake_rack.fake_counter.FakeCounter``, exercised in
+    ``test_pcr_curve_end_to_end.py``.
+    """
 
     def __init__(self, counts: int) -> None:
         self.counts = counts
         self.gate_time = 1.0
+        self.threshold_mV = 0.0
 
-    def count(self, gate_time: float = 1.0, channel: int | None = None) -> int:
+    def count(self, gate_time: float | None = None) -> int:
         return self.counts
 
-    def set_gate_time(self, gate_time: float, channel: int | None = None) -> bool:
+    def set_gate_time(self, gate_time: float) -> bool:
         self.gate_time = gate_time
         return True
+
+    def get_gate_time(self) -> float:
+        return self.gate_time
+
+    def set_threshold(self, threshold_mV: float) -> bool:
+        self.threshold_mV = threshold_mV
+        return True
+
+    def get_threshold(self) -> float:
+        return self.threshold_mV
 
 
 def _iv_resources(points: list[float], *, settle_s: float = 0.0) -> IVCurveResources:
@@ -115,7 +132,7 @@ def test_pcr_curve_emits_count_rate_per_point() -> None:
         savers=[StandInSaver()],
         plotters=[],
         voltage_source=StandInVSource(),
-        counter=FakeCounter(counts),
+        counter=StubCounter(counts),
         params=PCRCurveParams(
             bias=PCRBiasParams(
                 sweep=ExplicitSweepParams(values_V=points), settle_s=0.0
@@ -126,7 +143,7 @@ def test_pcr_curve_emits_count_rate_per_point() -> None:
     saver = resources.savers[0]
     assert isinstance(saver, StandInSaver)
 
-    status = PCRCurve(resources).run_measurement()
+    status = PCRCurveMeasurement(resources).run_measurement()
 
     assert status is Status.SUCCESS
     rows = saver.measurements

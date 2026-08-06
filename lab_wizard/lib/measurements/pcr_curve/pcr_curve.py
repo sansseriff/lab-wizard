@@ -102,7 +102,7 @@ def build_pcr_procedure(resources: "PCRCurveResources") -> Step:
     )
 
 
-class PCRCurve:
+class PCRCurveMeasurement:
     """Build, wire, and run a PCR-curve procedure for a set of resources."""
 
     def __init__(self, resources: "PCRCurveResources") -> None:

@@ -38,16 +38,49 @@ comfortably inside the latching regime.
 This throwaway model fixes that resistor at 100 kΩ, matching the IV
 measurement's existing default, so it does not add simulation-only settings to
 experiment YAML. The default detector therefore switches at 0.03 V applied.
+
+**Photon counting.** The same detector also reports what a counter wired to its
+output would see, which is what makes a simulated PCR curve possible. Detection
+efficiency against bias current is an error function::
+
+    eta(I) = eta_max · ½·(1 + erf((I - I_mid) / (√2 · w)))
+
+— the standard shape, and for the standard reason: a photon absorbed anywhere
+along the wire triggers a click only if the local current is high enough, and
+the spread of those local thresholds is roughly Gaussian, so the *cumulative*
+probability is its integral. ``I_mid`` is the bias at half the plateau and
+``w`` sets how sharp the turn-on is. A detector with internal saturation has a
+small ``w`` and a long flat plateau; one without never quite flattens.
+
+Two things bend that curve at the ends, and both are what a real PCR curve
+looks like rather than decoration:
+
+* **Dark counts** double every ``dark_count_doubling_current_a`` of bias, so
+  they are invisible under the plateau and then take over near ``I_c``. That
+  crossover is the reason a PCR curve is measured at all.
+* **Latching** ends the curve. Above ``I_c`` the detector sits normal, emits no
+  pulses, and the count rate falls to zero rather than continuing to rise.
+
+The counter's discriminator is modelled too, since a threshold sweep is the
+other thing this detector is asked for: counts pass while the threshold is
+below the pulse amplitude and roll off across ``pulse_amplitude_spread_mV``
+around it. The comparison is on magnitude, so the model takes no position on
+whether the readout chain inverts.
 """
 
 from __future__ import annotations
 
+import math
 import random
 
 from pydantic import BaseModel, Field
 
 
 BIAS_RESISTANCE_OHM = 100_000.0
+
+# Above this mean, a Poisson draw is indistinguishable from a Gaussian one and
+# the direct method costs a multiply per event.
+_POISSON_GAUSSIAN_THRESHOLD = 30.0
 
 
 class SnspdModelParams(BaseModel):
@@ -72,6 +105,41 @@ class SnspdModelParams(BaseModel):
     seed: int = Field(
         default=20250805,
         description="Seed for the noise generator, so a noisy run is still reproducible",
+    )
+
+    # -- photon counting ----------------------------------------------------
+
+    incident_photon_rate_hz: float = Field(
+        default=1.0e6,
+        description="(Hz) photons arriving at the detector",
+    )
+    max_detection_efficiency: float = Field(
+        default=0.8,
+        description="Fraction of incident photons counted on the plateau (0-1)",
+    )
+    detection_midpoint_current_a: float = Field(
+        default=2.0e-7,
+        description="(A) bias current at half the plateau efficiency; must be below the critical current",
+    )
+    detection_width_current_a: float = Field(
+        default=3.0e-8,
+        description="(A) width of the error-function turn-on; smaller is a sharper knee",
+    )
+    dark_count_rate_hz: float = Field(
+        default=100.0,
+        description="(Hz) dark counts at the critical current",
+    )
+    dark_count_doubling_current_a: float = Field(
+        default=2.0e-8,
+        description="(A) bias increase that doubles the dark count rate",
+    )
+    pulse_amplitude_mV: float = Field(
+        default=200.0,
+        description="(mV) height of an output pulse at the counter input",
+    )
+    pulse_amplitude_spread_mV: float = Field(
+        default=20.0,
+        description="(mV) spread of pulse heights, which sets how sharply counts fall off with threshold",
     )
 
 
@@ -152,3 +220,93 @@ class SnspdModel:
         if self.params.noise_volts <= 0.0:
             return 0.0
         return self._rng.gauss(0.0, self.params.noise_volts)
+
+    # -- what the counter sees ------------------------------------------------
+
+    def detection_efficiency(self, current: float | None = None) -> float:
+        """Fraction of incident photons detected at ``current`` (default: now).
+
+        The error-function turn-on, evaluated by default at the current the
+        circuit is actually pushing — so it comes out of the same :meth:`solve`
+        as the voltmeter reading and cannot disagree with it.
+        """
+        amps = abs(self.bias_current() if current is None else current)
+        p = self.params
+        if p.detection_width_current_a <= 0.0:
+            return p.max_detection_efficiency if amps >= p.detection_midpoint_current_a else 0.0
+        argument = (amps - p.detection_midpoint_current_a) / (
+            math.sqrt(2.0) * p.detection_width_current_a
+        )
+        return p.max_detection_efficiency * 0.5 * (1.0 + math.erf(argument))
+
+    def dark_count_rate(self, current: float | None = None) -> float:
+        """Dark counts per second at ``current`` (default: now).
+
+        Doubling every ``dark_count_doubling_current_a``, normalised so the
+        configured rate is the rate *at the critical current*. Stating it there
+        rather than at zero bias is what makes the number meaningful: it is the
+        end of the curve where dark counts are measured and where they decide
+        how far the bias can usefully go.
+        """
+        p = self.params
+        amps = abs(self.bias_current() if current is None else current)
+        if p.dark_count_doubling_current_a <= 0.0:
+            return p.dark_count_rate_hz
+        exponent = (amps - p.critical_current_a) / p.dark_count_doubling_current_a
+        return p.dark_count_rate_hz * 2.0**exponent
+
+    def discriminator_fraction(self, threshold_mV: float) -> float:
+        """Fraction of pulses that clear a discriminator at ``threshold_mV``.
+
+        One minus the error function of the threshold against the pulse-height
+        distribution: everything passes well below the pulse amplitude, nothing
+        passes well above it, and the transition is where a threshold sweep
+        finds the pulse height.
+        """
+        p = self.params
+        if p.pulse_amplitude_spread_mV <= 0.0:
+            return 1.0 if abs(threshold_mV) <= p.pulse_amplitude_mV else 0.0
+        argument = (abs(threshold_mV) - p.pulse_amplitude_mV) / (
+            math.sqrt(2.0) * p.pulse_amplitude_spread_mV
+        )
+        return 0.5 * (1.0 - math.erf(argument))
+
+    def count_rate(self, threshold_mV: float = 0.0) -> float:
+        """Counts per second a counter on this detector would report.
+
+        Zero once the detector has latched: a device sitting in its normal
+        state produces no pulses, which is why a measured PCR curve stops at
+        the switching current instead of continuing to climb.
+        """
+        current, _ = self.solve()  # settles the branch; everything below reads it
+        if self._normal or not self.output_enabled:
+            return 0.0
+        photons = self.params.incident_photon_rate_hz * self.detection_efficiency(current)
+        dark = self.dark_count_rate(current)
+        return (photons + dark) * self.discriminator_fraction(threshold_mV)
+
+    def count_events(self, gate_time: float, threshold_mV: float = 0.0) -> int:
+        """Events counted in a gate — a Poisson draw about :meth:`count_rate`.
+
+        Drawn rather than rounded because photon arrivals are Poissonian, and a
+        PCR curve that came back perfectly smooth would let an analysis that
+        ignores counting statistics pass a test it should fail. The draw uses
+        the model's seeded generator, so a simulated run is still reproducible.
+        """
+        if gate_time <= 0.0:
+            return 0
+        return self._poisson(self.count_rate(threshold_mV) * gate_time)
+
+    def _poisson(self, mean: float) -> int:
+        """A Poisson draw, by Knuth's method below the Gaussian crossover."""
+        if mean <= 0.0:
+            return 0
+        if mean > _POISSON_GAUSSIAN_THRESHOLD:
+            return max(0, round(self._rng.gauss(mean, math.sqrt(mean))))
+        limit = math.exp(-mean)
+        count = 0
+        product = self._rng.random()
+        while product > limit:
+            count += 1
+            product *= self._rng.random()
+        return count

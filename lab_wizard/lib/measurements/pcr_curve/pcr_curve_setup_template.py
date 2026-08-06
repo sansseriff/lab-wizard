@@ -56,7 +56,9 @@ def create_instrument_resources(
 if __name__ == "__main__":
     import argparse
 
-    from lab_wizard.lib.measurements.pcr_curve.pcr_curve import PCRCurve
+    # The wizard copies the procedure beside this setup file so the generated
+    # project is the editable, runnable source of truth.
+    from pcr_curve import PCRCurveMeasurement
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -95,5 +97,5 @@ if __name__ == "__main__":
 
     resources = create_instrument_resources(project, resource_source)
 
-    measurement = PCRCurve(resources)
+    measurement = PCRCurveMeasurement(resources)
     measurement.run_measurement()

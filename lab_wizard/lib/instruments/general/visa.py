@@ -59,10 +59,20 @@ class VisaDep(ABC):
 
 @dataclass
 class LocalVisaDep(VisaDep):
-    """Local VISA resource dependency using pyvisa."""
+    """Local VISA resource dependency using pyvisa.
+
+    ``read_termination`` / ``write_termination`` are applied only when set.
+    A ``::INSTR`` resource carries message boundaries in the protocol itself,
+    but a raw ``::SOCKET`` resource is a bare TCP stream where nothing marks
+    the end of a reply — pyvisa reads until its timeout unless told which
+    character terminates a message. Instruments on port 5025 therefore pass
+    ``"\\n"``; leaving the default ``None`` keeps existing callers unchanged.
+    """
 
     resource: str
     timeout: float = 5.0
+    read_termination: str | None = None
+    write_termination: str | None = None
     _inst: Any = field(default=None, init=False, repr=False)
 
     def _ensure(self):
@@ -72,6 +82,10 @@ class LocalVisaDep(VisaDep):
             rm = pyvisa.ResourceManager("@py")
             self._inst = rm.open_resource(self.resource)
             self._inst.timeout = int(self.timeout * 1000)
+            if self.read_termination is not None:
+                self._inst.read_termination = self.read_termination
+            if self.write_termination is not None:
+                self._inst.write_termination = self.write_termination
             logger.debug("Opened VISA resource %s", self.resource)
             atexit.register(self.close)
         return self._inst
