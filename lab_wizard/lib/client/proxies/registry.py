@@ -18,10 +18,12 @@ from __future__ import annotations
 
 from typing import Type
 
+from lab_wizard.lib.client.proxies.attenuator import RemoteAttenuator
 from lab_wizard.lib.client.proxies.base import RemoteOpaque, RemoteProxy
 from lab_wizard.lib.client.proxies.counter import RemoteCounter
 from lab_wizard.lib.client.proxies.vsense import RemoteVSense
 from lab_wizard.lib.client.proxies.vsource import RemoteVSource
+from lab_wizard.lib.instruments.general.attenuator import Attenuator
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
@@ -31,6 +33,7 @@ PROXY_BY_BEHAVIOR: dict[type, Type[RemoteProxy]] = {
     VSource: RemoteVSource,
     VSense: RemoteVSense,
     Counter: RemoteCounter,
+    Attenuator: RemoteAttenuator,
 }
 
 # Behaviors that intentionally have no proxy, with the reason. ChannelProvider

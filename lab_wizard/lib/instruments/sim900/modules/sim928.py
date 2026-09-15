@@ -1,6 +1,5 @@
 from lab_wizard.lib.instruments.general.vsource import VSource
 from typing import Literal, Any
-from pydantic import Field
 from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
 from lab_wizard.lib.instruments.sim900.children import Sim900ModuleParams
 from lab_wizard.lib.instruments.sim900.comm import Sim900SlotDep
@@ -15,10 +14,6 @@ class Sim928Params(SlotLike, Sim900ModuleParams):
 
     type: Literal["sim928"] = "sim928"
     offline: bool | None = False
-    settling_time: float | None = Field(
-        default=0.4,
-        description="(seconds)",
-    )
     attribute_name: str | None = ""
 
     @classmethod
@@ -39,7 +34,6 @@ class Sim928(Child[Any, Sim928Params], VSource):
 
     def __init__(self, dep: Sim900SlotDep, params: Sim928Params):
         self.dep = dep
-        self.settling_time = params.settling_time
         self.attribute_name = params.attribute_name
 
     # Implement abstract VSource interface (single-channel instrument)

@@ -29,6 +29,7 @@ from lab_wizard.lib.instruments.general.behavior import (
     behaviors,
     register_behavior,
 )
+from lab_wizard.lib.instruments.general.attenuator import Attenuator
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.instruments.general.parent_child import ChannelProvider
 from lab_wizard.lib.instruments.general.vsense import VSense
@@ -68,9 +69,9 @@ def _import_every_instrument_module() -> list[str]:
 # --------------------------- registration ---------------------------
 
 
-def test_the_four_shipped_behaviors_are_registered():
+def test_the_five_shipped_behaviors_are_registered():
     registered = dict(behaviors())
-    for abc in (VSource, VSense, Counter, ChannelProvider):
+    for abc in (VSource, VSense, Counter, Attenuator, ChannelProvider):
         assert abc.__name__ in registered
         assert registered[abc.__name__] is abc
 
@@ -82,6 +83,7 @@ def test_terminal_behaviors_are_checked_before_containers():
     assert names.index("VSource") < names.index("ChannelProvider")
     assert names.index("VSense") < names.index("ChannelProvider")
     assert names.index("Counter") < names.index("ChannelProvider")
+    assert names.index("Attenuator") < names.index("ChannelProvider")
 
 
 def test_ordering_is_stable_across_calls():

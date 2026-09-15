@@ -156,11 +156,11 @@ def test_save_instruments_writes_field_description_comments(tmp_path: Path) -> N
     _write_test_config(config_dir)
 
     inst_dir = config_dir / "instruments"
-    sim928_files = list(inst_dir.rglob("sim928_key_*.yml"))
-    assert sim928_files, "Expected a saved sim928 YAML file"
-    sim928_text = sim928_files[0].read_text(encoding="utf-8")
-    assert "settling_time:" in sim928_text
-    assert "#" in sim928_text
+    sim970_files = list(inst_dir.rglob("sim970_key_*.yml"))
+    assert sim970_files, "Expected a saved sim970 YAML file"
+    sim970_text = sim970_files[0].read_text(encoding="utf-8")
+    assert "settling_time:" in sim970_text
+    assert "#" in sim970_text
 
 
 def test_generate_project_rejects_wrong_parent_chain(tmp_path: Path) -> None:

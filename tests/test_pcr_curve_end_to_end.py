@@ -389,6 +389,7 @@ def _set_measurement_params(yaml_path: Path) -> None:
     params["bias"]["sweep"] = {"mode": "explicit", "values_V": list(SWEEP_V)}
     params["bias"]["settle_s"] = 0.0
     params["readout"]["gate_time_s"] = GATE_TIME_S
+    params["readout"]["threshold_mV"] = THRESHOLD_MV
 
     with yaml_path.open("w", encoding="utf-8") as handle:
         io.dump(payload, handle)
@@ -465,6 +466,31 @@ def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> N
         assert abs(data["counts"] - expected) <= tolerance, (
             f"at {bias} V: {data['counts']} counts, model says {expected:.0f}"
         )
+
+
+def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Path) -> None:
+    """The run sets its own threshold instead of inheriting the counter's.
+
+    On a server-held counter, the current threshold is whatever the previous
+    client set. Leave it far above the pulse height — which alone would count
+    nothing — and the curve must still match the model at the project's own
+    threshold.
+    """
+    out = _generate_project(tmp_path)
+    module = _load_setup_module(Path(out["setup_file"]))
+    project = load_project_config(Path(out["yaml_file"]))
+    resources = module.create_instrument_resources(project)
+    resources.counter.set_threshold(DEVICE.pulse_amplitude_mV * 2)
+
+    runner = ProcedureRunner(instruments=resources)
+    observations: list[Observation] = []
+    runner.context.data_bus.subscribe(Observation, observations.append)
+    assert runner.run(PCRCurveMeasurement(resources).build_procedure()) is Status.SUCCESS
+
+    assert resources.counter.get_threshold() == pytest.approx(THRESHOLD_MV)
+    top = observations[-1].data
+    expected = _expected_counts(SWEEP_V[-1])
+    assert abs(top["counts"] - expected) <= 5.0 * math.sqrt(expected) + 5.0
 
 
 def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path) -> None:

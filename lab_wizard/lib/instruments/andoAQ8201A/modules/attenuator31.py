@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from lab_wizard.lib.instruments.general.attenuator import Attenuator
 from lab_wizard.lib.instruments.general.parent_child import Child, SlotLike
 from lab_wizard.lib.instruments.andoAQ8201A.children import AndoAQ8201AModuleParams
 from lab_wizard.lib.instruments.andoAQ8201A.comm import AndoAQ8201ASlotDep
@@ -20,13 +21,25 @@ class Attenuator31Params(SlotLike, AndoAQ8201AModuleParams):
         return Attenuator31
 
 
-class Attenuator31(Child[AndoAQ8201ASlotDep, Attenuator31Params]):
-    """Ando AQ8201-31 Variable Optical Attenuator Module."""
+class Attenuator31(Child[AndoAQ8201ASlotDep, Attenuator31Params], Attenuator):
+    """Ando AQ8201-31 Variable Optical Attenuator Module, as an :class:`Attenuator`.
+
+    The AQ8201-31 has no shutter read-back, which is why reading the shutter is
+    not part of the ABC.
+    """
 
     def __init__(self, dep: AndoAQ8201ASlotDep, params: Attenuator31Params):
         self._dep = dep
         self.params = params
         self.slot = dep.slot
+        self.attribute_name = params.attribute_name
+        # Offline, the dep answers every query with "", so the getter reports
+        # the last commanded value instead of failing to parse nothing.
+        self._commanded_attenuation_db = 0.0
+
+    @property
+    def offline(self) -> bool:
+        return bool(self.params.offline or getattr(self._dep, "offline", False))
 
     def get_status(self) -> tuple[int, float]:
         """Returns (wavelength_nm, attenuation_db)."""
@@ -40,11 +53,27 @@ class Attenuator31(Child[AndoAQ8201ASlotDep, Attenuator31Params]):
         wav = int(round(wavelength_nm))
         self._dep.write(f"AW {wav}")
 
-    def set_attenuation_db(self, attenuation_db: float) -> None:
+    # ---- Attenuator contract ----------------------------------------------
+
+    def set_attenuation(self, attenuation_db: float) -> bool:
         self._dep.write(f"AAV {attenuation_db}")
+        self._commanded_attenuation_db = float(attenuation_db)
+        return True
 
-    def open_shutter(self) -> None:
+    def get_attenuation(self) -> float:
+        # The module reports attenuation only alongside wavelength, in one
+        # status reply; there is no attenuation-only query.
+        if self.offline:
+            return self._commanded_attenuation_db
+        return self.get_status()[1]
+
+    def open_shutter(self) -> bool:
         self._dep.write("ASHTR 0")
+        return True
 
-    def close_shutter(self) -> None:
+    def close_shutter(self) -> bool:
         self._dep.write("ASHTR 1")
+        return True
+
+    def get_max_attenuation(self) -> float:
+        return self.params.max_attenuation

@@ -86,10 +86,15 @@ interchangeable. The behaviors live in `lib/instruments/general`:
 |---|---|---|
 | [`VSource`](../../lab_wizard/lib/instruments/general/vsource.py) | `set_voltage`, `turn_on`, `turn_off` | `Sim928`, `Dac4DChannel` |
 | [`VSense`](../../lab_wizard/lib/instruments/general/vsense.py) | `get_voltage` (+ `measure` alias) | `Sim970Channel` |
-| [`Counter`](../../lab_wizard/lib/instruments/general/counter.py) | `count`, `set_gate_time` | photon counters |
+| [`Counter`](../../lab_wizard/lib/instruments/general/counter.py) | `count`, `set_gate_time` / `get_gate_time`, `set_threshold` / `get_threshold` | `Keysight53220AChannel` |
+| [`Attenuator`](../../lab_wizard/lib/instruments/general/attenuator.py) | `set_attenuation` / `get_attenuation`, `open_shutter` / `close_shutter`, `get_max_attenuation`, `enter_safe_state` | `YokoAttenuator`, `Attenuator31` |
+
+Getters sit beside setters wherever the hardware quantizes or clamps: the value
+asked for is not necessarily the value applied, and data is only interpretable
+against the latter.
 
 Each behavior also ships a **stand-in** (`StandInVSource`, `StandInVSense`,
-`StandInCounter`) — a no-hardware implementation used as the default in setup
+`StandInCounter`, `StandInAttenuator`) — a no-hardware implementation used as the default in setup
 templates and in tests. Stand-ins set `ignore_in_cli = True` so discovery skips
 them.
 
@@ -130,6 +135,47 @@ that address back into the params). The config system hashes `key_fields()` into
 an 8-char key — see [Config & discovery](config-and-discovery.md#hashing). Adding
 a new addressing scheme is just a new mixin; `config_io` and the GUI pick it up
 without changes because they only ever call `key_fields()`/`apply_key()`.
+
+## What belongs in `Params`
+
+Not every setting an instrument accepts belongs in its params. There are three
+kinds of value, and only the first two live on an instrument:
+
+| Kind | Examples | Home | Changes when… |
+|---|---|---|---|
+| Connection / identity | `ip_address`, `port`, `slot`, `gpib_address` | instrument params | the device is replaced or readdressed |
+| Bench wiring | `impedance_ohm`, `coupling`, `probe_factor`, `wavelength_nm` | instrument params | someone rewires the bench |
+| Procedure | sweep bounds, gate time, settle time, the threshold a run counts at | the **measurement's** params | someone designs a different experiment |
+
+**The test for a new field:** *if someone rewires the bench, does this value
+change?* Then it is bench wiring, and it belongs here. *If someone runs a
+different experiment on the same bench, does it change?* Then it is procedure,
+and it belongs in the measurement's params model, handed to the instrument as a
+method argument — `counter.count(gate_time)`, `counter.set_threshold(mV)` — not
+stored on the instrument.
+
+The mistake this prevents is concrete. The previous generation of this software
+kept `config['counterInst']['triggerLevelStart']` beside the counter's
+impedance — a sweep endpoint filed under an instrument — and a threshold sweep
+then needs `triggerLevelEnd` and `triggerLevelStep` too. Every richer procedure
+grows the instrument's config instead of the measurement's.
+[`tests/test_params_categories.py`](../../tests/test_params_categories.py)
+fails on any instrument params model with start/stop/step-shaped fields.
+
+Two consequences for procedures:
+
+- **A procedure sets every procedure value it depends on.** An instrument may
+  still carry a default — `Keysight53220AChannelParams.gate_time_s` is what a
+  bare `count()` uses — but a measurement never relies on it. On a server-held
+  instrument, the current value is whatever the previous client left.
+  `pcr_curve` sets its threshold at the start of every run for this reason.
+- **Deviating from bench wiring is scoped.** A procedure that genuinely needs
+  a different coupling or threshold for part of a run wraps that part in
+  `WithSettings`, which reads each setting back, applies the override, and
+  restores it on exit — including on failure and abort.
+
+See [`plans/procedure_plan.md`](../../plans/procedure_plan.md) for the full
+rationale.
 
 ## A worked example: DBay → Dac4D → channels
 

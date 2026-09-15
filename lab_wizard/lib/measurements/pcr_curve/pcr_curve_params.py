@@ -30,6 +30,10 @@ class PCRReadoutParams(BaseModel):
 
     photon_rate_hz: float = 100_000.0
     gate_time_s: float = 1.0
+    # Set explicitly at the start of every run, never inherited from the
+    # counter: on a shared counter, its current threshold is whatever the last
+    # caller left. The default matches the counter's own configured default.
+    threshold_mV: float = -50.0
 
 
 class PCRCurveParams(BaseModel):

@@ -14,7 +14,6 @@ class Sim921Params(SlotLike, Sim900ModuleParams):
     type: Literal["sim921"] = "sim921"
     num_channels: int = 1
     offline: bool | None = False
-    settling_time: float | None = 0.1
     attribute_name: str | None = None
 
     @classmethod
@@ -32,7 +31,6 @@ class Sim921(Child[Any, Sim921Params]):
 
     def __init__(self, dep: Sim900SlotDep, params: Sim921Params):
         self.dep = dep
-        self.settling_time = params.settling_time
         self.attribute_name = params.attribute_name
         self.slot = params.slot
 

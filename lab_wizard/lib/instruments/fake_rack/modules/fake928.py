@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import Field
-
 from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel
 from lab_wizard.lib.instruments.fake_rack.virtual_rack import (
     VirtualSlotModule,
@@ -28,17 +26,13 @@ class Fake928Params(SlotLike, Fake900ModuleParams):
     """Parameters for the simulated voltage source module.
 
     Mirrors :class:`~lab_wizard.lib.instruments.sim900.modules.sim928.Sim928Params`
-    field for field, except that ``settling_time`` defaults to zero: there is
-    no hardware to settle, and a sweep of a few hundred points should not cost
-    a few hundred sleeps in a test suite. Raise it to simulate a slow rack.
+    field for field. Neither has a settling time: waiting for a source to
+    settle is procedure choreography, expressed as a ``Wait`` step with the
+    measurement's own ``settle_s``, not a property of the instrument.
     """
 
     type: Literal["fake928"] = "fake928"
     offline: bool | None = False
-    settling_time: float | None = Field(
-        default=0.0,
-        description="(seconds)",
-    )
     attribute_name: str | None = ""
 
     @classmethod

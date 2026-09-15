@@ -1,8 +1,9 @@
 """PCR (photon-count-rate) measurement built on the ``lab_procedure`` framework.
 
-The measurement is expressed as a ``Step`` tree: turn the source on, sweep the
-bias voltage (set, settle, count), then return to zero / turn off. Each bias
-point emits an :class:`~lab_procedure.Observation` on the run's ``data_bus``;
+The measurement is expressed as a ``Step`` tree: set the counter's threshold,
+turn the source on, sweep the bias voltage (set, settle, count), then return to
+zero / turn off. Each bias point emits an :class:`~lab_procedure.Observation`
+on the run's ``data_bus``;
 savers and plotters consume that stream via
 :class:`~lab_wizard.lib.task_adapters.savers.SaverSink` and
 :class:`~lab_wizard.lib.task_adapters.plotters.PlotterSink`.
@@ -31,6 +32,7 @@ from lab_procedure import (
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.task_adapters import PlotterSink, SaverSink
 from lab_wizard.lib.task_adapters.instrument_steps import (
+    SetThreshold,
     SetVoltage,
     SourceGuard,
 )
@@ -95,9 +97,15 @@ def build_pcr_procedure(resources: "PCRCurveResources") -> Step:
             name=f"point({bias_v:g}V)",
         )
 
-    return SourceGuard(
-        source,
-        Sweep("bias_voltage", points, point, name="bias_sweep"),
+    # The readout is configured before the device is biased, and the threshold
+    # is set rather than assumed — see PCRReadoutParams.threshold_mV.
+    return Sequence(
+        SetThreshold(counter, params.readout.threshold_mV, name="set_threshold"),
+        SourceGuard(
+            source,
+            Sweep("bias_voltage", points, point, name="bias_sweep"),
+            name="biased",
+        ),
         name="pcr_curve",
     )
 

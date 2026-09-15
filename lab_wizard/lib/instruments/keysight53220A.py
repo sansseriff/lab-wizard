@@ -124,9 +124,12 @@ class Keysight53220AChannelParams(BaseModel):
     """
 
     attribute_name: str = ""
+    # The gate a bare ``count()`` uses. Procedures pass their own gate time on
+    # every call (see pcr_curve's ``readout.gate_time_s``) and never rely on
+    # this: on a server-held counter, "current" is whatever the last caller set.
     gate_time_s: float = Field(
         default=1.0,
-        description="(s) length of one gated count",
+        description="(s) gate used by count() when no gate time is passed",
     )
     threshold_mode: Literal["absolute", "relative", "auto"] = Field(
         default="absolute",

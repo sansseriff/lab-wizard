@@ -1,7 +1,7 @@
 # Procedure composition plan
 
-> **Status: proposed.** Nothing here is built. Phase 0 is cleanup that stands on
-> its own; Phases 1-2 are useful even if the GUI composer never ships.
+> **Status: in progress.** Phase 0 and Phase 6.1-6.3 are built. Phases 1-2 are
+> useful even if the GUI composer never ships.
 
 How a measurement's *choreography* stops being hand-written Python buried in
 `lib/measurements/`, and becomes something composable, storable, and eventually
@@ -193,7 +193,7 @@ duck-typed and write whatever arrives.
 
 ---
 
-## Phase 0 — Finish the category-3 migration ⬜
+## Phase 0 — Finish the category-3 migration ✅ done
 
 Cleanup with no design risk. Do first; it is independently valuable and it makes
 every later phase smaller.
@@ -201,18 +201,51 @@ every later phase smaller.
 | # | Item | Where |
 |---|---|---|
 | 0.1 | Delete `settling_time` from `Sim928Params`, `Sim921Params`, `Fake928Params` — assigned to `self`, never read. **Keep it on `Sim970Params`/`Fake970Params`**, where `get_voltage` genuinely sleeps on it ([sim970.py:72](../lab_wizard/lib/instruments/sim900/modules/sim970.py#L72)): an ADC's own read discipline is category 2 | `lib/instruments/sim900/modules/`, `fake_rack/modules/` |
-| 0.2 | Decide `Keysight53220AChannelParams.gate_time_s`: document as the pre-arm default, or remove it as shadowed | `lib/instruments/keysight53220A.py` |
-| 0.3 | Audit every params model for category-3 fields; produce the promote/delete list | all of `lib/instruments/` |
+| 0.2 | ~~Decide `Keysight53220AChannelParams.gate_time_s`~~ **Kept, documented.** Not dead: the `Counter` contract says a bare `count()` uses the current gate time, and this seeds it. Procedures pass their own gate time every call and never rely on it | `lib/instruments/keysight53220A.py` |
+| 0.3 | Audit every params model for category-3 fields — **done; see the audit below.** Nothing further to delete | all of `lib/instruments/` |
 | 0.4 | Add `SetThreshold` beside `SetVoltage` — the missing generic step, and the proof that richer procedures need no new instrument params | `lib/task_adapters/instrument_steps.py` |
-| 0.5 | Add `WithSettings(instrument, **overrides)`, scoped and self-restoring (see 2.2) | `lib/task_adapters/instrument_steps.py` |
-| 0.6 | Test flagging `*_start`/`*_end`/`*_step` field triples on instrument params models — the `triggerLevelStart` smell, mechanised | `tests/` |
-| 0.7 | Document the three-category test where instruments are authored | `docs/`, and the custom-resource flow |
-| 0.8 | **`pcr_curve` never sets the threshold** — it counts with whatever `threshold_mV` the channel's settings hold at arm time. Locally that is the config value; on a server-held counter it is whatever the last client left. Move it into `PCRReadoutParams` and set it explicitly (via 0.4's `SetThreshold`) | `lib/measurements/pcr_curve/` |
+| 0.5 | `WithSettings(instrument, overrides, body)` — scoped and self-restoring (see 2.2). Takes a **mapping**, not `**overrides`, so a setting named `name` cannot collide with the step's own name. Restores read-back values, only for overrides actually applied, and never masks the body's own error | `lib/task_adapters/instrument_steps.py` |
+| 0.6 | Test flagging start/stop/step-shaped fields (any two of the three, snake or camel case, units suffix allowed) on every instrument params model and its nested models — `tests/test_params_categories.py`, with an `ALLOWED` table that is empty | `tests/` |
+| 0.7 | Document the three-category test where instruments are authored — **docs only**, in `docs/concepts/instrument-model.md` (see correction below) | `docs/` |
+| 0.8 | ✅ **`pcr_curve` never set the threshold** — it counts with whatever `threshold_mV` the channel's settings hold at arm time. Locally that is the config value; on a server-held counter it is whatever the last client left. Move it into `PCRReadoutParams` and set it explicitly (via 0.4's `SetThreshold`) | `lib/measurements/pcr_curve/` |
 
-**0.7 matters more than it looks.** [`custom_resource_generation.py`](../lab_wizard/wizard/backend/custom_resource_generation.py)
-already walks someone through authoring an instrument. One question when adding a
-field — *bench, or experiment?* — catches the mistake at the only moment the
-author has the context to answer it. Documentation alone will not.
+**Correction to 0.7.** This plan said the custom-resource flow "walks someone
+through authoring an instrument". It does not — it picks already-configured
+instruments from the tree and generates a file exposing them. Instruments are
+authored as Python `Params` classes, so there is no GUI moment to ask *bench, or
+experiment?* The mechanical check in 0.6 is what stands in for that question.
+
+**0.8 has a regression test that fails without the fix:** a counter left at
+twice the pulse height by an earlier caller, which on its own counts nothing,
+still yields the model's curve at the project's threshold.
+
+### 0.3 audit — every instrument params model
+
+38 models, 199 fields. Connection/identity fields (`ip_address`, `ip_port`,
+`port`, `baudrate`, `timeout`, `gpib_address`, `slot`, DBay `mode` /
+`direct_port` / `direct_transport` / `serial_port`, module `name`) are omitted.
+
+| Field | Category | Verdict |
+|---|---|---|
+| `Keysight53220AChannelParams.coupling`, `impedance_ohm`, `input_range_V`, `probe_factor`, `noise_rejection`, `lowpass_filter`, `slope` | 2 | stay — facts about the signal chain on that input |
+| `YokoAttenuatorParams` / `Attenuator31Params` / `PowerMeterParams.wavelength_nm` | 2 | stay — which laser is plugged in (and still never pushed to hardware: Phase 7.1) |
+| `Attenuator31Params.min_attenuation` / `max_attenuation`, `YokoAttenuatorParams.max_attenuation` | 2 | stay — hardware range; `max_attenuation` is the safe-state target |
+| `Sim970ChannelParams` / `Fake970ChannelParams.settling_time`, `max_retries` | 2 | stay — the ADC's own read discipline, used inside `get_voltage` |
+| `Fake970Params.device_channel`, `Fake900Params` / `FakeCounterParams.detector_name` and `device`, `SnspdModelParams.*` | 2 | stay — the simulated bench: what is wired to what, and what the device is |
+| `visa_timeout_s`, `measurement_timeout_s` | 1 | stay — transport robustness, sized up automatically for long gates |
+| `Keysight53220AChannelParams.gate_time_s` | 3 | stay as the bare-`count()` default (0.2); procedures pass their own |
+| `Keysight53220AChannelParams.threshold_mode` / `threshold_mV` / `threshold_percent` | **borderline** | stay as the baseline; a procedure that counts sets its own (0.8) |
+| `Keysight53220AParams.trigger_count`, `sample_count`, `trigger_delay_s` | **borderline** | an acquisition pattern is a procedure choice, but the counter needs a baseline to arm with. Stay; procedures using multi-reading cycles set them via `configure_trigger` |
+| `Keysight53220AParams.trigger_source` / `trigger_slope`, `gate_source` / `gate_polarity` | **borderline** | whether a trigger or gate cable exists is bench; whether *this* run uses it is procedure. Same rule: stay as baseline, set explicitly when used |
+| every `offline`, `DBayParams.retain_changes` | none | run-mode switches, not bench or experiment facts — see Open questions |
+
+**The rule for every borderline field is the same:** it stays on the instrument as
+the baseline that Phase 7.1 re-applies at run start, and any procedure whose
+result depends on it sets it explicitly. Nothing needed promoting or deleting
+beyond 0.1.
+
+*Oddity noticed, out of scope:* `Sim921Params.num_channels` is an instance field
+where every other model declares `num_channels` as a `ClassVar`.
 
 ---
 
@@ -422,7 +455,7 @@ Largely additive — the existing two-page flow survives.
 
 ---
 
-## Phase 6 — `Attenuator` ABC and `mcr_curve` ⬜
+## Phase 6 — `Attenuator` ABC and `mcr_curve` — 6.1-6.3 ✅ done, 6.4-6.6 ⬜
 
 The first procedure *authored* rather than hand-written, and the honest test of
 whether Phases 1-5 work. `mcr_curve` sweeps optical attenuation and records
@@ -473,6 +506,28 @@ served** — `config/instruments/yokogawa_aq2212_key_b3c9ab43/`, attribute
   proxy in [`proxies/registry.py`](../lab_wizard/lib/client/proxies/registry.py)
   so the behavior works through a server. The auto-forwarder makes that a
   one-line class.
+
+  **As built (6.1-6.3):** `lib/instruments/general/attenuator.py` with
+  `set_attenuation` / `get_attenuation`, `open_shutter` / `close_shutter`,
+  `get_max_attenuation`, a concrete `enter_safe_state`, `_state_methods_` for
+  attenuation and shutter, and `StandInAttenuator`. Decisions made while
+  building:
+  - **Shutter verbs, not "output".** The AQ2212 calls its shutter the module's
+    output; `open_shutter` / `close_shutter` say what happens to the light and
+    make the safe state unambiguous. Reading the shutter back is not on the ABC,
+    because the AQ8201-31 cannot; `YokoAttenuator.is_shutter_open()` keeps it.
+  - **`get_max_attenuation` reads a param** (`max_attenuation`, dB), added to
+    `YokoAttenuatorParams` to match Ando's existing field name. Querying the
+    hardware would be better, but the AQ2212's SCPI for it is unverified.
+  - **Offline getters return the last commanded value.** Both slot deps answer
+    every offline query with `""`, which the getters would otherwise fail to
+    parse.
+  - The configured `yoko_attenuator-broad-chicken` now reports
+    `behavior_abc: Attenuator` through the server registry, and an `Attenuator`
+    requirement matches both drivers in the picker. 19 tests in
+    `tests/test_attenuator.py`.
+  - The Ando status-parser test is shaped to the existing parser
+    (wavelength at characters 6-10), not to a captured instrument reply.
 - **6.4** Build `mcr_curve`. It does not exist — only a commented-out import in
   [`lib/__init__.py`](../lab_wizard/lib/__init__.py#L46) and an `MCR_CURVE` enum
   value in [`schema.py`](../lab_wizard/lib/savers/schema.py#L27).
@@ -526,8 +581,15 @@ procedure ended in. Steps 5 and 6 run on failure and abort too.
   implementation. Declared in `_query_methods_`? **No** — it writes.
 - **7.2** **`enter_safe_state()` on the behavior ABCs that have one:**
   `VSource` (0 V, output off), `Attenuator` (maximum attenuation, shutter
-  closed), later `Laser` (output off). Both 7.1 and 7.2 are abstract ABC
-  methods, so `RemoteProxy` auto-forwards them with no proxy code.
+  closed — ✅ built in 6.1), later `Laser` (output off). **Correction:** this
+  said both 7.1 and 7.2 would be abstract and forwarded as one RPC. Building
+  `Attenuator` showed why 7.2 must not be: the permission gate records state per
+  RPC method via `_state_methods_`, and one entry maps to one state key, so an
+  opaque `enter_safe_state` call would hide the shutter closing from the gate.
+  `enter_safe_state` is therefore **concrete on the ABC**, built from the
+  abstract primitives, and through a proxy it decomposes into individually
+  recorded calls. `apply_baseline` (7.1) touches no safety state and can stay
+  abstract.
 - **7.3** **`_query_methods_` on the behavior ABCs** — `get_voltage`,
   `get_gate_time`, `get_threshold`, `get_attenuation`, … — so the ABCs declare
   their reads once and every driver inherits them (server Phase 9.2).
@@ -571,26 +633,27 @@ Everything that has to be created or changed, across this plan and
 
 | Item | Kind | Phase |
 |---|---|---|
-| `Attenuator` behavior ABC — set/get attenuation, `enter_safe_state`, query decl. | new | 6.1, 7.2, 7.3 |
-| Rename Yokogawa `Attenuator` → `YokoAttenuator`; conform Yoko + Ando to the ABC | change | 6.2, 6.3 |
-| `enter_safe_state()` on `VSource` | new method | 7.2 |
+| ✅ `Attenuator` behavior ABC — set/get attenuation, shutter, `get_max_attenuation`, concrete `enter_safe_state` | new | 6.1 |
+| `_query_methods_` declarations on `Attenuator` | new | 7.3 |
+| ✅ Rename Yokogawa `Attenuator` → `YokoAttenuator`; conform Yoko + Ando to the ABC | change | 6.2, 6.3 |
+| `enter_safe_state()` on `VSource` — concrete, like `Attenuator`'s | new method | 7.2 |
 | `apply_baseline()` on every driver with category-2 params; push the dead `wavelength_nm` | new method | 7.1 |
 | `_query_methods_` merge helper beside `state_effects.py`; declarations on `VSource`, `VSense`, `Counter`, `Attenuator` | new | 7.3, server 9.2 |
 | `channels_claimable()` on params — false by default; true for `Keysight53220A`, SIM900 slots, DBay | new method | server 9.1 |
-| Delete dead `settling_time` on `Sim928`/`Sim921`/`Fake928`; resolve shadowed `gate_time_s` | cleanup | 0.1, 0.2 |
-| `Attenuator` proxy class | new, one line | 6.3 |
+| ✅ Delete dead `settling_time` on `Sim928`/`Sim921`/`Fake928`; document `gate_time_s` | cleanup | 0.1, 0.2 |
+| ✅ `Attenuator` proxy class | new, one line | 6.3 |
 
 ### Procedure layer — `lib/task_adapters/`, `lib/procedures/`
 
 | Item | Kind | Phase |
 |---|---|---|
-| `SetThreshold`, `WithSettings` steps | new | 0.4, 0.5 |
+| ✅ `SetThreshold`, `WithSettings` steps | new | 0.4, 0.5 |
 | `SafeGuard`; `SourceGuard` as alias | new | 7.5 |
 | `StepSpec`, `RoleRef`, spec per existing step | new | 1.1, 1.2 |
 | `Retry`, `Guard`, `Selector`; `ValueAbove` / `ValueBelow` / `StepFailed` | new | 1.3 |
 | `StepSpec` registry mirroring `resource_catalog` | new | 1.4 |
 | `RunLifecycle` | new | 7.4 |
-| `pcr_curve` sets its threshold from `PCRReadoutParams` | change | 0.8 |
+| ✅ `pcr_curve` sets its threshold from `PCRReadoutParams` | change | 0.8 |
 | `mcr_curve` | new, composed | 6.4 |
 
 ### Server and client — `lib/server/`, `lib/client/`
