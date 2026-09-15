@@ -27,7 +27,7 @@ import yaml
 
 logger = logging.getLogger("lab_wizard.wizard.backend.projects")
 
-__all__ = ["list_projects"]
+__all__ = ["list_projects", "projects_referencing"]
 
 
 def _read_project_yaml(project_dir: Path) -> Optional[dict[str, Any]]:
@@ -60,6 +60,12 @@ def _resource_names(resources: Any) -> dict[str, list[str]]:
         block = resources.get(kind)
         if isinstance(block, dict):
             out[kind] = sorted(str(k) for k in block)
+    # A current project copies no instrument params; it names its instruments
+    # in instrument_sources, and those names are what it is bound to.
+    if not out["instruments"]:
+        sources = resources.get("instrument_sources")
+        if isinstance(sources, dict):
+            out["instruments"] = sorted(str(k) for k in sources)
     return out
 
 
@@ -113,3 +119,38 @@ def list_projects(projects_dir: str | Path) -> list[dict[str, Any]]:
     for project in projects:
         project.pop("_sort", None)
     return projects
+
+
+def projects_referencing(projects_dir: str | Path, attributes: set[str]) -> list[dict[str, Any]]:
+    """Projects that name any of ``attributes`` as an instrument, newest first.
+
+    A project resolves each instrument by ``attribute_name`` when it runs, so
+    removing or renaming a named instrument breaks every project that uses it.
+    This is what a confirm dialog lists before that happens. Projects that still
+    carry their own instrument copy address it by hash and are unaffected.
+    """
+    if not attributes:
+        return []
+    root = Path(projects_dir).expanduser()
+    if not root.is_dir():
+        return []
+    found: list[dict[str, Any]] = []
+    for entry in root.iterdir():
+        if not entry.is_dir() or entry.name.startswith((".", "__")):
+            continue
+        data = _read_project_yaml(entry) or {}
+        resources = data.get("resources")
+        sources = resources.get("instrument_sources") if isinstance(resources, dict) else None
+        if not isinstance(sources, dict):
+            continue
+        used = sorted(attributes & {str(k) for k in sources})
+        if used:
+            try:
+                mtime = entry.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            found.append({"name": entry.name, "path": str(entry), "attributes": used, "_sort": mtime})
+    found.sort(key=lambda p: p["_sort"], reverse=True)
+    for project in found:
+        project.pop("_sort", None)
+    return found

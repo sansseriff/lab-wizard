@@ -13,7 +13,6 @@ from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     model_to_commented_map,
     to_commented_yaml_value,
-    instrument_hash,
 )
 from lab_wizard.lib.utilities.flat_resource_io import load_resources
 from lab_wizard.wizard.backend.get_measurements import (
@@ -35,12 +34,9 @@ from lab_wizard.wizard.backend._generation_common import (
     _NodeRef,
     _build_subset_instruments_from_selected_nodes,
     _compose_pedagogical_embedded,
-    _compose_pedagogical_yaml_expanded,
     _create_unique_project_dir,
-    _node_lineage_leaf_to_root,
     _resolve_selection_node,
     _sanitize_identifier,
-    _short_type_token,
     _type_info,
     _walk_tree,
 )
@@ -82,6 +78,9 @@ class GenerateProjectRequest(BaseModel):
     # A named preset from config/measurements/<measurement>/, copied into the
     # project's measurement.params. None means the measurement's own defaults.
     params_preset: str | None = None
+    # What ``measurement_name`` names: a measurement under lib/measurements, or
+    # a procedure definition (config/procedures or the built-in library).
+    kind: Literal["measurement", "procedure"] = "measurement"
 
 
 def _format_measurement_slug(measurement_name: str) -> str:
@@ -289,8 +288,8 @@ def _compose_setup(
     saver_selections: list[SelectedResource],
     plotter_selections: list[SelectedResource],
     template_text: str,
-    generation_style: str = "production",
 ) -> str:
+    """Setup code for the embedded teaching style."""
     if not instrument_reqs and not saver_reqs and not plotter_reqs:
         raise ValueError(f"No requirements found for measurement '{measurement_name}'")
 
@@ -318,128 +317,30 @@ def _compose_setup(
     return_field_lines: list[str] = []
     instrument_assignments: list[str] = []
 
-    if generation_style in ("pedagogical_yaml_expanded", "pedagogical_embedded"):
-        leaves = [inst_selected_map[req.variable_name] for req in instrument_reqs]
-        selections = [
-            SelectedResource(
-                variable_name=req.variable_name,
-                type=inst_selected_map[req.variable_name].type,
-                key=inst_selected_map[req.variable_name].key,
-                channel_index=inst_selected_channels.get(req.variable_name),
-            )
-            for req in instrument_reqs
-        ]
-        if generation_style == "pedagogical_yaml_expanded":
-            instrument_lines, imports, final_exprs = _compose_pedagogical_yaml_expanded(
-                selections=selections,
-                var_names=[req.variable_name for req in instrument_reqs],
-                leaves=leaves,
-            )
-        else:
-            instrument_lines, imports, final_exprs = _compose_pedagogical_embedded(
-                selections=selections,
-                var_names=[req.variable_name for req in instrument_reqs],
-                leaves=leaves,
-            )
-        instrument_import_pairs.update(imports)
-        for req, expr in zip(instrument_reqs, final_exprs):
-            local_name = f"{req.variable_name}_1"
-            instrument_assignments.append(f"{local_name} = {expr}")
-            resource_field_lines.append(_format_resource_field_line(req))
-            return_field_lines.append(_format_return_field_line(req, [local_name]))
-    else:
-        created_inst: dict[tuple[tuple[str, str], ...], str] = {}
-        used_names: dict[str, int] = {}
-
-        def _alloc(base: str) -> str:
-            count = used_names.get(base, 0) + 1
-            used_names[base] = count
-            return base if count == 1 else f"{base}_{count}"
-
-        for leaf in inst_selected_map.values():
-            chain = list(reversed(_node_lineage_leaf_to_root(leaf)))  # root -> leaf
-            lineage_id: list[tuple[str, str]] = []
-            for idx, node in enumerate(chain):
-                lineage_id.append((node.type, node.key))
-                key_t = tuple(lineage_id)
-                if key_t in created_inst:
-                    continue
-
-                module, params_cls = _type_info(node.type)
-                inst_cls = (
-                    params_cls[:-6] if params_cls.endswith("Params") else params_cls
-                )
-                instrument_import_pairs.add((module, inst_cls))
-
-                token = _short_type_token(node.type)
-                var_inst = _alloc(f"{token}_i")
-                created_inst[key_t] = var_inst
-
-                node_key_fields = (
-                    node.params.key_fields()
-                    if hasattr(node.params, "key_fields")
-                    else node.key
-                )
-                node_hash = (
-                    instrument_hash(node.type, node_key_fields)
-                    if node_key_fields
-                    else node.key
-                )
-
-                if idx == 0:
-                    instrument_lines.extend(
-                        [
-                            f"{var_inst} = {inst_cls}.from_config(resources, key={node_hash!r})",
-                            "",
-                        ]
-                    )
-                else:
-                    parent_id = tuple(lineage_id[:-1])
-                    parent_inst = created_inst[parent_id]
-                    instrument_lines.extend(
-                        [
-                            f"{var_inst} = {inst_cls}.from_config({parent_inst}, key={node_hash!r})",
-                            "",
-                        ]
-                    )
-
-        def _final_expr(var_name: str, leaf: _NodeRef) -> str:
-            chain = tuple(
-                (n.type, n.key) for n in reversed(_node_lineage_leaf_to_root(leaf))
-            )
-            base_inst = created_inst[chain]
-            ch_idx = inst_selected_channels.get(var_name)
-            num_channels = (
-                int(getattr(type(leaf.params), "num_channels", 0) or 0)
-                if isinstance(getattr(leaf.params, "channels", None), dict)
-                else 0
-            )
-            if num_channels > 1:
-                if ch_idx is None:
-                    raise ValueError(
-                        f"Selection for {var_name} uses multi-channel instrument "
-                        f"{leaf.type}:{leaf.key}; channel_index is required"
-                    )
-                if ch_idx < 0 or ch_idx >= num_channels:
-                    raise ValueError(
-                        f"Invalid channel_index {ch_idx} for {leaf.type}:{leaf.key}; "
-                        f"valid range is 0..{num_channels - 1}"
-                    )
-                return f"{base_inst}.channels[{ch_idx}]"
-            if ch_idx is not None:
-                raise ValueError(
-                    f"channel_index provided for {leaf.type}:{leaf.key}, but it is not multi-channel"
-                )
-            return base_inst
-
-        for req in instrument_reqs:
-            leaf = inst_selected_map[req.variable_name]
-            local_name = f"{req.variable_name}_1"
-            instrument_assignments.append(
-                f"{local_name} = {_final_expr(req.variable_name, leaf)}"
-            )
-            resource_field_lines.append(_format_resource_field_line(req))
-            return_field_lines.append(_format_return_field_line(req, [local_name]))
+    # Every param is written into the Python itself (the escape hatch in
+    # plans/procedure_plan.md 5.10); production generation references
+    # instruments by attribute_name instead and never reaches here.
+    leaves = [inst_selected_map[req.variable_name] for req in instrument_reqs]
+    selections = [
+        SelectedResource(
+            variable_name=req.variable_name,
+            type=inst_selected_map[req.variable_name].type,
+            key=inst_selected_map[req.variable_name].key,
+            channel_index=inst_selected_channels.get(req.variable_name),
+        )
+        for req in instrument_reqs
+    ]
+    instrument_lines, imports, final_exprs = _compose_pedagogical_embedded(
+        selections=selections,
+        var_names=[req.variable_name for req in instrument_reqs],
+        leaves=leaves,
+    )
+    instrument_import_pairs.update(imports)
+    for req, expr in zip(instrument_reqs, final_exprs):
+        local_name = f"{req.variable_name}_1"
+        instrument_assignments.append(f"{local_name} = {expr}")
+        resource_field_lines.append(_format_resource_field_line(req))
+        return_field_lines.append(_format_return_field_line(req, [local_name]))
 
     for req in saver_reqs:
         vars_ = [
@@ -740,9 +641,9 @@ def _resolve_instrument_selections(
         local_nodes=local_nodes,
         local_channels=local_channels,
         attribute_for=attribute_for,
-        # Only meaningful when something is routed; a purely local project keeps
-        # an empty mapping and so an unchanged YAML.
-        instrument_sources=owner if routed else {},
+        # Every named instrument, local ones included: a project resolves each
+        # attribute against the tree its source names (plans/procedure_plan.md 5.4).
+        instrument_sources=owner,
         routed=routed,
     )
 
@@ -823,10 +724,19 @@ def _default_project_yaml(
                 key: model_to_commented_map(value, exclude_none=True)
                 for key, value in plotters.items()
             },
-            "instruments": {
-                key: model_to_commented_map(value, exclude_none=True)
-                for key, value in instruments.items()
-            },
+            # Present only for the embedded style (and in projects generated
+            # before instrument params left the project); otherwise instruments
+            # are resolved from the tree instrument_sources names.
+            **(
+                {
+                    "instruments": {
+                        key: model_to_commented_map(value, exclude_none=True)
+                        for key, value in instruments.items()
+                    }
+                }
+                if instruments
+                else {}
+            ),
             # Omitted entirely for a purely local project, so existing projects
             # and their YAML are unchanged. Present only when something is
             # routed, which is also what the setup file keys its behaviour off.
@@ -839,8 +749,30 @@ def _default_project_yaml(
     }
 
 
+# Styles a request may name, and what each means now. ``from_attribute`` and
+# ``explicit`` were the names of what is simply production generation today.
+_STYLE_ALIASES = {
+    "production": "production",
+    "from_attribute": "production",
+    "explicit": "production",
+    "pedagogical_embedded": "pedagogical_embedded",
+}
+
+
+def _normalized_style(style: str) -> str:
+    if style == "pedagogical_yaml_expanded":
+        raise ValueError(
+            "The 'YAML expanded' teaching style has been retired: it taught hash "
+            "lookups into a project's own instrument copy, which projects no longer "
+            "carry. Use 'production', or 'pedagogical_embedded' for a self-contained file."
+        )
+    if style not in _STYLE_ALIASES:
+        raise ValueError(f"Unknown generation_style: {style}")
+    return _STYLE_ALIASES[style]
+
+
 def _params_for(
-    config_dir: Path, measurement: str, preset: str | None, model: type[BaseModel] | None
+    config_dir: Path, measurement: str, preset: str | None, model: type | None
 ) -> dict[str, Any] | None:
     """A project's initial ``measurement.params``: a preset, or ``None`` for defaults."""
     if preset is None:
@@ -888,16 +820,7 @@ def generate_project(
     only in where these pieces come from. ``params`` of ``None`` means the
     measurement's own defaults.
     """
-    if req.generation_style == "explicit":
-        req.generation_style = "production"
-    allowed_styles = {
-        "production",
-        "from_attribute",
-        "pedagogical_yaml_expanded",
-        "pedagogical_embedded",
-    }
-    if req.generation_style not in allowed_styles:
-        raise ValueError(f"Unknown generation_style: {req.generation_style}")
+    style = _normalized_style(req.generation_style)
 
     instrument_sels, saver_sels, plotter_sels = _split_selections(
         req.selected_resources
@@ -909,40 +832,38 @@ def generate_project(
     inst_selected_map = resolved.local_nodes
     inst_selected_channels = resolved.local_channels
 
-    if resolved.routed and req.generation_style != "from_attribute":
-        # The other styles emit ``Cls.from_config(resources, key=<hash>)``, which
-        # addresses a params tree this workspace does not have for a routed
-        # instrument. attribute_name is the only handle that means the same thing
-        # on both sides of the wire.
-        logger.info(
-            "Selection spans %d source(s); generating in from_attribute style "
-            "instead of %s",
-            len({*resolved.instrument_sources.values()}),
-            req.generation_style,
-        )
-        req.generation_style = "from_attribute"
-
-    if req.generation_style == "from_attribute" and not resolved.routed:
-        # Chosen deliberately for an all-local project; same requirement, but the
-        # user has not been told anything about sources, so say it plainly.
-        unnamed = _unnamed_local(resolved.local_nodes, resolved.attribute_for)
-        if unnamed:
-            raise ValueError(
-                "from_attribute generation requires attribute_name to be set on "
-                f"{', '.join(unnamed)}. Set it in the instrument config and "
-                "regenerate."
-            )
+    if resolved.routed and style == "pedagogical_embedded":
+        # Embedding a routed instrument's params would build a local object for
+        # hardware a server owns. attribute_name is the only handle that means
+        # the same thing on both sides of the wire.
+        logger.info("Selection includes a routed instrument; generating in production style")
+        style = "production"
 
     instrument_reqs, saver_reqs, plotter_reqs = _split_requirements(requirements)
 
-    # Only local instruments contribute params. A routed one is owned by its
-    # server; copying a snapshot here would create a second copy to drift.
-    instruments_subset = _build_subset_instruments_from_selected_nodes(
-        [
-            (leaf, inst_selected_channels.get(variable_name))
-            for variable_name, leaf in inst_selected_map.items()
-        ]
-    )
+    if style == "production":
+        unnamed = _unnamed_local(resolved.local_nodes, resolved.attribute_for)
+        if unnamed:
+            raise ValueError(
+                "A project references its instruments by attribute_name, but "
+                f"{', '.join(unnamed)} has none. Manage Instruments names every "
+                "instrument it saves, so this config was probably edited by hand: "
+                "set an attribute_name and try again."
+            )
+        # No instrument params in the project: they are read from the tree each
+        # attribute's source names, when the project runs.
+        instruments_subset: dict[str, Any] = {}
+        instrument_sources = resolved.instrument_sources
+    else:
+        # The escape hatch keeps a full copy, so the project runs outside any
+        # workspace — the reason to choose it.
+        instruments_subset = _build_subset_instruments_from_selected_nodes(
+            [
+                (leaf, inst_selected_channels.get(variable_name))
+                for variable_name, leaf in inst_selected_map.items()
+            ]
+        )
+        instrument_sources = {}
 
     saver_registry = load_resources(config_dir, "saver")
     plotter_registry = load_resources(config_dir, "plotter")
@@ -958,7 +879,7 @@ def generate_project(
         instruments_subset,
         savers_subset,
         plotters_subset,
-        resolved.instrument_sources,
+        instrument_sources,
         params=params,
     )
     yaml_path = project_dir / f"{project_dir.name}.yaml"
@@ -968,7 +889,7 @@ def generate_project(
     with yaml_path.open("w", encoding="utf-8") as f:
         y_writer.dump(to_commented_yaml_value(yaml_payload), f)
 
-    if req.generation_style == "from_attribute":
+    if style == "production":
         setup_code = _compose_setup_from_attribute(
             req.measurement_name,
             resolved.attribute_for,
@@ -990,7 +911,6 @@ def generate_project(
             saver_sels,
             plotter_sels,
             template_text,
-            generation_style=req.generation_style,
         )
 
     setup_path = project_dir / f"{req.measurement_name}_setup.py"

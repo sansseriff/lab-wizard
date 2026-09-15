@@ -109,7 +109,7 @@ from lab_wizard.wizard.backend.remote_tree import (
     remote_tree,
     remote_tree_edit,
 )
-from lab_wizard.wizard.backend.projects import list_projects
+from lab_wizard.wizard.backend.projects import list_projects, projects_referencing
 from lab_wizard.wizard.backend.transport_status import (
     conflicts_for_selection,
     duplicate_transport_check,
@@ -257,34 +257,87 @@ def get_measurements_meta(env: Env = Depends(get_env), verbose: bool = False):
     return res
 
 
+@app.get("/api/measurement-choices")
+def api_measurement_choices(env: Env = Depends(get_env)):
+    """Everything a measurement can be created from, in one list.
+
+    Hand-written measurements under ``lib/measurements`` and procedures —
+    this workspace's own, and the ones built into lab_wizard — are offered
+    side by side, because to the person creating a measurement they are the
+    same kind of thing: roles to bind, params to set.
+    """
+    from lab_wizard.lib.procedures.storage import list_presets, list_procedures, load_procedure, procedure_origin
+
+    config_dir = _config_dir(env)
+    choices: list[dict] = []
+    for name, info in sorted(get_measurements(env).items()):
+        choices.append(
+            {
+                "name": name,
+                "kind": "measurement",
+                "origin": "builtin",
+                "description": info.description,
+                "presets": list_presets(config_dir, name),
+            }
+        )
+    for name in list_procedures(config_dir):
+        try:
+            definition = load_procedure(config_dir, name)
+        except Exception as e:  # noqa: BLE001 - a broken definition is listed, not hidden
+            choices.append({"name": name, "kind": "procedure", "origin": procedure_origin(config_dir, name),
+                            "description": "", "error": str(e), "presets": []})
+            continue
+        choices.append(
+            {
+                "name": name,
+                "kind": "procedure",
+                "origin": procedure_origin(config_dir, name),
+                "description": definition.description,
+                "roles": {role: decl.behavior for role, decl in definition.roles.items()},
+                "records": definition.emitted_fields(),
+                "presets": list_presets(config_dir, name),
+            }
+        )
+    return {"choices": choices}
+
+
+def _requirements_for(name: str, kind: str, env: Env):
+    """``FilledReq``s for a measurement or a procedure, or a 404."""
+    if kind == "procedure":
+        from lab_wizard.lib.procedures.storage import load_procedure
+        from lab_wizard.wizard.backend.procedure_generation import procedure_requirements
+
+        try:
+            return procedure_requirements(load_procedure(_config_dir(env), name))
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    all_meas = get_measurements(env)
+    if name not in all_meas:
+        raise HTTPException(status_code=404, detail=f"Unknown measurement: {name}")
+    return reqs_from_measurement(all_meas[name])
+
+
 @app.get("/api/get-resources/{name}")
 def get_resources(
     name: str,
+    kind: str = "measurement",
     env: Env = Depends(get_env),
     verbose: bool = False,
 ):
     """Return all required resources (instruments, savers, plotters) for a measurement.
 
-    Each entry carries a ``resource_kind`` discriminator and the relevant
-    matching list — ``matching_instruments`` for instrument requirements
-    (populated by class-hierarchy discovery) or ``matching_resources`` for
-    saver/plotter requirements (populated from the configured registry).
+    ``kind`` is ``measurement`` for one under ``lib/measurements`` or
+    ``procedure`` for a procedure definition; both answer the same shape. Each
+    entry carries a ``resource_kind`` discriminator and the relevant matching
+    list — ``matching_instruments`` for instrument requirements (populated by
+    class-hierarchy discovery) or ``matching_resources`` for saver/plotter
+    requirements (populated from the configured registry).
     """
-    logger.info("Getting resources for measurement '%s'", name)
-
-    all_meas = get_measurements(env)
-    if name not in all_meas:
-        raise HTTPException(status_code=404, detail=f"Unknown measurement: {name}")
-
-    choice = all_meas[name]
-    if verbose:
-        logger.debug("Measurement choice for '%s': %s", name, choice)
-
+    logger.info("Getting resources for %s '%s'", kind, name)
+    reqs = _requirements_for(name, kind, env)
     config_dir = _config_dir(env)
 
     try:
-        reqs = reqs_from_measurement(choice)
-
         # Pre-load saver/plotter registries once.
         saver_tree = get_configured_resources_tree(config_dir, "saver")
         plotter_tree = get_configured_resources_tree(config_dir, "plotter")
@@ -880,10 +933,13 @@ def api_removal_impact(body: _RemoveBody, env: Env = Depends(get_env)):
         return {
             "attributes": sorted(attributes),
             "rules": rules_referencing(config_dir, attributes) if attributes else [],
+            # A project names its instruments and resolves them when it runs, so
+            # removing one breaks every project that uses it.
+            "projects": projects_referencing(_projects_dir(env), attributes),
         }
     except Exception as e:  # noqa: BLE001 - the dialog must still open
         logger.warning("Could not compute removal impact: %s", e)
-        return {"attributes": [], "rules": [], "error": str(e)}
+        return {"attributes": [], "rules": [], "projects": [], "error": str(e)}
 
 
 @app.post("/api/manage-instruments/remove")
@@ -1122,8 +1178,16 @@ def api_create_measurement_project(
     body: GenerateProjectRequest,
     env: Env = Depends(get_env),
 ):
-    """Create a project with subset YAML, resource setup, and measurement code."""
+    """Create a project from a measurement or a procedure (``body.kind``)."""
     try:
+        if body.kind == "procedure":
+            from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
+
+            return generate_procedure_project(
+                config_dir=Path(_config_dir(env)),
+                projects_dir=_projects_dir(env),
+                req=body,
+            )
         return generate_measurement_project(
             config_dir=Path(_config_dir(env)),
             projects_dir=_projects_dir(env),

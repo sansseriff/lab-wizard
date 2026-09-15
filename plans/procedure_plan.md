@@ -383,7 +383,55 @@ Requisite abilities, minimal set:
 
 ---
 
-## Phase 5 — Measurement creation, rewired ⬜
+## Phase 5 — Measurement creation, rewired ✅ mostly done
+
+### As built
+
+- **5.1-5.3 ✅** `/api/measurement-choices` lists hand-written measurements and
+  procedures (workspace and built-in) side by side; `/measurements/new` shows
+  them with their roles and preset counts. `/api/get-resources/{name}?kind=`
+  answers either, and `/api/create-measurement-project` takes `kind`. The
+  resources page has a params-preset selector.
+- **5.4 ✅ No instrument params in a project.** Production generation writes
+  `instrument_sources` for *every* instrument, local ones as `local`, and no
+  `instruments` block. `lib/client/project_resources.py` resolves a project at
+  run time: local attributes against the workspace's `config/instruments`,
+  routed ones through their servers; only the local roots the project uses are
+  claimed. All three setup templates (IV, PCR, procedure codegen) use it.
+- **5.5 ✅ By name.** Production emits `resources.from_attribute(...)` for local
+  instruments too; the hash style is gone. Removing an instrument lists the
+  projects that name anything under it (`projects_referencing`, in the removal
+  dialog). Names are not editable in the UI and reset preserves them, so removal
+  is the only way to break a reference.
+- **5.8 ✅** Run outside a workspace: `WorkspaceNotFound`, naming the escape hatch.
+  A renamed or removed instrument is reported before anything opens.
+- **5.9 ✅** A project with an `instruments` block resolves exactly as before.
+- **5.10 ✅ for measurement creation.** YAML-expanded is refused with its
+  reason; `from_attribute` and `explicit` are aliases of production. The
+  embedded style keeps its full YAML copy, so it still runs outside a workspace.
+- **Own server as a source ✅** — the gap this whole plan started from. This
+  workspace's daemon is listed as "This workspace, through its server", and the
+  transport-conflict warning's button reroutes the conflicting selections to it.
+
+### Found while building
+
+- **`ResourceConfig.from_attribute` rebuilt the chain from the root for every
+  attribute**, so two instruments in one rack got two rack objects — two opens
+  of one serial port on hardware, two disagreeing detectors in simulation. It
+  was latent in mixed local/routed projects; now built nodes are cached per
+  resource tree.
+- **`attributes_under` only matched top-level instruments**, so removing any
+  instrument inside a rack reported no affected permission rules. Fixed.
+
+### Not done
+
+- **5.6 provenance** (recording applied baselines) — deferred, as planned.
+- **5.7 leftovers:** the custom-resource flow still copies params and offers
+  YAML-expanded; the server's `project_yaml` hosting mode is not retired.
+- **Claimed instruments shown busy in the picker** (server 9.10) — not built.
+- **The UI has not been exercised in a browser.** It type-checks and builds;
+  the endpoints behind it are tested.
+
 
 Largely additive — the existing two-page flow survives.
 
@@ -469,21 +517,6 @@ Largely additive — the existing two-page flow survives.
   Python file, for messy testing and for ripping a project out of the
   lab_wizard ecosystem entirely. It breaks when an instrument is readdressed,
   and that is accepted. Label it as the escape hatch, never the default.
-
----|---|---|
-  | 1 — connection / identity | `config/instruments` | only when the instrument is local |
-  | 2 — bench wiring | `config/instruments` | yes |
-  | 3 — procedure | project YAML | yes |
-
-  **Category 1 cannot be project-local for a routed instrument** — connection
-  params define *which device*, so a project holding its own would be naming a
-  different instrument, not overriding one. Enforce this in the picker rather
-  than discovering it at run time.
-
-  Record the choice in the project YAML beside `instrument_sources`, for the
-  reason [composite_resources](../lab_wizard/lib/client/composite_resources.py)
-  already gives: a project should run identically for everyone and stay readable
-  six months later, which a remembered generation-time flag is not.
 
 ---
 

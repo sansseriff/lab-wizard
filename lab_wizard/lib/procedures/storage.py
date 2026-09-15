@@ -130,7 +130,7 @@ def list_presets(config_dir: str | Path, measurement: str) -> list[str]:
 
 
 def load_preset(
-    config_dir: str | Path, measurement: str, preset: str, model: type[BaseModel] | None = None
+    config_dir: str | Path, measurement: str, preset: str, model: type | None = None
 ) -> dict[str, Any]:
     """A preset's values, validated against ``model`` when one is given."""
     path = presets_dir(config_dir, measurement) / f"{preset}.yml"
@@ -138,7 +138,7 @@ def load_preset(
         known = ", ".join(list_presets(config_dir, measurement)) or "none"
         raise ValueError(f"No preset {preset!r} for {measurement!r} (have: {known})")
     values = YAML(typ="safe").load(path.read_text(encoding="utf-8")) or {}
-    if model is None:
+    if model is None or not issubclass(model, BaseModel):
         return values
     return model.model_validate(values).model_dump(mode="json")
 

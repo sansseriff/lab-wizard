@@ -76,8 +76,13 @@ class CompositeResources:
         *,
         server_urls: Optional[dict[str, str]] = None,
         connect: Optional[Any] = None,
+        local: Any = None,
     ) -> "CompositeResources":
         """Build from a project's own ``instrument_sources`` mapping.
+
+        ``local`` is what local attributes resolve against — the workspace's
+        instrument tree for a current project. It defaults to the project's own
+        resources, which is where an older project carries its instruments.
 
         ``server_urls`` maps a source name to a URL — normally the address book
         in ``config/remote/servers.yaml``. Only servers a project actually
@@ -100,7 +105,11 @@ class CompositeResources:
             remotes[name] = connect_fn(url)
             logger.info("Connected to %s (%s) for this project", name, url)
 
-        return cls(local=project.resources, remotes=remotes, sources=sources)
+        return cls(
+            local=local if local is not None else project.resources,
+            remotes=remotes,
+            sources=sources,
+        )
 
     @classmethod
     def all_remote(

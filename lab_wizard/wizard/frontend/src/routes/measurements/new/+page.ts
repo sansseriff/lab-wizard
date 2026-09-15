@@ -2,21 +2,36 @@ import type { PageLoad } from './$types';
 import { browser } from '$app/environment';
 import { fetchWithConfig } from '$lib/api';
 
-type MeasurementInfo = {
-    name: string;
-    description: string;
-    measurement_dir: string;
+/** One thing a measurement can be created from. See api_measurement_choices.
+ *
+ * `measurement` is hand-written Python under lib/measurements; `procedure` is a
+ * definition — this workspace's own, or built into lab_wizard. To the person
+ * creating a measurement both are roles to bind and params to set.
+ */
+export type MeasurementChoice = {
+	name: string;
+	kind: 'measurement' | 'procedure';
+	origin: 'builtin' | 'workspace' | null;
+	description: string;
+	roles?: Record<string, string>;
+	records?: string[];
+	presets: string[];
+	error?: string;
 };
 
-export const load: PageLoad = async ({ fetch }) => {
-    if (!browser) {
-        return { measurements: [] as MeasurementInfo[] };
-    }
-    const data = await fetchWithConfig('/api/get-measurements', 'GET');
-
-    // Backend returns an object keyed by measurement name; turn into array
-    const measurements: MeasurementInfo[] = Object.values(data ?? {});
-    return { measurements };
+export const load: PageLoad = async () => {
+	if (!browser) {
+		return { choices: [] as MeasurementChoice[], error: null as string | null };
+	}
+	try {
+		const data = await fetchWithConfig<{ choices: MeasurementChoice[] }>(
+			'/api/measurement-choices',
+			'GET'
+		);
+		return { choices: data?.choices ?? [], error: null };
+	} catch (e) {
+		return { choices: [] as MeasurementChoice[], error: e instanceof Error ? e.message : String(e) };
+	}
 };
 
 export const prerender = true;

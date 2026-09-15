@@ -34,11 +34,13 @@ from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
 from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
 from lab_wizard.lib.measurements.iv_curve.iv_curve import IVCurveMeasurement
 from lab_wizard.lib.utilities.config_io import (
+    load_instruments,
     assign_missing_leaf_attribute_names,
     instrument_hash,
     save_instruments_to_config,
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
+from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
@@ -184,30 +186,25 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path) -> None:
     assert "from iv_curve import IVCurveMeasurement" in setup_text
     assert "class IVCurveMeasurement" in measurement_text
 
-    assert (
-        "from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpib"
-        in setup_text
-    )
-    assert "from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900" in setup_text
-    assert (
-        "from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928"
-        in setup_text
-    )
-    assert f"FakeGpib.from_config(resources, key={GPIB_KEY!r})" in setup_text
-    assert "Fake900.from_config(" in setup_text
-    assert ".channels[0]" in setup_text
+    config = load_instruments(tmp_path / "config")
+    mainframe_params = config[GPIB_KEY].children[MAINFRAME_KEY]
+    source_name = mainframe_params.children[SOURCE_KEY].attribute_name
+    meter_name = mainframe_params.children[METER_KEY].channels[0].attribute_name
+    assert source_name and meter_name
+
+    # Instruments are referenced by name, never by a hash of their address.
+    assert f"resources.from_attribute({source_name!r})" in setup_text
+    assert f"resources.from_attribute({meter_name!r})" in setup_text
+    assert ".from_config(resources, key=" not in setup_text
 
     payload = cast(
         dict[str, Any],
         YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8")),
     )
-    rack = payload["resources"]["instruments"][GPIB_KEY]
-    assert rack["type"] == "fakegpib"
-    mainframe = rack["children"][MAINFRAME_KEY]
-    # The detector's constants travel with the project, so a simulated run is
-    # reproducible from the YAML alone.
-    assert mainframe["device"]["critical_current_a"] == DEVICE.critical_current_a
-    assert set(mainframe["children"]) == {SOURCE_KEY, METER_KEY}
+    # No copy of the rack: its params, detector constants included, stay in the
+    # workspace config, and the project says which instruments it uses.
+    assert "instruments" not in payload["resources"]
+    assert payload["resources"]["instrument_sources"] == {source_name: "local", meter_name: "local"}
     assert payload["measurement"]["params"]["readout"]["bias_resistance_ohm"] == 100_000.0
 
 
@@ -215,7 +212,9 @@ def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path) -> No
     out = _generate_project(tmp_path)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(project)
+    resources = module.create_instrument_resources(
+        project, resource_source_for(project, Path(out["project_dir"]))
+    )
 
     measurement = IVCurveMeasurement(resources)
     runner = ProcedureRunner(instruments=resources)
@@ -262,7 +261,9 @@ def test_measured_current_matches_the_detectors_true_bias_current(
     out = _generate_project(tmp_path)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(project)
+    resources = module.create_instrument_resources(
+        project, resource_source_for(project, Path(out["project_dir"]))
+    )
 
     runner = ProcedureRunner(instruments=resources)
     observations: list[Observation] = []

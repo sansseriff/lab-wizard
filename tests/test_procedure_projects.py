@@ -38,6 +38,7 @@ from lab_wizard.lib.utilities.config_io import (
     save_instruments_to_config,
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
+from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import (
     generate_procedure_project,
     refresh_procedure_source,
@@ -215,14 +216,19 @@ def test_the_generated_project_carries_the_preset_and_the_procedure(tmp_path: Pa
     assert "# wizard:procedure:start" in module_text and "# wizard:procedure:end" in module_text
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
     assert "class ComposedPcrParams(BaseModel):" in setup_text
-    assert f"FakeCounter.from_config(resources, key={COUNTER_KEY!r})" in setup_text
+    assert "resources.from_attribute(" in setup_text
+    assert ".from_config(resources, key=" not in setup_text
+    assert "instruments" not in payload["resources"]
+    assert set(payload["resources"]["instrument_sources"].values()) == {"local"}
 
 
 def test_the_composed_procedure_measures_the_detectors_curve(tmp_path: Path):
     out = _generate(tmp_path)
     setup, measurement = _load_setup(out)
     project = load_project_config(Path(out["yaml_file"]))
-    resources = setup.create_instrument_resources(project)
+    resources = setup.create_instrument_resources(
+        project, resource_source_for(project, Path(out["project_dir"]))
+    )
 
     runner = ProcedureRunner(instruments=resources)
     rows: list[Observation] = []
@@ -287,7 +293,10 @@ def test_refreshing_replaces_the_tree_and_keeps_edits_outside_it(tmp_path: Path)
     assert "def my_analysis():" in text
 
     setup, measurement = _load_setup(out)
-    resources = setup.create_instrument_resources(load_project_config(Path(out["yaml_file"])))
+    resources = setup.create_instrument_resources(
+        project := load_project_config(Path(out["yaml_file"])),
+        resource_source_for(project, Path(out["project_dir"])),
+    )
     assert ProcedureRunner().run(measurement.ComposedPcrMeasurement(resources).build_procedure()) is Status.SUCCESS
 
 

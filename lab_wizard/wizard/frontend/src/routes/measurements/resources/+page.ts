@@ -47,10 +47,15 @@ type Source = {
     editable: boolean;
     reachable: boolean;
     error: string | null;
+    // This workspace's own daemon, serving the same tree as `local`: choosing
+    // it means using an instrument through the server instead of opening it.
+    is_own_server?: boolean;
 };
 
 const EMPTY = {
     measurementName: null,
+    measurementKind: 'measurement' as 'measurement' | 'procedure',
+    presets: [] as string[],
     requirements: [] as any[],
     sources: [] as Source[],
     ownServer: null as { name: string; url: string; pid: number } | null
@@ -61,16 +66,27 @@ export const load = async ({ url }: any) => {
 
     const name = url.searchParams.get('name');
     if (!name) return EMPTY;
+    const kind: 'measurement' | 'procedure' =
+        url.searchParams.get('kind') === 'procedure' ? 'procedure' : 'measurement';
 
-    let requirements = await fetchWithConfig(`/api/get-resources/${encodeURIComponent(name)}`, 'GET');
+    let requirements = await fetchWithConfig(
+        `/api/get-resources/${encodeURIComponent(name)}?kind=${kind}`,
+        'GET'
+    );
     requirements = Array.isArray(requirements) ? requirements : [];
     const sourceData = await fetchWithConfig<{
         sources: Source[];
         own_server: { name: string; url: string; pid: number } | null;
     }>('/api/instrument-sources', 'GET');
+    const choices = await fetchWithConfig<{
+        choices: { name: string; kind: string; presets: string[] }[];
+    }>('/api/measurement-choices', 'GET');
+    const choice = choices?.choices?.find((c) => c.name === name && c.kind === kind);
 
     return {
         measurementName: name,
+        measurementKind: kind,
+        presets: choice?.presets ?? [],
         requirements,
         sources: sourceData?.sources ?? [],
         ownServer: sourceData?.own_server ?? null

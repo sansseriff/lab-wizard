@@ -1,25 +1,29 @@
 <script lang="ts">
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
+	import Callout from '$lib/components/Callout.svelte';
+	import Pill from '$lib/components/Pill.svelte';
 	import { goto, preloadData } from '$app/navigation';
-	type MeasurementInfo = { name: string; description: string; measurement_dir: string };
-	let loading = false;
-	let { data } = $props();
-	const measurements: MeasurementInfo[] = (data?.measurements ?? []) as MeasurementInfo[];
-	let selectedName = $state<string | null>(null);
-	// let selected: MeasurementInfo | null = $state(null);
+	import type { MeasurementChoice } from './+page';
 
-	function onNext() {
-		if (!selectedName) return;
-		goto(`/measurements/resources?name=${encodeURIComponent(selectedName)}`);
+	let { data } = $props();
+	const choices: MeasurementChoice[] = (data?.choices ?? []) as MeasurementChoice[];
+	let selected = $state<MeasurementChoice | null>(null);
+
+	function resourcesUrl(choice: MeasurementChoice): string {
+		return `/measurements/resources?name=${encodeURIComponent(choice.name)}&kind=${choice.kind}`;
 	}
 
-	async function onSelectionChange(name: string) {
-		selectedName = name;
-		// Prefetch the resource-selection page data when a measurement is selected
+	function onNext() {
+		if (selected) goto(resourcesUrl(selected));
+	}
+
+	async function onSelectionChange(choice: MeasurementChoice) {
+		if (choice.error) return;
+		selected = choice;
+		// Prefetching is only a speed-up; a failure here is not worth reporting.
 		try {
-			await preloadData(`/measurements/resources?name=${encodeURIComponent(name)}`);
+			await preloadData(resourcesUrl(choice));
 		} catch (error) {
-			// Silently fail if prefetching doesn't work - it's just a performance optimization
 			console.debug('Failed to prefetch resource-selection page:', error);
 		}
 	}
@@ -28,31 +32,55 @@
 <section class="space-y-4">
 	<h1 class="text-2xl font-semibold">Choose a measurement</h1>
 	<p class="text-sm text-ink-2">
-		Pick a measurement type, then continue to select instruments.
+		Pick what to run, then continue to bind instruments. Procedures are measurements written as
+		definitions rather than Python — built into lab_wizard, or saved in this workspace.
 	</p>
+
+	{#if data?.error}
+		<Callout tone="crit">{data.error}</Callout>
+	{/if}
 
 	<ScrollArea
 		type="hover"
 		class="relative overflow-hidden rounded border border-line bg-surface p-3 shadow-sm"
 		orientation="vertical"
-		viewportClasses="h-full max-h-[360px] w-full"
+		viewportClasses="h-full max-h-[420px] w-full"
 	>
 		<ul class="divide-y divide-line">
-			{#each measurements as m}
+			{#each choices as c (`${c.kind}:${c.name}`)}
 				<li>
 					<button
-						class={`w-full rounded-md px-3 py-3 text-left transition ${selectedName === m.name ? 'bg-accent-wash ring-1 ring-accent' : ''} hover:bg-accent-wash active:scale-[.99] active:bg-accent-wash`}
-						onclick={() => onSelectionChange(m.name)}
+						class={`w-full rounded-md px-3 py-3 text-left transition ${selected?.name === c.name && selected?.kind === c.kind ? 'bg-accent-wash ring-1 ring-accent' : ''} ${c.error ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent-wash active:scale-[.99]'}`}
+						onclick={() => onSelectionChange(c)}
+						disabled={Boolean(c.error)}
 					>
-						<div class="flex items-start gap-3">
-							<div>
-								<div class="font-medium">{m.name}</div>
-								<div class="text-xs text-ink-2">{m.description}</div>
-								<div class="truncate text-[10px] text-muted">
-									{m.measurement_dir}
-								</div>
-							</div>
+						<div class="flex items-center gap-2">
+							<span class="font-medium">{c.name}</span>
+							{#if c.kind === 'procedure'}
+								<Pill tone="accent">procedure</Pill>
+							{/if}
+							{#if c.origin === 'workspace'}
+								<Pill title="Saved in this workspace's config/procedures">this workspace</Pill>
+							{/if}
+							{#if c.presets.length > 0}
+								<span class="text-[11px] text-muted">
+									{c.presets.length} preset{c.presets.length === 1 ? '' : 's'}
+								</span>
+							{/if}
 						</div>
+						{#if c.description}
+							<div class="mt-0.5 text-xs text-ink-2">{c.description}</div>
+						{/if}
+						{#if c.roles}
+							<div class="mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted">
+								{#each Object.entries(c.roles) as [role, behavior] (role)}
+									<span class="mono">{role}: {behavior}</span>
+								{/each}
+							</div>
+						{/if}
+						{#if c.error}
+							<div class="mt-1 text-xs text-crit">This definition does not load: {c.error}</div>
+						{/if}
 					</button>
 				</li>
 			{/each}
@@ -63,7 +91,7 @@
 		<button
 			class="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:brightness-110 disabled:opacity-50"
 			onclick={onNext}
-			disabled={!selectedName || loading}
+			disabled={!selected}
 		>
 			Next
 		</button>

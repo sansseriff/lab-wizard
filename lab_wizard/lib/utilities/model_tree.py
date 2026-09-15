@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Literal, Tuple, Optional
 import yaml
 
-from pydantic import BaseModel, Field, SerializeAsAny, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, SerializeAsAny, model_validator
 from ruamel.yaml import YAML as RuamelYAML
 
 from lab_wizard.lib.utilities.resource_catalog import (
@@ -48,6 +48,12 @@ class ResourceConfig(BaseModel):
     # existing projects need no change.
     instrument_sources: dict[str, str] = Field(default_factory=dict)
 
+    # Instruments already built, by hash-key path from the root. Two attributes
+    # under one rack must share the rack: building it twice would open its
+    # serial port twice, and on a simulated rack would split one detector into
+    # two that disagree.
+    _built: dict[tuple[str, ...], Any] = PrivateAttr(default_factory=dict)
+
     @model_validator(mode="before")
     @classmethod
     def _parse_dynamic_resources(cls, data: dict[str, Any]) -> dict[str, Any]:
@@ -56,11 +62,19 @@ class ResourceConfig(BaseModel):
     def from_attribute(self, attribute_name: str) -> Any:
         result = _find_attribute_path(self.instruments, attribute_name)
         if result is None:
+            hint = (
+                " This resource tree holds no instruments at all: a project generated "
+                "since instrument params left the project YAML resolves them against "
+                "its workspace — pass resource_source_for(project, project_dir) from "
+                "lab_wizard.lib.client.project_resources."
+                if not self.instruments
+                else ""
+            )
             raise ValueError(
-                f"No instrument with attribute_name={attribute_name!r} found in resources"
+                f"No instrument with attribute_name={attribute_name!r} found in resources.{hint}"
             )
         path, channel_index = result
-        return _construct_from_path(path, channel_index)
+        return _construct_from_path(path, channel_index, self._built)
 
 
 class ProjectConfig(BaseModel):
@@ -182,10 +196,16 @@ def _search_node(
 def _construct_from_path(
     path: list[Tuple[str, Any]],
     channel_index: Optional[int],
+    built: Optional[dict[tuple[str, ...], Any]] = None,
 ) -> Any:
-    """Construct the full instrument chain for the given path and return the target."""
+    """Construct the instrument chain for ``path`` and return the target.
+
+    ``built`` carries nodes constructed by earlier calls, keyed by their path of
+    hash keys, so a root or mainframe shared by several attributes is built once.
+    """
     if not path:
         raise ValueError("Empty path — cannot construct instrument")
+    cache = built if built is not None else {}
 
     root_key, root_params = path[0]
     if not hasattr(root_params, "create_inst"):
@@ -193,10 +213,16 @@ def _construct_from_path(
             f"Root params {type(root_params).__name__} does not support create_inst(); "
             "top-level instruments must inherit CanInstantiate."
         )
-    current_inst = root_params.create_inst()
+    keys: tuple[str, ...] = (root_key,)
+    if keys not in cache:
+        cache[keys] = root_params.create_inst()
+    current_inst = cache[keys]
 
     for hash_key, _params in path[1:]:
-        current_inst = current_inst.make_child(hash_key)
+        keys = (*keys, hash_key)
+        if keys not in cache:
+            cache[keys] = current_inst.make_child(hash_key)
+        current_inst = cache[keys]
 
     if channel_index is not None:
         channels = getattr(current_inst, "channels", None)

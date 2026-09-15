@@ -71,6 +71,7 @@
 		editable: boolean;
 		reachable: boolean;
 		error: string | null;
+		is_own_server?: boolean;
 	};
 	type SelectedChoice = {
 		source: string;
@@ -90,6 +91,11 @@
 
 	let { data } = $props();
 	const measurementName: string | null = data?.measurementName ?? null;
+	const measurementKind: 'measurement' | 'procedure' =
+		data?.measurementKind === 'procedure' ? 'procedure' : 'measurement';
+	const presets: string[] = (data?.presets ?? []) as string[];
+	// A named preset from config/measurements/<name>/, or '' for the defaults.
+	let paramsPreset = $state('');
 	const reqs: ResourceReq[] = (data?.requirements ?? []) as ResourceReq[];
 	const sources: Source[] = (data?.sources ?? []) as Source[];
 	const ownServer: { name: string; url: string } | null = data?.ownServer ?? null;
@@ -165,6 +171,40 @@
 		return out;
 	}
 
+	/** Switch every local selection on a conflicting rack to this workspace's server.
+	 *
+	 * Only this workspace's own server can take a selection over directly: it
+	 * serves the same tree, so the same node has the same keys there. The
+	 * attribute_name is what the routed project will address it by.
+	 */
+	function rerouteToOwnServer(conflictRoot: string) {
+		rerouteError = null;
+		const own = sources.find((s) => s.is_own_server);
+		if (!own) return;
+		for (const r of instrumentReqs) {
+			const choice = selected[r.variable_name];
+			if (!choice || choice.source !== 'local' || choice.pathLeafToRoot.length === 0) continue;
+			const root = choice.pathLeafToRoot[choice.pathLeafToRoot.length - 1];
+			if (`inst://${root.key}` !== conflictRoot) continue;
+			const node = selectedNode(choice);
+			const attribute = node
+				? attributeOf(node, choice.channelCount > 1 ? choice.channelIndex : null)
+				: null;
+			if (!attribute) {
+				rerouteError = `${r.variable_name} has no attribute_name, so it cannot be used through a server.`;
+				continue;
+			}
+			selected[r.variable_name] = {
+				...choice,
+				source: own.name,
+				sourceLabel: own.label,
+				sourceKind: own.kind,
+				attribute,
+				pathKey: pathKey(own.name, [...choice.pathLeafToRoot].reverse())
+			};
+		}
+	}
+
 	$effect(() => {
 		const paths = selectedRootPaths();
 		if (paths.length === 0) {
@@ -195,9 +235,8 @@
 
 	let activeRequirement = $state<string | null>(null);
 	let projectPrefix = $state('');
-	let generationStyle = $state<
-		'production' | 'from_attribute' | 'pedagogical_yaml_expanded' | 'pedagogical_embedded'
-	>('production');
+	let generationStyle = $state<'production' | 'pedagogical_embedded'>('production');
+	let rerouteError: string | null = $state(null);
 	let creatingProject = $state(false);
 	let createError: string | null = $state(null);
 	let createResult:
@@ -466,9 +505,11 @@
 
 			const body: Record<string, any> = {
 				measurement_name: measurementName,
+				kind: measurementKind,
 				selected_resources,
 				generation_style: generationStyle
 			};
+			if (paramsPreset) body.params_preset = paramsPreset;
 			if (projectPrefix.trim()) body.project_prefix = projectPrefix.trim();
 			const res = await fetchWithConfig('/api/create-measurement-project', 'POST', body);
 			createResult = {
@@ -535,7 +576,11 @@
 										<li>
 											<span class="font-mono">{c.transport_key ?? c.root}</span>
 											is open in another process.
-											{#if reroutingOptions(c).length > 0}
+											{#if sources.some((s) => s.is_own_server)}
+												<button class="ml-1 underline" onclick={() => rerouteToOwnServer(c.root)}>
+													Use it through this workspace's server
+												</button>
+											{:else if reroutingOptions(c).length > 0}
 												<span class="text-crit">
 													Pick it from <span class="font-medium">{reroutingOptions(c).map((o) => o.label).join(' or ')}</span>
 													instead and this goes away.
@@ -562,18 +607,40 @@
 									{#each conflicts.configured_conflicts as c (c.root)}
 										<li>
 											<span class="font-mono">{c.transport_key ?? c.root}</span>
-											{#if reroutingOptions(c).length > 0}
+											{#if sources.some((s) => s.is_own_server)}
+												<button class="ml-1 underline" onclick={() => rerouteToOwnServer(c.root)}>
+													Use it through this workspace's server
+												</button>
+											{:else if reroutingOptions(c).length > 0}
 												<span>— available from {reroutingOptions(c).map((o) => o.label).join(' or ')}</span>
 											{/if}
 										</li>
 									{/each}
 								</ul>
 								<div class="mt-1 text-warn">
-									A local run works right now, but will fail as soon as anything uses that rack
-									through the server.
+									A local run works right now, but will fail as soon as anything uses that rack through the server.
+									</div>
 								</div>
-							</div>
-						{/if}
+							{/if}
+							{#if rerouteError}
+								<div class="text-xs text-crit">{rerouteError}</div>
+							{/if}
+					</div>
+				{/if}
+
+				{#if presets.length > 0}
+					<div class="mt-3">
+						<label class="lw-label" for="params-preset">Params preset</label>
+						<select id="params-preset" class="lw-input" bind:value={paramsPreset}>
+							<option value="">Defaults</option>
+							{#each presets as preset (preset)}
+								<option value={preset}>{preset}</option>
+							{/each}
+						</select>
+						<p class="mt-1 text-[11px] text-muted">
+							Copied into the project when it is generated; editing the preset later changes no
+							existing project.
+						</p>
 					</div>
 				{/if}
 
@@ -584,28 +651,21 @@
 							<input type="radio" bind:group={generationStyle} value="production" />
 							<span>
 								<span class="block font-medium">Production</span>
-								<span class="block text-xs text-muted">Short setup file; resolves selected resources from the project YAML.</span>
-							</span>
-						</label>
-						<label class="flex items-start gap-2 rounded border border-line px-3 py-2">
-							<input type="radio" bind:group={generationStyle} value="from_attribute" />
-							<span>
-								<span class="block font-medium">Remote attribute</span>
-								<span class="block text-xs text-muted">Looks up instruments by attribute name; use with remote servers.</span>
-							</span>
-						</label>
-						<label class="flex items-start gap-2 rounded border border-line px-3 py-2">
-							<input type="radio" bind:group={generationStyle} value="pedagogical_yaml_expanded" />
-							<span>
-								<span class="block font-medium">Teaching: YAML expanded</span>
-								<span class="block text-xs text-muted">Shows hash-key traversal and explicit parent/child creation.</span>
+								<span class="block text-xs text-muted">
+									Names each instrument; its settings come from this workspace's instrument config
+									when the project runs, so a readdressed rack needs no regeneration.
+								</span>
 							</span>
 						</label>
 						<label class="flex items-start gap-2 rounded border border-line px-3 py-2">
 							<input type="radio" bind:group={generationStyle} value="pedagogical_embedded" />
 							<span>
-								<span class="block font-medium">Teaching: embedded params</span>
-								<span class="block text-xs text-muted">Embeds selected instrument params directly in Python.</span>
+								<span class="block font-medium">Escape hatch: embedded params</span>
+								<span class="block text-xs text-muted">
+									Every setting written into the Python file, to run outside this workspace or to
+									learn from. Breaks when an instrument is readdressed; cannot use instruments
+									through a server.
+								</span>
 							</span>
 						</label>
 					</div>
@@ -829,7 +889,9 @@
 										{#if source.kind === 'machine'}
 											<span
 												class="rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium text-accent-strong"
-												title="A daemon on this machine. Its instruments are used through it, so they never contend with your local hardware."
+												title={source.is_own_server
+													? "The same instruments as 'This workspace', used through its server instead of opened by the project. Choose per instrument."
+													: 'A daemon on this machine. Its instruments are used through it, so they never contend with your local hardware.'}
 											>
 												through server
 											</span>
@@ -838,7 +900,7 @@
 									<!-- Both land on Configured instruments now; a same-machine
 									     server is a tab there rather than a separate page. -->
 									<a class="text-xs text-accent hover:underline" href="/instruments">
-										{source.kind === 'machine' ? 'Edit that workspace →' : 'Manage instruments →'}
+										{source.kind === 'machine' && !source.is_own_server ? 'Edit that workspace →' : 'Manage instruments →'}
 									</a>
 								</div>
 								<ScrollArea

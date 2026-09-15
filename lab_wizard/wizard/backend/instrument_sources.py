@@ -199,13 +199,15 @@ def _remote_source(name: str, url: str) -> dict[str, Any]:
 
 
 def list_instrument_sources(config_dir: str | Path) -> dict[str, Any]:
-    """Local tree, same-machine daemons, and registered remote servers.
+    """Local tree, this workspace's own daemon, other daemons, remote servers.
 
-    This workspace's *own* daemon is deliberately not offered as a separate
-    source — it serves the very tree already shown as ``local``, and listing it
-    twice would ask the user to choose between two names for one instrument. It
-    is reported separately as ``own_server`` so a transport conflict on a local
-    selection can offer routing through it as the fix.
+    This workspace's *own* daemon serves the same tree as ``local``, and it is
+    offered anyway, labelled as such. The two are not duplicates: they are the
+    choice between opening an instrument in the project's process and using it
+    through the server that owns it — made per instrument, so one project can
+    hold a local voltmeter and route a counter a server is already sharing. The
+    conflict warning for a local selection points at it as the fix. It is also
+    reported as ``own_server``.
     """
     from lab_wizard.wizard.backend.remote_servers import load_remote_servers
 
@@ -229,11 +231,12 @@ def list_instrument_sources(config_dir: str | Path) -> dict[str, Any]:
         # edit rights and needs no port.
         url = endpoints[0]
         if str(Path(entry.get("config_dir", "")).expanduser().resolve()) == config_dir:
-            own_server = {
-                "name": _unique(_workspace_name(entry.get("workspace_path")), taken),
-                "url": url,
-                "pid": entry.get("pid"),
-            }
+            name = _unique(_workspace_name(entry.get("workspace_path")), taken)
+            own_server = {"name": name, "url": url, "pid": entry.get("pid")}
+            own = _machine_source(entry, name, url)
+            own["label"] = "This workspace, through its server"
+            own["is_own_server"] = True
+            sources.append(own)
             continue
         name = _unique(_workspace_name(entry.get("workspace_path")), taken)
         sources.append(_machine_source(entry, name, url))

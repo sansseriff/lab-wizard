@@ -13,9 +13,7 @@ from typing import cast
 from lab_procedure import Status
 
 from lab_wizard.lib.client.claims import RoutedClaims
-from lab_wizard.lib.client.composite_resources import CompositeResources
-from lab_wizard.lib.client.local_claims import LocalTransportClaim
-from lab_wizard.lib.client.server_discovery import load_server_urls
+from lab_wizard.lib.client.project_resources import local_claims_for, resource_source_for
 from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
 from lab_wizard.lib.task_adapters.lifecycle import RunLifecycle
@@ -80,29 +78,11 @@ if __name__ == "__main__":
     project_yaml = project_dir / f"{project_dir.name}.yaml"
     project = load_project_config(project_yaml)
 
-    resource_source: object | None = None
-    claims: list[LocalTransportClaim] = []
-    if args.remote:
-        # Explicit override: route every *instrument* through one server. Savers
-        # and plotters stay local — they write this machine's database and draw
-        # on this machine's screen — which is why this is a composite rather
-        # than a bare RemoteResources.
-        resource_source = CompositeResources.all_remote(project, args.remote)
-    else:
-        if project.resources.instrument_sources:
-            # Per-attribute routing declared in the project YAML, so instruments
-            # may be split between this machine and one or more servers.
-            resource_source = CompositeResources.from_project(
-                project, server_urls=load_server_urls(project_dir)
-            )
-        # This process opens every instrument left in the project's own tree —
-        # all of them for a local project, the unrouted ones for a mixed one —
-        # so it claims their transports for the run, and refuses if a server
-        # already holds one. Naming the rack here beats an opaque failure deep
-        # inside a driver.
-        claims.append(
-            LocalTransportClaim(project.resources.instruments, owner=project_dir.name)
-        )
+    # Local instruments resolve against this workspace's config/instruments;
+    # routed ones through their servers (resources.instrument_sources). Only
+    # the local racks this project uses are claimed. See project_resources.py.
+    resource_source = resource_source_for(project, project_dir, remote=args.remote)
+    claims = local_claims_for(project, project_dir, owner=project_dir.name, remote=args.remote)
 
     # Claim local transports, build the instruments, claim the ones reached
     # through a server, reset them to their configured baseline, run, make them

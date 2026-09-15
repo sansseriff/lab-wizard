@@ -234,12 +234,14 @@ def attributes_under(config_dir: str | Path, type_str: str, key: str) -> set[str
     has to cover the whole subtree rather than just the node clicked.
     """
     registry = InstrumentRegistry.from_config_dir(str(config_dir))
-    prefix = f"inst://{key}"
-    return {
-        name
-        for name, path in registry.list_attributes().items()
-        if path == prefix or path.startswith(f"{prefix}/")
-    }
+
+    # The key can name a child as well as a root, so it is matched as a path
+    # segment anywhere, not only at the start. Matching only a leading
+    # ``inst://<key>`` reported nothing for any instrument inside a rack.
+    def under(path: str) -> bool:
+        return key in path[len("inst://"):].split("/")
+
+    return {name for name, path in registry.list_attributes().items() if under(path)}
 
 
 def _referenced_attributes(config: Any) -> set[str]:

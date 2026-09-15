@@ -46,6 +46,7 @@ from lab_wizard.lib.utilities.config_io import (
     save_instruments_to_config,
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
+from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
@@ -227,7 +228,10 @@ def _expected_rate(transmission: float) -> float:
 def test_the_measured_mcr_curve_follows_the_attenuation(tmp_path: Path):
     out = _generate(tmp_path)
     setup, measurement = _load(out)
-    resources = setup.create_instrument_resources(load_project_config(Path(out["yaml_file"])))
+    resources = setup.create_instrument_resources(
+        project := load_project_config(Path(out["yaml_file"])),
+        resource_source_for(project, Path(out["project_dir"])),
+    )
 
     runner = ProcedureRunner(instruments=resources)
     rows: list[Observation] = []

@@ -44,11 +44,13 @@ from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.measurements.pcr_curve.pcr_curve import PCRCurveMeasurement
 from lab_wizard.lib.utilities.config_io import (
+    load_instruments,
     assign_missing_leaf_attribute_names,
     instrument_hash,
     save_instruments_to_config,
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
+from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
@@ -418,30 +420,31 @@ def test_generated_setup_wires_the_simulated_counter(tmp_path: Path) -> None:
 
     assert "from pcr_curve import PCRCurveMeasurement" in setup_text
     assert "class PCRCurveMeasurement" in measurement_text
-    assert (
-        "from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounter"
-        in setup_text
-    )
-    assert f"FakeCounter.from_config(resources, key={COUNTER_KEY!r})" in setup_text
-    assert ".channels[0]" in setup_text
+    config = load_instruments(tmp_path / "config")
+    counter_name = config[COUNTER_KEY].channels[0].attribute_name
+    source_name = config[GPIB_KEY].children[MAINFRAME_KEY].children[SOURCE_KEY].attribute_name
+    assert f"resources.from_attribute({counter_name!r})" in setup_text
+    assert f"resources.from_attribute({source_name!r})" in setup_text
+    assert ".from_config(resources, key=" not in setup_text
 
     payload = cast(
         dict[str, Any],
         YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8")),
     )
-    counter = payload["resources"]["instruments"][COUNTER_KEY]
-    rack = payload["resources"]["instruments"][GPIB_KEY]
-    mainframe = rack["children"][MAINFRAME_KEY]
-    # The wiring is stated in the project, not implied by instantiation order.
-    assert counter["detector_name"] == mainframe["detector_name"] == DETECTOR
-    assert counter["channels"][0]["threshold_mV"] == THRESHOLD_MV
+    assert "instruments" not in payload["resources"]
+    assert payload["resources"]["instrument_sources"] == {counter_name: "local", source_name: "local"}
+    # The wiring lives in the workspace config, where the rack and counter are
+    # defined, rather than in a copy per project.
+    assert config[COUNTER_KEY].detector_name == config[GPIB_KEY].children[MAINFRAME_KEY].detector_name == DETECTOR
 
 
 def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> None:
     out = _generate_project(tmp_path)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(project)
+    resources = module.create_instrument_resources(
+        project, resource_source_for(project, Path(out["project_dir"]))
+    )
 
     runner = ProcedureRunner(instruments=resources)
     observations: list[Observation] = []
@@ -479,7 +482,9 @@ def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Pa
     out = _generate_project(tmp_path)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(project)
+    resources = module.create_instrument_resources(
+        project, resource_source_for(project, Path(out["project_dir"]))
+    )
     resources.counter.set_threshold(DEVICE.pulse_amplitude_mV * 2)
 
     runner = ProcedureRunner(instruments=resources)
@@ -497,7 +502,9 @@ def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path) -> None
     out = _generate_project(tmp_path)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(project)
+    resources = module.create_instrument_resources(
+        project, resource_source_for(project, Path(out["project_dir"]))
+    )
 
     runner = ProcedureRunner(instruments=resources)
     observations: list[Observation] = []

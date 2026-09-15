@@ -93,19 +93,50 @@ does three things:
 The project folder is timestamped, e.g. `projects/iv_curve_20260528_143012/`,
 containing `<folder>.yaml`, `<name>_setup.py`, and `<name>.py`.
 
-### Two generation styles
+### What a project contains
 
-The request's `generation_style` selects how instruments are constructed in the
-generated code:
+A project names its instruments and copies none of their settings. Its YAML
+records each instrument's `attribute_name` and where it lives:
 
-| Style | Construction line | When to use |
+```yaml
+resources:
+  instrument_sources:
+    sim928-brave-otter: local          # this workspace's config/instruments
+    counter-quiet-lynx: cryo-rack      # a server in config/remote/servers.yaml
+```
+
+and the setup file resolves each one when the project runs:
+
+```python
+voltage_source_1 = resources.from_attribute("sim928-brave-otter")
+```
+
+So a rack readdressed, or a bench setting changed, in Manage Instruments reaches
+every project that uses it without regenerating. The measurement's own params
+(`measurement.params`) stay frozen in the project. A project must run from inside
+its workspace, and says so if it is not. Removing an instrument in Manage
+Instruments lists the projects that use it first.
+
+Each instrument can come from this workspace directly, or **through this
+workspace's server** — the same instruments, used through the process that owns
+them instead of opened by the project. When a local selection conflicts with a
+rack the server holds, the warning offers that switch.
+
+### Generation styles
+
+| Style | What it writes | When to use |
 |---|---|---|
-| `explicit` (default) | `voltage_source_1 = Sim928.from_config(resources, key="c7fe1259")` | local hardware on this machine |
-| `from_attribute` | `voltage_source_1 = resources.from_attribute("bias_source")` | works against either a local `Exp` **or** a remote server |
+| `production` (default) | instruments by name, as above | always, unless you need the escape hatch |
+| `pedagogical_embedded` | every instrument's params written into the Python, plus a full copy in the project YAML | running a project outside any workspace, or reading how instruments are built. Breaks when an instrument is readdressed; cannot use an instrument through a server |
 
-`from_attribute` requires the selected instrument to have an `attribute_name`
-set. Multi-channel instruments resolve to `base.channels[i]` (explicit) or the
-channel's `attribute_name` (from_attribute).
+The former YAML-expanded teaching style is retired. Projects generated before
+this change carry their own instrument copy and keep running exactly as they did.
+
+### Procedures and presets
+
+Measurements under `lib/measurements` and [procedures](../concepts/procedures.md)
+are offered side by side, and either can start from a named **params preset**
+from `config/measurements/<name>/`, copied into the project when it is generated.
 
 ## Running the generated project
 

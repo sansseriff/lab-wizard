@@ -151,7 +151,11 @@ def _read_yaml(path: Path) -> dict:
 def test_a_routed_instrument_is_recorded_as_a_source_not_copied(
     workspace, fake_source
 ):
-    """The server owns that config; a copy here would be a copy to drift."""
+    """The server owns that config; a copy here would be a copy to drift.
+
+    Neither is the local rack copied any more: every instrument, local or
+    routed, is a name and a source (plans/procedure_plan.md 5.4).
+    """
     config_dir, projects_dir, instruments = workspace
 
     result = generate_measurement_project(
@@ -166,8 +170,7 @@ def test_a_routed_instrument_is_recorded_as_a_source_not_copied(
     data = _read_yaml(Path(result["yaml_file"]))
     resources = data["resources"]
 
-    # Only the local rack's params were copied.
-    assert set(resources["instruments"].keys()) == {_PROLOGIX_KEY}
+    assert "instruments" not in resources
 
     sense_attr = _attribute_of(
         instruments, _PROLOGIX_KEY, _SIM900_KEY, _SIM970_KEY, channel=0
@@ -295,8 +298,13 @@ def test_two_sources_claiming_one_attribute_name_are_refused(
 # --------------------------- local projects are untouched ---------------------------
 
 
-def test_a_purely_local_project_emits_no_sources_and_keeps_its_style(workspace):
-    """Existing behaviour must be bit-for-bit unchanged when nothing is routed."""
+def test_a_purely_local_project_is_referenced_by_name_like_any_other(workspace):
+    """Local and routed are one pattern: a name, and the tree that answers it.
+
+    Before instrument params left the project, a purely local project copied its
+    racks and addressed them by hash. Now it records a source for every
+    instrument and copies nothing, so readdressing a rack centrally reaches it.
+    """
     config_dir, projects_dir, instruments = workspace
 
     local_source = SelectedResource(
@@ -308,7 +316,6 @@ def test_a_purely_local_project_emits_no_sources_and_keeps_its_style(workspace):
             SelectedNodeRef(type="sim900", key=_SIM900_KEY),
             SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
         ],
-        # sim928 is single-channel; production style validates that.
     )
     result = generate_measurement_project(
         config_dir=config_dir,
@@ -321,10 +328,54 @@ def test_a_purely_local_project_emits_no_sources_and_keeps_its_style(workspace):
     )
 
     data = _read_yaml(Path(result["yaml_file"]))
-    assert "instrument_sources" not in data["resources"]
+    assert "instruments" not in data["resources"]
+    assert set(data["resources"]["instrument_sources"].values()) == {"local"}
     setup = Path(result["setup_file"]).read_text(encoding="utf-8")
-    assert ".from_config(resources, key=" in setup
-    assert "from_attribute" not in setup
+    assert ".from_config(resources, key=" not in setup
+    assert setup.count("resources.from_attribute(") == 2
+
+
+def test_the_embedded_style_still_carries_its_own_copy(workspace):
+    """The escape hatch: a project that runs outside any workspace."""
+    config_dir, projects_dir, instruments = workspace
+    result = generate_measurement_project(
+        config_dir=config_dir,
+        projects_dir=projects_dir,
+        req=GenerateProjectRequest(
+            measurement_name="iv_curve",
+            selected_resources=[
+                SelectedResource(
+                    variable_name="voltage_source",
+                    type="sim928",
+                    key=_SIM928_KEY,
+                    path=[
+                        SelectedNodeRef(type="sim928", key=_SIM928_KEY),
+                        SelectedNodeRef(type="sim900", key=_SIM900_KEY),
+                        SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
+                    ],
+                ),
+                _local_sense(instruments),
+            ],
+            generation_style="pedagogical_embedded",
+        ),
+    )
+    data = _read_yaml(Path(result["yaml_file"]))
+    assert set(data["resources"]["instruments"]) == {_PROLOGIX_KEY}
+    assert "instrument_sources" not in data["resources"]
+
+
+def test_the_yaml_expanded_style_is_retired_with_a_reason(workspace):
+    config_dir, projects_dir, instruments = workspace
+    with pytest.raises(ValueError, match="has been retired"):
+        generate_measurement_project(
+            config_dir=config_dir,
+            projects_dir=projects_dir,
+            req=GenerateProjectRequest(
+                measurement_name="iv_curve",
+                selected_resources=[_local_sense(instruments)],
+                generation_style="pedagogical_yaml_expanded",
+            ),
+        )
 
 
 # --------------------------- address book ---------------------------

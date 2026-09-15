@@ -91,6 +91,8 @@
 	// removing one instrument can make a different one un-callable.
 	type RemovalImpact = {
 		attributes: string[];
+		// Projects that name an instrument under this node and resolve it at run time.
+		projects?: { name: string; path: string; attributes: string[] }[];
 		rules: {
 			id: string;
 			description: string;
@@ -1018,8 +1020,28 @@
 
 			{#if confirmAction === 'remove'}
 				{#if impactLoading}
-					<p class="mt-3 text-xs text-muted">Checking permission rules…</p>
-				{:else if removalImpact && removalImpact.rules.length > 0}
+					<p class="mt-3 text-xs text-muted">Checking permission rules and projects…</p>
+				{/if}
+				{#if !impactLoading && removalImpact && (removalImpact.projects ?? []).length > 0}
+					<div class="mt-3 rounded-md border border-crit/30 bg-crit-wash p-2.5 text-xs">
+						<div class="font-medium text-crit">
+							{removalImpact.projects!.length} project(s) use this instrument
+						</div>
+						<ul class="mt-1 space-y-0.5 text-crit">
+							{#each removalImpact.projects! as project (project.path)}
+								<li>
+									<span class="font-mono">{project.name}</span>
+									— <span class="font-mono">{project.attributes.join(', ')}</span>
+								</li>
+							{/each}
+						</ul>
+						<div class="mt-1.5 text-crit">
+							A project finds its instruments by name when it runs, so these will stop at startup
+							until the instrument is added back under the same name, or they are regenerated.
+						</div>
+					</div>
+				{/if}
+				{#if !impactLoading && removalImpact && removalImpact.rules.length > 0}
 					<div
 						class="mt-3 rounded-md border border-warn/30 bg-warn-wash p-2.5 text-xs"
 					>

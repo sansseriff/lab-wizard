@@ -193,9 +193,7 @@ from typing import cast
 from lab_procedure import Status
 
 from lab_wizard.lib.client.claims import RoutedClaims
-from lab_wizard.lib.client.composite_resources import CompositeResources
-from lab_wizard.lib.client.local_claims import LocalTransportClaim
-from lab_wizard.lib.client.server_discovery import load_server_urls
+from lab_wizard.lib.client.project_resources import local_claims_for, resource_source_for
 from lab_wizard.lib.plotters.plotter import GenericPlotter
 from lab_wizard.lib.savers.saver import GenericSaver
 from lab_wizard.lib.task_adapters.lifecycle import RunLifecycle
@@ -255,24 +253,15 @@ if __name__ == "__main__":
     project_dir = Path(__file__).resolve().parent
     project = load_project_config(project_dir / f"{{project_dir.name}}.yaml")
 
-    resource_source: object | None = None
-    claims: list[LocalTransportClaim] = []
-    if args.remote:
-        resource_source = CompositeResources.all_remote(project, args.remote)
-    else:
-        if project.resources.instrument_sources:
-            resource_source = CompositeResources.from_project(
-                project, server_urls=load_server_urls(project_dir)
-            )
-        # Every instrument left in the project's own tree is opened by this
-        # process, so its transport is claimed for the run.
-        claims.append(
-            LocalTransportClaim(project.resources.instruments, owner=project_dir.name)
-        )
+    # Local instruments resolve against this workspace's config/instruments;
+    # routed ones through their servers (resources.instrument_sources). Only
+    # the local racks this project uses are claimed. See project_resources.py.
+    resource_source = resource_source_for(project, project_dir, remote=args.remote)
+    claims = local_claims_for(project, project_dir, owner=project_dir.name, remote=args.remote)
 
     # Claim local transports, build the instruments, claim the ones reached
-    # through a server, reset them to baseline, run, make them safe if the run
-    # fails, release. See lab_wizard/lib/task_adapters/lifecycle.py.
+    # through a server, reset them to their configured baseline, run, make them
+    # safe if the run fails, release. See lifecycle.py.
     status = RunLifecycle(
         claims=claims,
         claims_after_resolve=[

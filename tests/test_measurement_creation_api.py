@@ -1,0 +1,182 @@
+"""Measurement creation, rewired (procedure plan Phase 5), through the API.
+
+Procedures appear beside hand-written measurements, take presets, and generate
+through the same endpoint; removing an instrument lists the projects that use
+it; and this workspace's own server is a source an instrument can be picked
+from.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from ruamel.yaml import YAML
+
+from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
+from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuatorParams
+from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
+from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
+from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
+from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
+from lab_wizard.lib.procedures.storage import load_procedure, save_preset
+from lab_wizard.lib.utilities.config_io import (
+    assign_missing_leaf_attribute_names,
+    instrument_hash,
+    load_instruments,
+    save_instruments_to_config,
+)
+from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.workspace import WORKSPACE_ENV, initialize_workspace
+
+RACK = instrument_hash("fakegpib", "sim://api-rack")
+MAINFRAME = instrument_hash("fake900", "5")
+SOURCE = instrument_hash("fake928", "1")
+METER = instrument_hash("fake970", "2")
+COUNTER = instrument_hash("fake_counter", "sim://api-counter:5025")
+ATTENUATOR = instrument_hash("fake_attenuator", "sim://api-attenuator")
+
+
+@pytest.fixture
+def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    ws, _ = initialize_workspace(tmp_path / "workspace")
+    monkeypatch.setenv(WORKSPACE_ENV, str(ws.root))
+    instruments: dict[str, Any] = {
+        RACK: FakeGpibParams(
+            port="sim://api-rack",
+            children={
+                MAINFRAME: Fake900Params(
+                    gpib_address="5",
+                    detector_name="api",
+                    children={SOURCE: Fake928Params(slot="1"), METER: Fake970Params(slot="2")},
+                )
+            },
+        ),
+        COUNTER: FakeCounterParams(ip_address="sim://api-counter", detector_name="api"),
+        ATTENUATOR: FakeAttenuatorParams(port="sim://api-attenuator", detector_name="api"),
+    }
+    assign_missing_leaf_attribute_names(instruments)
+    save_instruments_to_config(instruments, ws.config_dir)
+    # Not entered as a context manager: that runs the app's startup, which
+    # configures logging and tries to start a server for the workspace — both
+    # of which leak into every test that runs after this file. The app caches
+    # its workspace on app.state, so it is cleared for each test instead.
+    monkeypatch.setattr(app.state, "env", None, raising=False)
+    yield ws, TestClient(app)
+
+
+def _mcr_selections() -> list[dict[str, Any]]:
+    rack = [{"type": "fake900", "key": MAINFRAME}, {"type": "fakegpib", "key": RACK}]
+    return [
+        {"variable_name": "voltage_source", "type": "fake928", "key": SOURCE,
+         "path": [{"type": "fake928", "key": SOURCE}, *rack]},
+        {"variable_name": "voltage_sense", "type": "fake970", "key": METER, "channel_index": 0,
+         "path": [{"type": "fake970", "key": METER}, *rack]},
+        {"variable_name": "counter", "type": "fake_counter", "key": COUNTER, "channel_index": 0,
+         "path": [{"type": "fake_counter", "key": COUNTER}]},
+        {"variable_name": "attenuator", "type": "fake_attenuator", "key": ATTENUATOR,
+         "path": [{"type": "fake_attenuator", "key": ATTENUATOR}]},
+    ]
+
+
+def test_procedures_are_offered_beside_measurements_with_their_presets(workspace):
+    ws, client = workspace
+    definition = load_procedure(ws.config_dir, "mcr_curve")
+    save_preset(ws.config_dir, "mcr_curve", "bench", {"bias": {"voltage": 0.02}}, definition.params_model())
+
+    choices = {(c["name"], c["kind"]): c for c in client.get("/api/measurement-choices").json()["choices"]}
+    assert ("iv_curve", "measurement") in choices
+    mcr = choices[("mcr_curve", "procedure")]
+    assert mcr["origin"] == "builtin"
+    assert mcr["presets"] == ["bench"]
+    assert mcr["roles"]["attenuator"] == "Attenuator"
+
+
+def test_a_procedures_roles_are_its_requirements(workspace):
+    _ws, client = workspace
+    reqs = {r["variable_name"]: r for r in client.get("/api/get-resources/mcr_curve?kind=procedure").json()}
+    assert set(reqs) == {"voltage_source", "voltage_sense", "counter", "attenuator", "savers", "plotters"}
+    matched = {m["class_name"] for m in reqs["attenuator"]["matching_instruments"]}
+    assert "FakeAttenuator" in matched
+    assert client.get("/api/get-resources/nothing?kind=procedure").status_code == 404
+
+
+def test_a_project_is_created_from_a_procedure_with_a_preset(workspace):
+    ws, client = workspace
+    definition = load_procedure(ws.config_dir, "mcr_curve")
+    save_preset(ws.config_dir, "mcr_curve", "bench", {"bias": {"voltage": 0.02}}, definition.params_model())
+
+    response = client.post(
+        "/api/create-measurement-project",
+        json={
+            "measurement_name": "mcr_curve",
+            "kind": "procedure",
+            "params_preset": "bench",
+            "selected_resources": _mcr_selections(),
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = YAML(typ="safe").load(Path(response.json()["yaml_file"]).read_text(encoding="utf-8"))
+    assert payload["measurement"]["params"]["bias"]["voltage"] == 0.02
+    assert "instruments" not in payload["resources"]
+    assert len(payload["resources"]["instrument_sources"]) == 4
+
+
+def test_the_retired_style_is_refused_with_its_reason(workspace):
+    _ws, client = workspace
+    response = client.post(
+        "/api/create-measurement-project",
+        json={
+            "measurement_name": "mcr_curve",
+            "kind": "procedure",
+            "generation_style": "pedagogical_yaml_expanded",
+            "selected_resources": _mcr_selections(),
+        },
+    )
+    assert response.status_code == 400
+    assert "retired" in response.json()["detail"]
+
+
+def test_removing_an_instrument_lists_the_projects_that_use_it(workspace):
+    ws, client = workspace
+    created = client.post(
+        "/api/create-measurement-project",
+        json={"measurement_name": "mcr_curve", "kind": "procedure", "selected_resources": _mcr_selections()},
+    ).json()
+    counter_name = load_instruments(ws.config_dir)[COUNTER].channels[0].attribute_name
+
+    impact = client.post(
+        "/api/manage-instruments/removal-impact", json={"type": "fake_counter", "key": COUNTER}
+    ).json()
+    assert [p["name"] for p in impact["projects"]] == [created["project_name"]]
+    assert impact["projects"][0]["attributes"] == [counter_name]
+
+    # An instrument inside a rack is found too, not only a top-level one.
+    meter = client.post(
+        "/api/manage-instruments/removal-impact", json={"type": "fake970", "key": METER}
+    ).json()
+    assert [p["name"] for p in meter["projects"]] == [created["project_name"]]
+    projects = client.get("/api/projects").json()["projects"]
+    assert counter_name in projects[0]["resources"]["instruments"]
+
+
+def test_this_workspaces_own_server_is_a_source_to_pick_from(tmp_path: Path, monkeypatch):
+    from lab_wizard.lib.client.server_registry import advertise_server
+    from lab_wizard.wizard.backend import instrument_sources as sources_mod
+
+    monkeypatch.setenv("LAB_WIZARD_SERVER_REGISTRY", str(tmp_path / "registry"))
+    config_dir = tmp_path / "ws" / "config"
+    (config_dir / "instruments").mkdir(parents=True)
+    advertise_server(config_dir, bind=None, ipc="ipc:///tmp/lw-own.sock")
+
+    def unreachable(entry, name, url):
+        return {"name": name, "kind": "machine", "label": name, "url": url, "tree": [], "reachable": False}
+
+    monkeypatch.setattr(sources_mod, "_machine_source", unreachable)
+    listing = sources_mod.list_instrument_sources(str(config_dir))
+    own = [s for s in listing["sources"] if s.get("is_own_server")]
+    assert len(own) == 1
+    assert own[0]["label"] == "This workspace, through its server"
+    assert listing["own_server"]["name"] == own[0]["name"]
