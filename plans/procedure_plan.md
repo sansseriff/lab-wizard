@@ -549,20 +549,20 @@ served** — `config/instruments/yokogawa_aq2212_key_b3c9ab43/`, attribute
 
 ---
 
-## Phase 7 — Run lifecycle ✅ done (routed-instrument claims wait on server Phase 9)
+## Phase 7 — Run lifecycle ✅ done
 
 Phases 0-6 decide what a procedure *is*. This decides what happens around one
 when it runs, and it is where the decisions in 5.4-5.6 and server Phase 9 meet.
 Every generated run does exactly this, in this order:
 
 ```
-1. claim       local instruments:  transport lease per exclusive root, then preflight
-               routed instruments: claim_acquire (all-or-nothing) — server Phase 9, not built
+1. claim       local instruments: transport lease per exclusive root, then preflight
 2. resolve     construct the instruments
-3. baseline    apply_baseline() on every bound instrument
-4. run         the measurement
-5. safe        enter_safe_state() on every bound instrument that declares one — if the run did not succeed
-6. release     claims and leases, always
+3. claim       routed instruments: claim_acquire, all-or-nothing (server Phase 9)
+4. baseline    apply_baseline() on every bound instrument
+5. run         the measurement
+6. safe        enter_safe_state() on every bound instrument that declares one — if the run did not succeed
+7. release     claims and leases, always
 ```
 
 The order is not arbitrary. **Claim before resolve**, because constructing a
@@ -681,7 +681,7 @@ Everything that has to be created or changed, across this plan and
 | ✅ `enter_safe_state()` on `VSource` — concrete, like `Attenuator`'s | new method | 7.2 |
 | ✅ `apply_baseline()` on every behavior driver with category-2 params; push the dead `wavelength_nm` (power meter still pending — no ABC) | new method | 7.1 |
 | ✅ `_query_methods_` merge helper in `state_effects.py`; declarations on `VSense`, `Counter`, `Attenuator`, `YokoAttenuator` | new | 7.3, server 9.2 |
-| `channels_claimable()` on params — false by default; true for `Keysight53220A`, SIM900 slots, DBay | new method | server 9.1 |
+| ✅ `children_claimable()` on params — false by default; true for `Keysight53220A`, GPIB buses, SIM900, DBay, AQ2212, AQ8201A | new method | server 9.1 |
 | ✅ Delete dead `settling_time` on `Sim928`/`Sim921`/`Fake928`; document `gate_time_s` | cleanup | 0.1, 0.2 |
 | ✅ `Attenuator` proxy class | new, one line | 6.3 |
 
@@ -702,13 +702,13 @@ Everything that has to be created or changed, across this plan and
 
 | Item | Kind | Phase |
 |---|---|---|
-| Threaded request dispatch | change | server 9.0 |
-| `ClaimTable`; `claim_acquire` / `renew` / `release` / `list` RPCs | new | server 9.3, 9.4 |
-| Claim + query check in `WireServer.call`; `ClaimDenied` | change | server 9.5 |
-| `RunClaim` context manager (`client/claims.py`); `Session` attaches token | new | server 9.7 |
-| `tree_*` and `release` refuse while claimed; claim events in audit log | change | server 9.8, 9.9 |
-| Hierarchical disjointness check in `claim_acquire`; baseline restore on release/expiry | new | server 9.4, 9.12 |
-| Interleaving test: two runs on channels 1 and 2 of a `FakeCounter` | new test | server 9.13 |
+| ✅ Threaded request dispatch | change | server 9.0 |
+| ✅ `ClaimTable`; `claim_acquire` / `renew` / `release` / `list` / `force_release` RPCs | new | server 9.3, 9.4 |
+| ✅ Claim + query check in `WireServer.call`; `ClaimDeniedError` | change | server 9.5 |
+| ✅ `RemoteClaim` / `RoutedClaims` (`client/claims.py`); `Session` attaches token | new | server 9.7 |
+| ✅ `tree_*` and `release` refuse while claimed; claim events in audit log | change | server 9.8, 9.9 |
+| ✅ Hierarchical disjointness check in `claim_acquire`; baseline restore on release/expiry | new | server 9.4, 9.12 |
+| ✅ Interleaving test: two runs on channels 1 and 2 of a `FakeCounter` | new test | server 9.13 |
 
 ### Config and generation — `lib/utilities/`, `wizard/backend/`
 
@@ -729,7 +729,8 @@ Everything that has to be created or changed, across this plan and
 |---|---|---|
 | Procedures section — seventh sidebar entry, composer | new | 4 |
 | Procedure + preset selection in measurement creation | change | 5.1, 5.3 |
-| Live claims and force-release on Hardware ownership | new | server 9.10 |
+| ✅ Live claims and force-release on Hardware ownership | new | server 9.10 |
+| Show a claimed instrument as busy in the measurement picker | new | server 9.10, deferred to 5 |
 | Attribute rename/remove confirmation listing dependent projects | new | 5.5 |
 
 ### Deferred

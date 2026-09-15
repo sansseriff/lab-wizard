@@ -17,13 +17,14 @@
 	import Pill from '$lib/components/Pill.svelte';
 	import ArrowClockwiseIcon from 'phosphor-svelte/lib/ArrowClockwise';
 	import EjectSimpleIcon from 'phosphor-svelte/lib/EjectSimple';
-	import type { HardwareStatusData, RootStatus } from './+page.ts';
+	import type { HardwareStatusData, RootStatus, ServerClaims } from './+page.ts';
 
 	let { data }: { data: HardwareStatusData } = $props();
 
 	let owner = $state(data.owner);
 	let transport = $state(data.transport);
 	let servers = $state(data.servers);
+	let claims: ServerClaims[] = $state(data.claims);
 	let error: string | null = $state(data.error ?? null);
 	let busy = $state(false);
 	let message: { text: string; ok: boolean } | null = $state(null);
@@ -31,19 +32,22 @@
 	const roots = $derived(Object.values(transport.roots) as RootStatus[]);
 	const heldRoots = $derived(roots.filter((r) => r.held_by_server));
 	const duplicates = $derived(Object.entries(transport.duplicate_transports));
+	const claimCount = $derived(claims.reduce((n, s) => n + s.claims.length, 0));
 
 	async function refresh() {
 		busy = true;
 		error = null;
 		try {
-			const [o, t, s] = await Promise.all([
+			const [o, t, s, c] = await Promise.all([
 				fetchWithConfig<typeof owner>('/api/hardware-owner', 'GET'),
 				fetchWithConfig<typeof transport>('/api/transport-status', 'GET'),
-				fetchWithConfig<{ servers: typeof servers }>('/api/local-servers', 'GET')
+				fetchWithConfig<{ servers: typeof servers }>('/api/local-servers', 'GET'),
+				fetchWithConfig<{ servers: ServerClaims[] }>('/api/local-servers/claims', 'GET')
 			]);
 			owner = o;
 			transport = t;
 			servers = s.servers;
+			claims = c.servers;
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -70,6 +74,35 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	async function forceRelease(url: string, unit: string, holder: string) {
+		if (!confirm(`End ${holder}'s claim on ${unit}? If that run is still going, its next write will be refused.`)) {
+			return;
+		}
+		busy = true;
+		message = null;
+		try {
+			const res = await fetchWithConfig<{ released: string[] }>(
+				'/api/local-servers/claims/force-release',
+				'POST',
+				{ url, unit }
+			);
+			message = {
+				text: `Ended the claim on ${res.released.join(', ') || unit}. It is reset to baseline before anyone else can claim it.`,
+				ok: true
+			};
+			await refresh();
+		} catch (e) {
+			message = { text: e instanceof Error ? e.message : 'Force release failed.', ok: false };
+		} finally {
+			busy = false;
+		}
+	}
+
+	function expiry(seconds: number | null): string {
+		if (seconds === null) return 'resetting';
+		return seconds < 1 ? '<1 s' : `${Math.round(seconds)} s`;
 	}
 
 	function workspaceName(path: string | null): string {
@@ -256,4 +289,75 @@
 			</Panel>
 		</div>
 	</div>
+	<!-- Which *run* holds which instruments. Distinct from "in use" above: a
+	     server can have a rack open that nobody has claimed, and a run can hold
+	     a claim on an instrument with no handle open this instant. -->
+	<Panel
+		title="Run claims"
+		description="A running measurement claims the instruments it drives, so no other run can write to them. Claims lapse on their own if a client stops renewing them."
+		flush
+	>
+		{#if claimCount === 0 && claims.every((s) => !s.error)}
+			<p class="px-3.5 py-5 text-center text-xs text-muted">No run holds a claim right now.</p>
+		{:else}
+			<div class="overflow-x-auto">
+				<table class="lw-table">
+					<thead>
+						<tr>
+							<th>Run</th>
+							<th>Instruments</th>
+							<th>Server</th>
+							<th>Expires</th>
+							<th></th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each claims as s (s.url)}
+							{#if s.error}
+								<tr>
+									<td colspan="5" class="text-[11.5px] text-muted">
+										{workspaceName(s.workspace_path)} did not answer: {s.error}
+									</td>
+								</tr>
+							{/if}
+							{#each s.claims as c (c.units.join('|'))}
+								<tr>
+									<td>
+										<span class="font-medium">{c.holder}</span>
+										<span class="mono block text-[10.5px] text-muted">{c.peer}</span>
+									</td>
+									<td class="mono text-[11px]">
+										{#each c.units as unit (unit)}
+											<span class="block">{unit}</span>
+										{/each}
+									</td>
+									<td class="text-[11.5px]">{workspaceName(s.workspace_path)}</td>
+									<td class="tabular-nums">
+										{#if c.restoring}
+											<Pill tone="accent" title="Released; being reset to baseline before anyone else can claim it">resetting</Pill>
+										{:else}
+											{expiry(c.expires_in_s)}
+										{/if}
+									</td>
+									<td>
+										{#if !c.restoring}
+											<button
+												class="lw-btn lw-btn-sm"
+												title="End this claim. For a run that is stuck, or whose client has gone."
+												onclick={() => forceRelease(s.url, c.units[0], c.holder)}
+												disabled={busy}
+											>
+												<EjectSimpleIcon size={11} />
+												Force release
+											</button>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+	</Panel>
 </section>

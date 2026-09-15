@@ -41,6 +41,11 @@ class AndoAQ8201AParams(
     offline: bool = False
     children: dict[str, SerializeAsAny[AndoAQ8201AModuleParams]] = Field(default_factory=dict)
 
+    def children_claimable(self) -> bool:
+        # Every module command is prefixed C<slot> within one write, and modules
+        # share no state.
+        return True
+
     @classmethod
     def resource_class(cls):
         return AndoAQ8201A

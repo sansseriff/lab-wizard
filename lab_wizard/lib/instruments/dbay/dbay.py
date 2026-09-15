@@ -65,6 +65,10 @@ class DBayParams(
     )
     children: dict[str, SerializeAsAny[DBayModuleParams]] = Field(default_factory=dict)
 
+    def children_claimable(self) -> bool:
+        # Modules are addressed per call and share no state.
+        return True
+
     @classmethod
     def resource_class(cls):
         return DBay

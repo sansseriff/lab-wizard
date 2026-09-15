@@ -517,6 +517,52 @@ class InstrumentRegistry:
             "transport_key": declared.get("transport_key"),
         }
 
+    def claim_unit_for(self, path: str) -> str:
+        """The path a run must claim in order to write to ``path``.
+
+        Walks down from the root. Each step deeper is taken only while the node
+        above declares ``children_claimable()``, so an instrument nobody has
+        reasoned about is claimed whole. A channel is one step, written
+        ``.../channel/<n>``.
+
+            inst://counter/channel/1   -> inst://counter/channel/1  (53220A: inputs claimable)
+            inst://rack/mainframe/slot -> inst://rack/mainframe/slot (Prologix, SIM900: yes)
+            inst://yoko/attenuator     -> inst://yoko/attenuator     (AQ2212: slots claimable)
+            inst://sim970/channel/2    -> inst://rack/mainframe/sim970 (SIM970 declares nothing)
+
+        See :mod:`lab_wizard.lib.instruments.general.transport` and
+        ``plans/server_plan.md`` 9.1.
+        """
+        body = path[len(PATH_PREFIX):] if path.startswith(PATH_PREFIX) else path
+        segments = [s for s in body.split("/") if s]
+        if not segments:
+            raise KeyError(f"Not an instrument path: {path!r}")
+
+        # Group ``channel/<n>`` into one step.
+        steps: list[str] = [segments[0]]
+        i = 1
+        while i < len(segments):
+            if segments[i] == "channel" and i + 1 < len(segments):
+                steps.append(f"channel/{segments[i + 1]}")
+                i += 2
+            else:
+                steps.append(segments[i])
+                i += 1
+
+        params_by_path = getattr(self, "_params", {})
+        unit = f"{PATH_PREFIX}{steps[0]}"
+        for step in steps[1:]:
+            declared = getattr(params_by_path.get(unit), "children_claimable", None)
+            try:
+                claimable = bool(declared()) if callable(declared) else False
+            except Exception:  # noqa: BLE001 - a broken declaration claims whole
+                logger.warning("children_claimable() failed for %s; claiming it whole", unit, exc_info=True)
+                claimable = False
+            if not claimable:
+                break
+            unit = f"{unit}/{step}"
+        return unit
+
     def exclusive_roots(self) -> dict[str, dict[str, Any]]:
         """Roots that cannot be shared with another process, by path."""
         return {

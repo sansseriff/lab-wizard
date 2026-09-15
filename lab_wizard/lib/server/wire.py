@@ -19,6 +19,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Optional
@@ -31,6 +34,8 @@ from pyleco.json_utils.errors import JSONRPCError
 from pyleco.json_utils.json_objects import JsonRpcError
 from pyleco.json_utils.rpc_server import RPCServer
 
+from lab_wizard.lib.instruments.general.state_effects import collect_query_methods
+from lab_wizard.lib.server.claims import Claim, ClaimConflict, ClaimTable
 from lab_wizard.lib.server.events import EventLog
 from lab_wizard.lib.server.peer import (
     LocalOnlyError,
@@ -46,8 +51,18 @@ from lab_wizard.lib.server.registry import PATH_PREFIX, InstrumentRegistry, root
 
 SERVER_NAME = b"lab_wizard_server"
 
-# JSON-RPC server-error range (-32000..-32099). -32001 = permission denied.
+# JSON-RPC server-error range (-32000..-32099). -32001 = permission denied,
+# -32002 = the path is claimed by another run (or the caller's claim is gone).
 PERMISSION_DENIED_CODE = -32001
+CLAIM_DENIED_CODE = -32002
+
+DEFAULT_CLAIM_TTL_S = 30.0
+MAX_CLAIM_TTL_S = 3600.0
+
+# Methods that may block on hardware. They run on their own worker pool so that
+# fast requests — above all claim renewals — are never stuck behind a long
+# ``count()``, or a claim would expire while its holder was only waiting.
+HARDWARE_RPC = frozenset({"call", "discover", "release", "tree_add", "tree_remove", "tree_reset"})
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +83,9 @@ class WireServer:
         gate: Optional[PermissionGate] = None,
         config_dir: Optional[str] = None,
         events: Optional[EventLog] = None,
+        claims: Optional[ClaimTable] = None,
+        hardware_workers: int = 16,
+        control_workers: int = 4,
     ) -> None:
         self._binds = [bind] if isinstance(bind, str) else list(bind)
         if not self._binds:
@@ -84,6 +102,19 @@ class WireServer:
         self._events = events or EventLog(
             Path(config_dir) / "server" / "events.jsonl" if config_dir else None
         )
+
+        self._claims = claims or ClaimTable()
+        # Serializes check -> dispatch -> record for calls a permission rule
+        # involves (see PermissionGate.involves). Always taken *inside* a
+        # transport lock and never held while taking one, so it cannot deadlock.
+        self._gate_lock = threading.Lock()
+        self._hardware_workers = hardware_workers
+        self._control_workers = control_workers
+        self._hardware_pool: Optional[ThreadPoolExecutor] = None
+        self._reply_addr: Optional[str] = None
+        self._reply_local = threading.local()
+        self._reply_sockets: list[zmq.Socket] = []
+        self._reply_sockets_lock = threading.Lock()
 
         self._rpc = RPCServer(title="lab_wizard_server")
         self._rpc.method()(self.call)
@@ -102,6 +133,11 @@ class WireServer:
         self._rpc.method()(self.describe_path)
         self._rpc.method()(self.describe_attribute)
         self._rpc.method()(self.list_descriptions)
+        self._rpc.method()(self.claim_acquire)
+        self._rpc.method()(self.claim_renew)
+        self._rpc.method()(self.claim_release)
+        self._rpc.method()(self.claim_list)
+        self._rpc.method()(self.claim_force_release)
 
         self._ctx = zmq.Context.instance()
         self._sockets: dict[str, zmq.Socket] = {}
@@ -115,11 +151,15 @@ class WireServer:
         method: str,
         args: Optional[list[Any]] = None,
         kwargs: Optional[dict[str, Any]] = None,
+        token: Optional[str] = None,
     ) -> Any:
         """Invoke ``method`` on the object at ``path`` and return the result.
 
-        If a permission gate is configured, the call is checked before dispatch
-        (denied calls raise a structured -32001 error) and recorded after.
+        ``token`` is the caller's run claim, if it holds one (see
+        :mod:`lab_wizard.lib.server.claims`). A write to a claimed path needs a
+        claim covering it; a query needs nothing. If a permission gate is
+        configured, the call is checked before dispatch (denied calls raise a
+        structured -32001 error) and recorded after.
         """
         pos = args or []
         kw = kwargs or {}
@@ -129,39 +169,48 @@ class WireServer:
         # often several writes against connection-global state, so releasing
         # between them would let another caller interleave mid-query. Calls on
         # different roots take different locks and still run in parallel.
-        with self._registry.transport_lock(path):
+        with self._hold_transport(path) as registry:
+            # Checked inside the lock, so a claim granted while this call waited
+            # is honoured. A write already past this point when a claim lands
+            # started before the claim existed; the new holder's baseline call
+            # queues behind it on the same lock.
+            self._check_claim(registry, path, method, token)
             # A rack claimed by another process must not be opened here, or the
             # claim would mean nothing. Checked before resolve, since resolve is
             # what actually opens the transport.
             self._refuse_if_leased(path)
-            target = self._registry.resolve(path)
+            target = registry.resolve(path)
 
-            if self._gate is not None:
-                denial = self._gate.check(path, method, pos, kw)
-                if denial is not None:
-                    raise JSONRPCError(
-                        JsonRpcError(
-                            code=PERMISSION_DENIED_CODE,
-                            message=denial.message,
-                            data={
-                                "rule_id": denial.rule_id,
-                                "blocking_state": denial.blocking_state,
-                            },
+            gated = self._gate is not None and self._gate.involves(
+                path, method, registry.instrument_class(path) or type(target)
+            )
+            with self._gate_lock if gated else _no_lock():
+                if self._gate is not None:
+                    denial = self._gate.check(path, method, pos, kw)
+                    if denial is not None:
+                        raise JSONRPCError(
+                            JsonRpcError(
+                                code=PERMISSION_DENIED_CODE,
+                                message=denial.message,
+                                data={
+                                    "rule_id": denial.rule_id,
+                                    "blocking_state": denial.blocking_state,
+                                },
+                            )
                         )
+
+                if not hasattr(target, method):
+                    raise AttributeError(
+                        f"{type(target).__name__} at {path!r} has no method {method!r}"
                     )
+                fn = getattr(target, method)
+                if not callable(fn):
+                    raise TypeError(f"{type(target).__name__}.{method} is not callable")
+                result = fn(*pos, **kw)
 
-            if not hasattr(target, method):
-                raise AttributeError(
-                    f"{type(target).__name__} at {path!r} has no method {method!r}"
-                )
-            fn = getattr(target, method)
-            if not callable(fn):
-                raise TypeError(f"{type(target).__name__}.{method} is not callable")
-            result = fn(*pos, **kw)
-
-            if self._gate is not None:
-                self._gate.record(path, target, method, pos, kw, result)
-            return result
+                if self._gate is not None:
+                    self._gate.record(path, target, method, pos, kw, result)
+                return result
 
     def list_paths(self) -> list[str]:
         return self._registry.list_paths()
@@ -214,8 +263,8 @@ class WireServer:
         parent_path = PATH_PREFIX + "/".join(step["key"] for step in chain)
         root = root_path(parent_path)
         was_held = root in self._registry.held_roots()
-        with self._registry.transport_lock(parent_path):
-            parent_inst = self._registry.resolve(parent_path)
+        with self._hold_transport(parent_path) as registry:
+            parent_inst = registry.resolve(parent_path)
             try:
                 return actions[action].run(
                     params or {}, parent=parent_inst
@@ -226,15 +275,24 @@ class WireServer:
                 # tree_add fail its held-rack safety check. Preserve a rack that
                 # was already live, but hand back one opened solely by discovery.
                 if not was_held:
-                    self._registry.release(root)
+                    registry.release(root)
 
     def release(self, path: str) -> list[str]:
         """Disconnect and evict ``path`` and everything under it.
 
         Lets an operator hand a rack back without stopping the whole server.
+        Refused while a run holds a claim touching it: disconnecting hardware a
+        run is driving would fail that run halfway through.
         """
-        with self._registry.transport_lock(path):
-            return self._registry.release(path)
+        with self._hold_transport(path) as registry:
+            touching = self._claims.touching(path)
+            if touching:
+                raise ValueError(
+                    f"Cannot release {path}: {touching[0].holder} holds a claim on "
+                    f"{', '.join(touching[0].units)}. Wait for the run to finish, or "
+                    "force-release the claim first."
+                )
+            return registry.release(path)
 
     # ------------------------- tree (read-only) -------------------------
 
@@ -337,6 +395,7 @@ class WireServer:
         with self._tree_write_lock():
             for step in chain:
                 self._refuse_if_held(step.get("key"), "reconfigure")
+                self._refuse_if_claimed(step.get("key"), "reconfigure")
             result = add_instrument_chain(config_dir, chain)
             self._reload_tree("tree_add")
         self._events.record(
@@ -358,6 +417,7 @@ class WireServer:
 
         with self._tree_write_lock():
             self._refuse_if_held(key, "remove")
+            self._refuse_if_claimed(key, "remove")
             result = remove_instrument(config_dir, type, key)
             self._reload_tree("tree_remove")
         self._events.record(
@@ -378,6 +438,7 @@ class WireServer:
 
         with self._tree_write_lock():
             self._refuse_if_held(key, "reset")
+            self._refuse_if_claimed(key, "reset")
             result = reinitialize_instrument(config_dir, type, key)
             self._reload_tree("tree_reset")
         self._events.record(
@@ -445,6 +506,23 @@ class WireServer:
                 f"Cannot {verb} {', '.join(blocking)} while its hardware is open. "
                 "Release it first (Hardware & Servers → Release), then try again."
             )
+
+    def _refuse_if_claimed(self, key: Optional[str], verb: str) -> None:
+        """Refuse to reconfigure a rack a run holds a claim on.
+
+        Separate from ``_refuse_if_held``: a run can hold a claim on a rack that
+        happens to have no open handle at this instant, and rebuilding the tree
+        under it would move the paths its claim names.
+        """
+        if not key:
+            return
+        for root in sorted(self._roots_containing(key)):
+            touching = self._claims.touching(root)
+            if touching:
+                raise ValueError(
+                    f"Cannot {verb} {root} while {touching[0].holder} holds a claim "
+                    f"on {', '.join(touching[0].units)}."
+                )
 
     @contextmanager
     def _tree_write_lock(self) -> Iterator[None]:
@@ -536,6 +614,222 @@ class WireServer:
 
         return _addressable_instruments(self._registry)
 
+    # ------------------------- claims -------------------------
+
+    def claim_acquire(
+        self,
+        paths: Optional[list[str]] = None,
+        attributes: Optional[list[str]] = None,
+        holder: str = "",
+        ttl_s: float = DEFAULT_CLAIM_TTL_S,
+    ) -> dict[str, Any]:
+        """Claim the instruments a run will drive, all or none.
+
+        Open to remote peers as well as local ones: a measurement on another
+        machine must be able to claim. Each path is widened to the unit its
+        instrument can be claimed as (``registry.claim_unit_for``), so claiming
+        one SIM970 channel claims the SIM970. The returned token goes on every
+        subsequent ``call``.
+        """
+        if not 0 < ttl_s <= MAX_CLAIM_TTL_S:
+            raise ValueError(f"ttl_s must be between 0 and {MAX_CLAIM_TTL_S:g} seconds")
+        self._reap_expired()
+        registry = self._registry
+        wanted = list(paths or [])
+        for name in attributes or []:
+            wanted.append(registry.resolve_attribute_path(name))
+        known = set(registry.list_paths())
+        for path in wanted:
+            if path not in known:
+                raise ValueError(f"No instrument at {path!r} on this server")
+
+        peer = current_peer()
+        actor = peer.describe() if peer else "in-process"
+        units = [registry.claim_unit_for(path) for path in wanted]
+        label = holder or actor
+        try:
+            claim = self._claims.acquire(units, holder=label, peer=actor, ttl_s=ttl_s)
+        except ClaimConflict as exc:
+            self._events.record(
+                "claim.denied",
+                f"Refused {label} a claim on {exc.unit}: {exc}",
+                actor=actor,
+                unit=exc.unit,
+                held_by=exc.holder.holder,
+            )
+            raise JSONRPCError(
+                JsonRpcError(
+                    code=CLAIM_DENIED_CODE,
+                    message=str(exc),
+                    data={"unit": exc.unit, "held_by": exc.holder.to_wire(0.0)},
+                )
+            ) from exc
+        self._events.record(
+            "claim.acquire",
+            f"{label} claimed {', '.join(claim.units)}",
+            actor=actor,
+            units=list(claim.units),
+            ttl_s=claim.ttl_s,
+        )
+        return {"token": claim.token, "units": list(claim.units), "ttl_s": claim.ttl_s}
+
+    def claim_renew(self, token: str) -> dict[str, Any]:
+        """Keep a claim alive for another TTL."""
+        self._reap_expired()
+        try:
+            claim = self._claims.renew(token)
+        except KeyError:
+            raise JSONRPCError(
+                JsonRpcError(
+                    code=CLAIM_DENIED_CODE,
+                    message=(
+                        "This claim is no longer held — it expired, was released, "
+                        "or the server restarted."
+                    ),
+                    data={"token_known": False},
+                )
+            ) from None
+        return {"units": list(claim.units), "ttl_s": claim.ttl_s}
+
+    def claim_release(self, token: str) -> dict[str, Any]:
+        """Release a claim. Its units are reset to baseline, then freed."""
+        claim = self._claims.release(token)
+        if claim is None:
+            return {"released": []}
+        peer = current_peer()
+        self._after_release([claim], "release", peer.describe() if peer else "in-process")
+        return {"released": list(claim.units)}
+
+    def claim_list(self) -> list[dict[str, Any]]:
+        """Live and restoring claims, oldest first. Tokens are never listed."""
+        self._reap_expired()
+        return self._claims.snapshot()
+
+    def claim_force_release(self, unit: str) -> dict[str, Any]:
+        """Release every claim touching ``unit``. Same-machine callers only.
+
+        For a run that is stuck, or whose client vanished and whose TTL is long.
+        """
+        peer = require_local("Force-releasing a claim")
+        released: list[Claim] = []
+        for claim in self._claims.touching(unit):
+            if not claim.restoring and self._claims.release(claim.token) is not None:
+                released.append(claim)
+        self._after_release(released, "force_release", peer.describe())
+        return {"released": [u for c in released for u in c.units]}
+
+    def _is_query(self, registry: InstrumentRegistry, path: str, method: str) -> bool:
+        """Whether ``method`` is a declared pure read on the class at ``path``.
+
+        Read from the class, so a write can be refused before anything is
+        resolved or opened. An unknown class counts as a write: the allowlist
+        fails closed.
+        """
+        cls = registry.instrument_class(path)
+        if cls is None and path in registry.list_held():
+            cls = type(registry.resolve(path))
+        return cls is not None and method in collect_query_methods(cls)
+
+    def _check_claim(
+        self, registry: InstrumentRegistry, path: str, method: str, token: Optional[str]
+    ) -> None:
+        """Enforce the claim rules for one call. See :mod:`...server.claims`."""
+        self._reap_expired()
+        mine = self._claims.live(token) if token else None
+        if token and mine is None:
+            # A run that believes it holds a claim must not carry on unowned.
+            raise JSONRPCError(
+                JsonRpcError(
+                    code=CLAIM_DENIED_CODE,
+                    message=(
+                        "This run's claim is no longer held — it expired, was "
+                        "released, or the server restarted. Stopping rather than "
+                        "driving hardware without it."
+                    ),
+                    data={"token_known": False, "path": path},
+                )
+            )
+        if self._is_query(registry, path, method):
+            return
+        touching = self._claims.touching(path)
+        if not touching:
+            return
+        if mine is not None and mine.covers(path):
+            return
+        other = next((c for c in touching if c is not mine), None)
+        if other is None:
+            message = (
+                f"This run's claim covers {', '.join(mine.units) if mine else '-'} "
+                f"but not {path}, which holds state shared with it. Claim {path} "
+                "itself to change it."
+            )
+            holder = mine.to_wire(0.0) if mine else None
+        else:
+            doing = "is being reset to baseline after" if other.restoring else "is claimed by"
+            message = f"{path} {doing} {other.holder} ({', '.join(other.units)})."
+            holder = other.to_wire(0.0)
+        raise JSONRPCError(
+            JsonRpcError(
+                code=CLAIM_DENIED_CODE,
+                message=message,
+                data={"path": path, "method": method, "held_by": holder},
+            )
+        )
+
+    def _reap_expired(self) -> None:
+        expired = self._claims.pop_expired()
+        if expired:
+            self._after_release(expired, "expire", "server")
+
+    def _after_release(self, claims: list[Claim], reason: str, actor: str) -> None:
+        """Record the release and restore each claim's units to baseline."""
+        for claim in claims:
+            self._events.record(
+                f"claim.{reason}",
+                f"{claim.holder}'s claim on {', '.join(claim.units)} ended ({reason})",
+                actor=actor,
+                units=list(claim.units),
+            )
+            pool = self._hardware_pool
+            if pool is not None:
+                pool.submit(self._restore_baseline, claim)
+            else:
+                self._restore_baseline(claim)
+
+    def _restore_baseline(self, claim: Claim) -> None:
+        """Re-apply baseline under each released unit, then free the units.
+
+        Only instruments already open are reset — releasing a claim must never
+        open hardware. Shallowest first, so a counter's trigger is restored
+        before its inputs. Failures are logged and recorded, and the units are
+        freed regardless: a unit wedged forever is worse than one that may need
+        attention.
+        """
+        try:
+            for unit in claim.units:
+                with self._hold_transport(unit) as registry:
+                    held = sorted(
+                        (p for p in registry.list_held() if p == unit or p.startswith(unit + "/")),
+                        key=lambda p: p.count("/"),
+                    )
+                    for path in held:
+                        target = registry.resolve(path)
+                        if not callable(getattr(type(target), "apply_baseline", None)):
+                            continue
+                        try:
+                            if target.apply_baseline() is False:
+                                raise RuntimeError("apply_baseline reported failure")
+                        except Exception as exc:  # noqa: BLE001 - every unit is attempted
+                            log.warning("Baseline restore failed at %s: %s", path, exc)
+                            self._events.record(
+                                "claim.restore_failed",
+                                f"Could not restore {path} to baseline after {claim.holder}: {exc}",
+                                actor="server",
+                                path=path,
+                            )
+        finally:
+            self._claims.restored(claim.token)
+
     def list_attributes(self) -> dict[str, str]:
         return self._registry.list_attributes()
 
@@ -557,6 +851,11 @@ class WireServer:
         # access to it, which only a process on this machine can have. Separate
         # sockets make "arrived locally" a structural property of the receive
         # path rather than something a client could claim.
+        #
+        # Requests are *processed* on worker threads, so one slow instrument no
+        # longer blocks every other client. ZMQ sockets are not thread-safe, so
+        # only this thread touches the ROUTERs: workers push finished replies to
+        # an inproc socket that this loop polls and forwards.
         poller = zmq.Poller()
         for transport, endpoints in (("ipc", self._ipc_binds), ("tcp", self._tcp_binds)):
             if not endpoints:
@@ -568,14 +867,42 @@ class WireServer:
             self._sockets[transport] = socket
             poller.register(socket, zmq.POLLIN)
 
+        self._reply_addr = f"inproc://lab_wizard-replies-{uuid.uuid4().hex}"
+        replies = self._ctx.socket(zmq.PULL)
+        replies.bind(self._reply_addr)
+        poller.register(replies, zmq.POLLIN)
+
+        hardware = ThreadPoolExecutor(self._hardware_workers, thread_name_prefix="lw-hardware")
+        control = ThreadPoolExecutor(self._control_workers, thread_name_prefix="lw-control")
+        self._hardware_pool = hardware
+
         self._running = True
         try:
             while self._running:
                 events = dict(poller.poll(timeout=200))
                 for transport, socket in self._sockets.items():
                     if socket in events:
-                        self._handle_one(socket, transport)
+                        received = self._receive(socket, transport)
+                        if received is not None:
+                            method, job = received
+                            (hardware if method in HARDWARE_RPC else control).submit(job)
+                if replies in events:
+                    self._forward_replies(replies)
+                # Expiry is checked every tick, not only when a request happens
+                # to arrive, so a vanished client's claim lapses on time.
+                self._reap_expired()
         finally:
+            # Stop taking work, let running requests finish, drop queued ones.
+            self._hardware_pool = None
+            control.shutdown(wait=True, cancel_futures=True)
+            hardware.shutdown(wait=True, cancel_futures=True)
+            self._forward_replies(replies)
+            self._claims.drop_all()
+            with self._reply_sockets_lock:
+                for socket in self._reply_sockets:
+                    socket.close(linger=0)
+                self._reply_sockets.clear()
+            replies.close(linger=0)
             for socket in self._sockets.values():
                 socket.close(linger=0)
             self._sockets.clear()
@@ -610,36 +937,55 @@ class WireServer:
 
     # ------------------------- Internals -------------------------
 
-    def _handle_one(self, socket: "zmq.Socket", transport: str) -> None:
+    def _receive(self, socket: "zmq.Socket", transport: str):
+        """Read one request; return ``(method, job)`` for a worker, or ``None``."""
         try:
             raw = socket.recv_multipart()
         except zmq.ZMQError as exc:
             log.warning("recv_multipart failed: %s", exc)
-            return
+            return None
 
         # ROUTER prepends the peer identity; strip it for the LECO message.
         if len(raw) < 2:
             log.warning("Dropping short frame list: %r", raw)
-            return
+            return None
         identity, frames = raw[0], raw[1:]
 
         try:
             msg = Message.from_frames(*frames)
         except Exception as exc:
             log.warning("Could not parse incoming Message: %s (frames=%r)", exc, frames)
-            return
+            return None
 
         if msg.header_elements.message_type != MessageTypes.JSON:
             log.warning("Ignoring non-JSON message_type=%s", msg.header_elements.message_type)
-            return
+            return None
 
         if not msg.payload:
             log.warning("Ignoring message with empty payload")
-            return
+            return None
 
         request_bytes = msg.payload[0]
+        try:
+            method = json.loads(request_bytes).get("method")
+        except (ValueError, AttributeError):
+            method = None  # malformed: the RPC server will say so
+
+        def job() -> None:
+            reply = self._process(transport, identity, msg, request_bytes)
+            if reply is not None:
+                self._push_reply(transport, identity, reply)
+
+        return method, job
+
+    def _process(
+        self, transport: str, identity: bytes, msg: Message, request_bytes: bytes
+    ) -> Optional[list[bytes]]:
+        """Dispatch one request on a worker thread; return the reply frames."""
         # Published for the duration of dispatch so RPC methods can consult the
         # caller without threading a parameter through every signature.
+        # ContextVars are per thread, so concurrent workers do not see each
+        # other's peer.
         peer = Peer(
             transport=transport,
             identity=identity.hex(),
@@ -652,13 +998,13 @@ class WireServer:
             reset_current_peer(token)
         if response_str is None:
             # Notification — no response.
-            return
+            return None
 
         try:
             response_obj = json.loads(response_str)
         except json.JSONDecodeError as exc:
             log.error("RPCServer returned non-JSON response: %s", exc)
-            return
+            return None
 
         reply = Message(
             receiver=msg.sender or SERVER_NAME,
@@ -667,7 +1013,59 @@ class WireServer:
             conversation_id=msg.conversation_id,
             message_type=MessageTypes.JSON,
         )
+        return reply.to_frames()
+
+    def _push_reply(self, transport: str, identity: bytes, frames: list[bytes]) -> None:
+        """Hand a finished reply to the loop thread, which owns the ROUTERs."""
+        socket = getattr(self._reply_local, "socket", None)
+        if socket is None:
+            if self._reply_addr is None:
+                return
+            socket = self._ctx.socket(zmq.PUSH)
+            socket.setsockopt(zmq.LINGER, 0)
+            socket.connect(self._reply_addr)
+            self._reply_local.socket = socket
+            with self._reply_sockets_lock:
+                self._reply_sockets.append(socket)
+        socket.send_multipart([transport.encode(), identity, *frames])
+
+    def _forward_replies(self, replies: "zmq.Socket") -> None:
+        while True:
+            try:
+                transport, identity, *frames = replies.recv_multipart(zmq.NOBLOCK)
+            except zmq.Again:
+                return
+            socket = self._sockets.get(transport.decode())
+            if socket is None:
+                continue
+            try:
+                socket.send_multipart([identity, *frames])
+            except zmq.ZMQError as exc:
+                log.warning("send_multipart failed: %s", exc)
+
+    @contextmanager
+    def _hold_transport(self, path: str) -> Iterator[InstrumentRegistry]:
+        """Take ``path``'s transport lock on the *current* registry.
+
+        A tree write replaces the registry while holding every transport lock.
+        A worker that picked up the old registry just before the swap would,
+        once the lock frees, resolve paths in an index nobody uses any more —
+        opening a handle nothing can reach. So after taking the lock, check the
+        registry is still current, and start again if not.
+        """
+        while True:
+            registry = self._registry
+            lock = registry.transport_lock(path)
+            lock.acquire()
+            if registry is self._registry:
+                break
+            lock.release()
         try:
-            socket.send_multipart([identity] + reply.to_frames())
-        except zmq.ZMQError as exc:
-            log.warning("send_multipart failed: %s", exc)
+            yield registry
+        finally:
+            lock.release()
+
+
+@contextmanager
+def _no_lock() -> Iterator[None]:
+    yield

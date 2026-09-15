@@ -92,7 +92,34 @@ The generated `RemoteResources.connect(url)` + `resources.from_attribute(name)` 
 proxies that satisfy the measurement's behavior ABCs — see
 [Remote control](architecture.md).
 
-!!! note "Server robustness is still basic"
-    The server is currently a single-threaded poll loop with no per-connection
-    concurrency, no graceful instrument shutdown, no client reconnect, and no
-    hot-reload of permissions. These are tracked in the [Roadmap](../roadmap.md).
+### Several runs on one server: claims
+
+The point of a server is that several measurements can share its instruments.
+A **run claim** keeps them from stepping on each other. A generated project
+claims every instrument it drives through a server for the length of its run —
+nothing to configure — and releases it when the run ends.
+
+- **Writes need a claim; reads don't.** While a run holds an instrument, a
+  write from any other run is refused with the holder's name. Declared pure
+  queries (`get_threshold`, `get_voltage`, …) stay open to anyone, so you can
+  watch a running measurement.
+- **Claims are as fine-grained as the hardware allows.** Two runs may hold the
+  two inputs of one 53220A counter and interleave their counts, because each
+  count re-establishes its own settings. An instrument that has not declared its
+  parts independently claimable is claimed whole.
+- **Shared settings need the whole instrument.** A run holding one input cannot
+  change the counter's trigger or gate, even if no one else holds anything —
+  that change would carry into whoever claims the other input next.
+- **Claims expire** about 30 seconds after their client stops renewing them, so
+  a crashed run does not hold hardware forever. A released or expired
+  instrument is reset to its configured baseline before anyone can claim it
+  again.
+
+**Hardware ownership** in the wizard lists every claim on the machine's servers,
+with a **Force release** for a run that is stuck. Force release is only
+accepted from this machine.
+
+!!! note "Still basic"
+    Requests are handled in parallel — calls on different instruments no longer
+    wait for each other — but there is no hot-reload of permissions. Tracked in
+    the [Roadmap](../roadmap.md).

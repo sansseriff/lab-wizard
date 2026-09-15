@@ -29,6 +29,11 @@ class YokogawaAQ2212Params(
     offline: bool = False
     children: dict[str, SerializeAsAny[YokogawaAQ2212ModuleParams]] = Field(default_factory=dict)
 
+    def children_claimable(self) -> bool:
+        # Every module command names its slot inline (INP2:ATT, SOUR1:FREQ), and
+        # modules share no state.
+        return True
+
     @classmethod
     def resource_class(cls):
         return YokogawaAQ2212

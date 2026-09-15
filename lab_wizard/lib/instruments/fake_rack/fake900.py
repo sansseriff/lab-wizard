@@ -75,6 +75,10 @@ class Fake900Params(
         ),
     )
 
+    def children_claimable(self) -> bool:
+        # Mirrors Sim900Params.
+        return True
+
     @classmethod
     def resource_class(cls):
         return Fake900

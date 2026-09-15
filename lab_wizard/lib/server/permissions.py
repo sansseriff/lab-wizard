@@ -337,6 +337,27 @@ class PermissionGate:
         if attribute_resolver is not None:
             resolve_attributes(self._config, attribute_resolver)
         self._tracker = StateTracker(self._config.state_defaults)
+        # Paths whose recorded state some rule reads. Fixed after construction.
+        self._watched_paths = {
+            path for rule in self._config.rules for path in _condition_paths(rule.when)
+        }
+
+    def involves(self, path: str, method: str, cls: Optional[type]) -> bool:
+        """Whether a call could race a rule if it ran alongside another call.
+
+        True when a rule would deny this (path, method), or when the call changes
+        recorded state that a rule reads. Such a call must run its check,
+        dispatch and record as one step with every other such call; anything
+        else may run in parallel. With no rules configured nothing is involved.
+        An unknown class is treated as involved — the conservative answer.
+        """
+        if not self._config.rules:
+            return False
+        if any(clause.matches(path, method) for rule in self._config.rules for clause in rule.deny):
+            return True
+        if cls is None:
+            return True
+        return path in self._watched_paths and method in collect_state_methods(cls)
 
     @property
     def tracker(self) -> StateTracker:
@@ -391,6 +412,17 @@ class PermissionGate:
 
         walk(rule.when)
         return refs
+
+
+def _condition_paths(cond: Condition) -> set[str]:
+    """Every resolved ``path`` a condition tree reads."""
+    if cond.all_ is not None:
+        return set().union(*(_condition_paths(c) for c in cond.all_))
+    if cond.any_ is not None:
+        return set().union(*(_condition_paths(c) for c in cond.any_))
+    if cond.not_ is not None:
+        return _condition_paths(cond.not_)
+    return {cond.path} if cond.path is not None else set()
 
 
 Condition.model_rebuild()

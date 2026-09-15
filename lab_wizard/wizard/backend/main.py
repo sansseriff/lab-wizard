@@ -454,6 +454,72 @@ def api_local_servers(env: Env = Depends(get_env)):
     }
 
 
+@app.get("/api/local-servers/claims")
+def api_local_server_claims():
+    """Run claims held on every instrument server on this machine.
+
+    A claim is how a running measurement keeps other runs off the instruments
+    it drives (``plans/server_plan.md`` Phase 9), so this answers "why was my
+    run refused" and "is something still holding that counter". A server that
+    does not answer is reported rather than raised: one stopped daemon must not
+    blank the page.
+    """
+    from lab_wizard.lib.client.server_registry import (
+        list_local_servers,
+        local_server_endpoints,
+    )
+    from lab_wizard.lib.client.session import Session
+
+    out = []
+    for entry in list_local_servers():
+        endpoints = local_server_endpoints(entry)
+        if not endpoints:
+            continue
+        url = endpoints[0]
+        row = {
+            "url": url,
+            "pid": entry.get("pid"),
+            "workspace_path": entry.get("workspace_path"),
+            "claims": [],
+            "error": None,
+        }
+        try:
+            session = Session(url, timeout_ms=2_000, auto_reconnect=False)
+            try:
+                row["claims"] = session.call("claim_list") or []
+            finally:
+                session.close()
+        except Exception as e:  # noqa: BLE001 - reported per server
+            row["error"] = str(e)
+        out.append(row)
+    return {"servers": out}
+
+
+class _ForceReleaseClaimRequest(_PermBM):
+    url: str
+    unit: str
+
+
+@app.post("/api/local-servers/claims/force-release")
+def api_force_release_claim(req: _ForceReleaseClaimRequest):
+    """End every claim touching ``unit`` on one server.
+
+    For a run that is stuck, or whose client disappeared. The server resets the
+    released instruments to baseline before anyone else can claim them.
+    """
+    from lab_wizard.lib.client.session import Session
+
+    try:
+        session = Session(req.url, timeout_ms=10_000)
+        try:
+            result = session.call("claim_force_release", {"unit": req.unit})
+        finally:
+            session.close()
+    except Exception as e:  # noqa: BLE001 - surfaced to the UI
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "ok", **(result or {})}
+
+
 class _ReleaseRequest(_PermBM):
     url: str
     path: str

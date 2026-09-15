@@ -1,9 +1,7 @@
 # Server / client architecture plan
 
-> **Status: mostly complete; Phase 9 proposed.** Phases 0-8 are built and
-> tested, with two corrections recorded in Phase 9 (2.5's concurrency does not
-> reach the socket path; 7.2's leases are never acquired by projects). Phase 9 —
-> run-scoped claims — is designed but not built. Also remaining, tracked in
+> **Status: mostly complete.** Phases 0-9 are built and tested, including run
+> claims and parallel dispatch (Phase 9). Remaining, tracked in
 > [Remaining](#remaining):
 > push notifications (6.3), forced `attribute` references in the rule builder
 > (8.6), per-attribute source selection in `select_instruments`, and the
@@ -429,7 +427,7 @@ refused reconfiguration, and the event recorded the actor.
 
 ---
 
-## Phase 9 — Ownership: run-scoped claims ⬜
+## Phase 9 — Ownership: run-scoped claims ✅ done
 
 Everything up to Phase 8 decides *which process* owns hardware. Nothing decides
 *which measurement* may drive an instrument once several clients share one
@@ -448,7 +446,11 @@ refusal naming the holder.
 2. Claims held by different tokens must not overlap: nobody may claim a path
    while another token holds that path, an ancestor of it, or a descendant.
    Siblings coexist.
-3. A write to a path requires the caller's token to hold a claim covering it.
+3. A write to a path **that any claim touches** requires the caller's token to
+   hold a claim covering it. That includes the caller's own claims: holding
+   channel 0 does not let a run write to the counter, because the counter's
+   shared state would carry into whoever claims channel 1 next. A path no claim
+   touches stays open, so wizard discovery and ad-hoc scripts keep working.
 4. Reads — declared pure queries — are always allowed.
 
 This is a borrow checker over the instrument tree. Two runs holding channel 1
@@ -498,105 +500,95 @@ must pass both.
   refuses. Nothing ever *acquires* a lease, so two locally-run projects on one
   rack still collide.
 
-### Items
+### As built
 
-- **9.0** **Threaded dispatch.** Hand each request to a worker pool after
-  receipt, reply through a single sender, and keep `transport_lock` as the
-  per-root serialisation it was designed to be. Prerequisite for 9.6: claim
-  expiry cannot be implemented on a loop that one long call can stall.
-- **9.1** **Claimable granularity is declared, and defaults to the root.** A
-  driver declares `channels_claimable()` (and, for mainframes, whether slot
-  modules are) — beside `transport_key()` — meaning *my channel-level
-  operations are transactional, and all shared state is owned by an ancestor*.
-  Undeclared means **false**: `registry.claim_unit_for(path)` then resolves any
-  path to the root, so claiming one channel claims the whole instrument. That
-  is the conservative answer for a driver nobody has reasoned about, like
-  `transport_sharing`'s default.
+Everything below is implemented and tested; the numbered items keep their
+original numbering so references elsewhere still resolve.
 
-  *Worked example — the 53220A declares its channels claimable.* Its manual
-  (`literature/9018-03351.pdf`) shows one measurement engine: `CONFigure`
-  selects function and channel together, `TRIGger:*` is a single system
-  trigger, and gate commands are scoped by function, never by channel. Only
-  `INPut[{1|2}]` is per input. So it can never *simultaneously* count on both
-  inputs — but it does not need to. Interleaved counts are correct because
-  `count()` is transactional (see The rule), and trigger and gate live on the
-  root, where changing them needs a root claim. One consequence falls out
-  correctly: gating one input on the other (`gate_source = "input2"`) is root
-  state, so only a run holding the whole counter can use it — right, since that
-  measurement occupies both inputs.
+- **9.0 ✅ Parallel dispatch.** Requests are received on the loop thread and
+  processed on two pools: *hardware* (`call`, `discover`, `release`, tree
+  writes) and *control* (everything else, above all `claim_renew`), so a long
+  `count()` never delays a renewal. Workers hand replies back over an inproc
+  PUSH/PULL pair, because ZMQ sockets are not thread-safe. Three hazards that
+  serial dispatch had hidden, each fixed:
+  - **Registry swap.** A tree write replaces the registry while holding every
+    transport lock; a worker that picked up the old registry would then open a
+    handle nothing can reach. `_hold_transport` re-checks the registry after
+    taking the lock and retries.
+  - **Permission races.** A rule reading one instrument's state could race a
+    call changing it. `PermissionGate.involves(path, method, cls)` identifies
+    calls a rule denies or whose state a rule reads; only those take a shared
+    gate lock across check → dispatch → record, always innermost, so it cannot
+    deadlock. With no rules configured nothing waits.
+  - **Shutdown.** Running requests finish, queued ones are dropped, and only
+    then is hardware released.
+- **9.1 ✅ `children_claimable()`**, not `channels_claimable()` — one declaration
+  covers children and channels, on any params node. Default false (in
+  `transport.py`, beside the sharing declarations). Declared true on
+  `Keysight53220A` (and so `FakeCounter`), `PrologixGPIB`/`FakeGpib`,
+  `Sim900`/`Fake900`, `DBay`, `Dac4D`, `Dac16D`, `YokogawaAQ2212` and
+  `AndoAQ8201A`, each with its one-line reason. `registry.claim_unit_for(path)`
+  walks down while each node declares it, so a SIM970 channel claims the SIM970.
+- **9.2 ✅** — built as procedure plan 7.3.
+- **9.3 ✅ `lib/server/claims.py`.** Beyond the plan: a released or expired claim
+  moves to a **restoring** state and its units stay unavailable until the
+  baseline restore finishes — otherwise a restore that happened to run after the
+  next holder started would overwrite that holder's settings. And every expiry
+  is reported exactly once, however it was first noticed; without that, a claim
+  seen expiring by an unrelated query would never be restored and its units
+  would stay locked forever (a bug caught in review before it shipped).
+- **9.4 ✅ RPCs** as planned, plus `claim_acquire` accepts `attributes` as well
+  as `paths`. Refusals are JSON-RPC `-32002` with `held_by`; the client raises
+  `ClaimDeniedError`.
+- **9.5 ✅ Enforcement** runs *inside* the transport lock, so a claim granted
+  while a call waited is honoured, then leases, resolve, and the gate. A call
+  carrying a token the server no longer knows — expired, released, or a server
+  restart — is refused outright, so a run cannot continue unowned.
+- **9.6 ✅ Expiry and renewal.** Default TTL 30 s, maximum 3600. The loop reaps
+  every tick, not only when a request arrives. The client renews at TTL/3 on a
+  **separate session**: the proxies' session serializes its calls, so a renewal
+  on it would wait behind a long count until the claim expired.
+- **9.7 ✅ Client** — `lib/client/claims.py`. **Correction:** routed instruments
+  are claimed *after* resolving, not before. Resolving a proxy opens nothing,
+  and only resolved proxies know their server and path — which also makes the
+  `--remote` override claim correctly, where attribute names never appear in
+  the project YAML. `RoutedClaims` groups proxies by session, claims all or
+  nothing across servers, and sets `Session.claim_token`. `RunLifecycle` gained
+  `claims_after_resolve`; both setup templates pass it.
+- **9.8 ✅** `tree_add` / `tree_remove` / `tree_reset` and `release` refuse while
+  a claim touches the rack.
+- **9.9 ✅ Audit events:** `claim.acquire`, `claim.denied`, `claim.release`,
+  `claim.expire`, `claim.force_release`, `claim.restore_failed`.
+- **9.10 ✅ partly.** Hardware ownership lists every claim on the machine's
+  servers with a **Force release**; `/api/local-servers/claims` and
+  `.../force-release` back it. *Not done:* showing a claimed instrument as busy
+  in the measurement picker — deferred to procedure plan Phase 5, which reworks
+  that picker anyway.
+- **9.11 ✅** — built with procedure plan 7.6.
+- **9.12 ✅ Release restores baseline** on the released units: only instruments
+  already open (release never opens hardware), shallowest first, failures
+  recorded and the units freed regardless.
+- **9.13 ✅ Acceptance test** over a real socket: two runs on the two inputs of
+  one simulated 53220A interleave counts at −50 mV and 400 mV, and neither ever
+  sees the other's threshold. Plus the refusals, a slow call not blocking other
+  clients (fails at 1.3 s with one worker), renewal outliving the TTL, and the
+  lifecycle claiming a routed instrument and getting it back at baseline.
 
-  A two-channel function generator is the easy case: each output has its own
-  `SOURce1` / `SOURce2` subsystem, so channels are claimable with no shared
-  state to reason about. (No function-generator driver exists in the repo yet.)
+**Tests:** `test_claim_table.py`, `test_server_claims.py`,
+`test_claims_over_the_wire.py` — 36 tests. Mutating the enforcement to let any
+holder write where its claim touches, or freeing units before their restore,
+fails them.
 
-  Mainframes follow the same shape: SIM900 slot modules share the Prologix
-  transport but not state, and every call is `++addr` plus command under one
-  lock hold, so slots are claimable. DBay channels likewise.
-- **9.2** **Query allowlist, failing closed.** Each class declares its pure
-  queries — `_query_methods_ = {"get_voltage", "get_threshold", ...}` — merged
-  across the MRO like `_state_methods_`, with behavior ABCs declaring their
-  getters once. **Anything undeclared is a write.** `_state_methods_` cannot be
-  reused for this: it is opt-in tracking of *safety-relevant* state, so most
-  mutating methods are absent from it, and absence would silently read as
-  "harmless". Note `Counter.count()` is a write — on the 53220A it issues
-  `CONFigure` and arms the box.
-- **9.3** **`ClaimTable`** on the server:
-  `{unit_path: Claim(token, holder_label, peer, acquired_at, expires_at)}`
-  under its own lock, never under a transport lock. In memory: a server restart
-  drops all claims, and the holder's next write fails with "unknown claim",
-  which aborts the run legibly rather than letting it continue unowned.
-- **9.4** **RPCs**, available to `ipc` **and** `tcp` peers — a measurement on
-  another machine must be able to claim:
-  - `claim_acquire(paths, holder_label, ttl_s) -> {token, units, expires_at}` —
-    **all-or-nothing**. A run needing two instruments can never end up holding
-    one while waiting on the other, so there is no acquisition order to get
-    wrong and no deadlock.
-  - `claim_renew(token)`, `claim_release(token)`, `claim_list()`.
-  - The token is **server-issued**, not client-chosen: it costs nothing and
-    keeps a guessed token from impersonating a holder, even in a cooperative
-    model.
-- **9.5** **Enforcement in `WireServer.call`**, in this order: resolve the path
-  → if the method is not a declared query, require that the request's token
-  holds a claim covering `claim_unit_for(path)` → permission gate → dispatch.
-  A new `ClaimDenied` names the holder label and expiry. **Unclaimed paths stay
-  open** to token-less writes, so wizard discovery and ad-hoc scripts keep
-  working; once any claim covers a path, only its holder writes. Acquisition
-  checks rule 2 atomically against the whole table.
-- **9.6** **Expiry and renewal.** TTL of the order of 30 s, renewed by the
-  client in the background. A crashed client's claim lapses on its own. pid
-  liveness is useless across machines, and a `Session` rebuilds its socket on
-  timeout (6.2), changing its ZMQ identity — which is why the claim is keyed
-  on the token and never on the connection. Expiry does exactly what release
-  does, including 9.12's baseline restore.
-- **9.7** **Client side:** `Session` attaches the active token to every `call`;
-  a `RunClaim` context manager in `lib/client/claims.py` acquires, renews on a
-  thread, and releases in `finally`. The runtime ordering it slots into is in
-  `procedure_plan.md` Phase 7.
-- **9.8** **Existing refusals learn about claims.** `tree_add` / `tree_remove`
-  / `tree_reset` and `release` already refuse while a rack is *held*; they
-  should also refuse while any unit under it is *claimed*.
-- **9.9** **Audit.** Acquire, renew-failure, release, expiry, and denial are
-  recorded in `server/events.py`.
-- **9.10** **UI.** Hardware ownership page lists live claims — holder, units,
-  expiry — with a force-release for same-machine callers only, and the conflict
-  warning on `/measurements/resources` shows a claimed instrument as busy.
-- **9.11** ✅ **Wire leases into local runs.** *(Built with procedure plan 7.6: `LocalTransportClaim` leases every exclusive local root, then preflights, since a lease cannot see a server that opened the rack earlier.)* Generated setup files acquire the
-  transport lease for each local root instead of only preflighting (fixes the
-  7.2 gap above). The local analogue of a claim, at transport granularity,
-  which is correct because a local run owns the whole transport.
-- **9.12** **Release restores baseline.** On release or expiry the server calls
-  `apply_baseline()` on the released subtree and clears driver caches that
-  describe hardware (the 53220A's `_forget_hardware_state()`), keeping
-  "unclaimed state is baseline state" true. Baseline covers category-2 params
-  only; outputs are already in their safe state from the run lifecycle, and the
-  two sets are disjoint.
-- **9.13** **Interleaving acceptance test.** Two runs, one token each, holding
-  channels 1 and 2 of a `FakeCounter` — which is the real 53220A driver over a
-  simulated VISA session — alternating `set_threshold` and `count` against
-  different simulated detectors. Each run's counts must match what it would get
-  alone. Plus the refusals: a root claim while either channel is held, a
-  `configure_gate` from a channel holder, and a write with no token to a held
-  channel.
+### Known gaps
+
+- **Writes outside any claim can still change shared state.** A token-less
+  script can change the counter's trigger while no run holds it, and a run that
+  later claims only an input will not reset it. Cooperative, not airtight — the
+  same stance as 2.5.
+- **A `RemoteOpaque` proxy is never claimed**, since nothing is known about it.
+- **A proxy whose path moves** after a key-field edit re-resolves to a path its
+  claim does not name. Tree writes refuse while claimed, so this needs an edit
+  made outside the server.
 
 ---
 
@@ -607,4 +599,3 @@ must pass both.
 - Per-attribute source selection in `select_instruments` — `CompositeResources`
   can route, but the generator does not yet emit `instrument_sources`
 - Read-only mode / explicit edit destination for a merged multi-source tree
-- **Phase 9** — run-scoped claims, threaded dispatch, and lease acquisition for local runs

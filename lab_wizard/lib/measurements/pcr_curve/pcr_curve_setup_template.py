@@ -12,6 +12,7 @@ from typing import cast
 
 from lab_procedure import Status
 
+from lab_wizard.lib.client.claims import RoutedClaims
 from lab_wizard.lib.client.composite_resources import CompositeResources
 from lab_wizard.lib.client.local_claims import LocalTransportClaim
 from lab_wizard.lib.client.server_discovery import load_server_urls
@@ -103,9 +104,15 @@ if __name__ == "__main__":
             LocalTransportClaim(project.resources.instruments, owner=project_dir.name)
         )
 
-    # Claim, build the instruments, reset them to their configured baseline,
-    # run, make them safe if the run fails, release. See lifecycle.py.
-    status = RunLifecycle(claims=claims).run(
+    # Claim local transports, build the instruments, claim the ones reached
+    # through a server, reset them to their configured baseline, run, make them
+    # safe if the run fails, release. See lifecycle.py.
+    status = RunLifecycle(
+        claims=claims,
+        claims_after_resolve=[
+            lambda instruments: RoutedClaims(instruments, holder=project_dir.name)
+        ],
+    ).run(
         resolve=lambda: create_instrument_resources(project, resource_source),
         execute=lambda resources: PCRCurveMeasurement(resources).run_measurement(),
     )

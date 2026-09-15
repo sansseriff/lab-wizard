@@ -44,6 +44,7 @@ graph LR
 | [`registry.py`](../../lab_wizard/lib/server/registry.py) | `InstrumentRegistry`: indexes the tree by `inst://` path and by `attribute_name`; resolves objects lazily |
 | [`wire.py`](../../lab_wizard/lib/server/wire.py) | `WireServer`: ZMQ ROUTER loop + pyleco framing + JSON-RPC dispatch + gate integration |
 | [`permissions.py`](../../lab_wizard/lib/server/permissions.py) | the [permission state machine](permissions.md) |
+| [`claims.py`](../../lab_wizard/lib/server/claims.py) | `ClaimTable`: which run may write to which part of the tree, with expiry |
 | [`server.py`](../../lab_wizard/lib/server/server.py) | CLI entry point: load config → build registry + gate → serve |
 
 The wire format is a pyleco `Message` (multipart, conversation-id) carrying
@@ -52,8 +53,16 @@ pyleco's `Coordinator`/`MessageHandler` layer is deliberately **not** used, but
 the wire format is identical so migrating later is additive.
 
 RPC methods: `call`, `list_paths`, `list_attributes`, `describe_path`,
-`describe_attribute`, `list_descriptions`. Permission denials are JSON-RPC error
-**code `-32001`** carrying `{rule_id, blocking_state}`.
+`describe_attribute`, `list_descriptions`, and the claim methods `claim_acquire`,
+`claim_renew`, `claim_release`, `claim_list`, `claim_force_release`. Permission
+denials are JSON-RPC error **code `-32001`** carrying `{rule_id, blocking_state}`;
+claim refusals are **code `-32002`** carrying `held_by`.
+
+Requests are received on one thread and processed on two worker pools —
+hardware calls on one, fast control requests (claim renewals, listings) on the
+other — so a long instrument call never delays a renewal. Calls on one transport
+still serialize under its lock; calls a permission rule involves also serialize
+with each other, so a rule check cannot race the state change it depends on.
 
 ### Client (`lib/client/`)
 

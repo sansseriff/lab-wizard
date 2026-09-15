@@ -43,6 +43,10 @@ class Dac16DParams(ChannelsLike, SlotLike, DBayModuleParams):
     num_channels: ClassVar[int] = 16
     channels: dict[int, Dac16DChannelParams] = Field(default_factory=dict)
 
+    def children_claimable(self) -> bool:
+        # Each channel's set_voltage is one self-contained call.
+        return True
+
     @classmethod
     def resource_class(cls):
         return Dac16D

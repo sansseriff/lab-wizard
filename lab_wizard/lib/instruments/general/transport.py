@@ -28,6 +28,21 @@ consumes it without importing anything about specific hardware.
 The two are orthogonal: an instrument with a front panel is exclusive *and*
 externally mutated.
 
+**children_claimable** — may a run claim one child or channel of this node
+without claiming the node itself? Declared on any params node, not only roots.
+
+    False  a claim on anything beneath this node claims the whole node. The
+           default: correct for any instrument nobody has reasoned about.
+    True   each direct child (or channel) is an independent claim unit. Only
+           declare this when two things hold: every operation on a child
+           re-establishes, within one call, all the shared state it depends on;
+           and that shared state can only be changed through this node itself.
+           The 53220A qualifies — ``count()`` re-arms from its settings in one
+           call, and trigger and gate are methods on the counter, not on an
+           input — so two runs can hold its two inputs at once.
+
+See ``plans/server_plan.md`` Phase 9.
+
 Defaults are the conservative pair (``exclusive`` / ``inferred``), so a new
 instrument is safe until someone thinks about it.
 """
@@ -42,6 +57,7 @@ StateAuthority = Literal["inferred", "subscribed"]
 
 DEFAULT_TRANSPORT_SHARING: TransportSharing = "exclusive"
 DEFAULT_STATE_AUTHORITY: StateAuthority = "inferred"
+DEFAULT_CHILDREN_CLAIMABLE = False
 
 
 __all__ = [
@@ -49,4 +65,5 @@ __all__ = [
     "StateAuthority",
     "DEFAULT_TRANSPORT_SHARING",
     "DEFAULT_STATE_AUTHORITY",
+    "DEFAULT_CHILDREN_CLAIMABLE",
 ]

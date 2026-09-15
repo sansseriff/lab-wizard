@@ -41,6 +41,11 @@ class Sim900Params(
     children: dict[str, SerializeAsAny[Sim900ModuleParams]] = Field(default_factory=dict)
     type: Literal["sim900"] = "sim900"
 
+    def children_claimable(self) -> bool:
+        # Every slot command is CONN <slot> ... esc inside one write, and slot
+        # modules share no state.
+        return True
+
     @classmethod
     def resource_class(cls):
         return Sim900

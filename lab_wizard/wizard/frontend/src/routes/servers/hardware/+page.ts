@@ -36,10 +36,30 @@ export type TransportStatus = {
 
 export type HardwareOwner = { owner: 'server' | 'wizard'; url: string | null };
 
+/** One run claim, as a server lists it. Tokens are never sent. */
+export type RunClaim = {
+	holder: string;
+	peer: string;
+	units: string[];
+	ttl_s: number;
+	acquired_at: number;
+	expires_in_s: number | null;
+	restoring: boolean;
+};
+
+export type ServerClaims = {
+	url: string;
+	pid: number | null;
+	workspace_path: string | null;
+	claims: RunClaim[];
+	error: string | null;
+};
+
 export type HardwareStatusData = {
 	owner: HardwareOwner;
 	transport: TransportStatus;
 	servers: LocalServer[];
+	claims: ServerClaims[];
 	error?: string;
 };
 
@@ -58,7 +78,8 @@ const EMPTY: HardwareStatusData = {
 		roots: {},
 		duplicate_transports: {}
 	},
-	servers: []
+	servers: [],
+	claims: []
 };
 
 export const load: PageLoad = async () => {
@@ -66,12 +87,18 @@ export const load: PageLoad = async () => {
 	try {
 		// Fetched together so the page shows one coherent picture rather than
 		// three panels that can disagree with each other.
-		const [owner, transport, servers] = await Promise.all([
+		const [owner, transport, servers, claims] = await Promise.all([
 			fetchWithConfig<HardwareOwner>('/api/hardware-owner', 'GET'),
 			fetchWithConfig<TransportStatus>('/api/transport-status', 'GET'),
-			fetchWithConfig<{ servers: LocalServer[] }>('/api/local-servers', 'GET')
+			fetchWithConfig<{ servers: LocalServer[] }>('/api/local-servers', 'GET'),
+			fetchWithConfig<{ servers: ServerClaims[] }>('/api/local-servers/claims', 'GET')
 		]);
-		return { owner, transport, servers: servers.servers } satisfies HardwareStatusData;
+		return {
+			owner,
+			transport,
+			servers: servers.servers,
+			claims: claims.servers
+		} satisfies HardwareStatusData;
 	} catch (e) {
 		return {
 			...EMPTY,

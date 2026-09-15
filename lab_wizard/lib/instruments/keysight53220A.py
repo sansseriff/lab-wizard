@@ -599,6 +599,11 @@ class Keysight53220AParams(ChannelsLike, IPLike, BaseModel, CanInstantiate["Keys
     num_channels: ClassVar[int] = 2
     channels: dict[int, Keysight53220AChannelParams] = Field(default_factory=dict)
 
+    def children_claimable(self) -> bool:
+        # Inputs are independent: count() re-arms function, trigger, gate and input
+        # from settings in one call, and trigger and gate are counter methods.
+        return True
+
     @classmethod
     def resource_class(cls) -> type[Keysight53220A]:
         return Keysight53220A

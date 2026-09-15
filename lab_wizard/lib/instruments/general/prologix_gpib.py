@@ -52,6 +52,11 @@ class PrologixGPIBParams(
     def _validate(self):
         return self
 
+    def children_claimable(self) -> bool:
+        # Each GPIB device is addressed with ++addr inside the same call, and
+        # devices on the bus share no state.
+        return True
+
     @classmethod
     def resource_class(cls) -> type["PrologixGPIB"]:
         return PrologixGPIB

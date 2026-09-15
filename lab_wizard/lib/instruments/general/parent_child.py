@@ -21,6 +21,7 @@ import inspect
 from pydantic import BaseModel, model_validator, field_validator
 from lab_wizard.lib.instruments.general.discovery import Discoverable
 from lab_wizard.lib.instruments.general.transport import (
+    DEFAULT_CHILDREN_CLAIMABLE,
     DEFAULT_STATE_AUTHORITY,
     DEFAULT_TRANSPORT_SHARING,
     StateAuthority,
@@ -88,6 +89,10 @@ class CanInstantiate(Generic[P_co], ABC):
     def state_authority(self) -> StateAuthority:
         """Whether this instrument's state must be read rather than inferred."""
         return DEFAULT_STATE_AUTHORITY
+
+    def children_claimable(self) -> bool:
+        """Whether a run may claim one child or channel without the whole node."""
+        return DEFAULT_CHILDREN_CLAIMABLE
 
     def transport_key(self) -> str | None:
         """Identifier of the physical transport this root opens, if known.
@@ -280,6 +285,13 @@ class ChildParams(Instrument, BaseModel, Params2Inst[I_co], Generic[I_co]):
     @classmethod
     def resource_class(cls) -> type[I_co]:
         return super().resource_class()
+
+    def children_claimable(self) -> bool:
+        """Whether a run may claim one child or channel without the whole node.
+
+        See :mod:`lab_wizard.lib.instruments.general.transport`.
+        """
+        return DEFAULT_CHILDREN_CLAIMABLE
 
 
 R = TypeVar("R", bound=Dependency)

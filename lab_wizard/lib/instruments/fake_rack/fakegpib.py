@@ -80,6 +80,10 @@ class FakeGpibParams(
     )
     children: dict[str, SerializeAsAny[FakeGpibChildParams]] = Field(default_factory=dict)
 
+    def children_claimable(self) -> bool:
+        # Mirrors PrologixGPIBParams.
+        return True
+
     @classmethod
     def resource_class(cls) -> type["FakeGpib"]:
         return FakeGpib

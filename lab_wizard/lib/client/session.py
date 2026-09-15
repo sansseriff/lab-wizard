@@ -34,8 +34,10 @@ class RemoteCallError(RuntimeError):
         self.data = data
 
 
-# JSON-RPC server-error code the server uses for permission denials.
+# JSON-RPC server-error codes: a permission rule denied the call, or the path is
+# claimed by another run (or this run's claim is gone).
 PERMISSION_DENIED_CODE = -32001
+CLAIM_DENIED_CODE = -32002
 
 
 class PermissionDeniedError(RemoteCallError):
@@ -50,6 +52,19 @@ class PermissionDeniedError(RemoteCallError):
         info = data if isinstance(data, dict) else {}
         self.rule_id: Optional[str] = info.get("rule_id")
         self.blocking_state: dict[str, Any] = info.get("blocking_state", {})
+
+
+class ClaimDeniedError(RemoteCallError):
+    """Raised when a run claim blocks a call or cannot be granted.
+
+    ``held_by`` describes the claim in the way (holder, units, expiry), when
+    there is one.
+    """
+
+    def __init__(self, code: int, message: str, data: Any = None) -> None:
+        super().__init__(code, message, data)
+        info = data if isinstance(data, dict) else {}
+        self.held_by: Optional[dict[str, Any]] = info.get("held_by")
 
 
 class Session:
@@ -73,6 +88,10 @@ class Session:
 
         self._lock = threading.Lock()
         self._closed = False
+        # The run claim this session's instrument calls act under, set by
+        # ``lib/client/claims.py`` for the length of a run. Kept on the session
+        # rather than the socket, so it survives a reconnect.
+        self.claim_token: Optional[str] = None
 
     def _open_socket(self) -> "zmq.Socket":
         socket = self._ctx.socket(zmq.DEALER)
@@ -146,11 +165,10 @@ class Session:
         if "error" in data and data["error"] is not None:
             err = data["error"]
             code = err.get("code", 0)
-            err_cls = (
-                PermissionDeniedError
-                if code == PERMISSION_DENIED_CODE
-                else RemoteCallError
-            )
+            err_cls = {
+                PERMISSION_DENIED_CODE: PermissionDeniedError,
+                CLAIM_DENIED_CODE: ClaimDeniedError,
+            }.get(code, RemoteCallError)
             raise err_cls(
                 code=code,
                 message=err.get("message", ""),
@@ -167,16 +185,16 @@ class Session:
         args: Optional[list[Any]] = None,
         kwargs: Optional[dict[str, Any]] = None,
     ) -> Any:
-        """Invoke ``method`` on the instrument at ``path``."""
-        return self.call(
-            "call",
-            {
-                "path": path,
-                "method": method,
-                "args": args or [],
-                "kwargs": kwargs or {},
-            },
-        )
+        """Invoke ``method`` on the instrument at ``path``, under this session's claim."""
+        params: dict[str, Any] = {
+            "path": path,
+            "method": method,
+            "args": args or [],
+            "kwargs": kwargs or {},
+        }
+        if self.claim_token is not None:
+            params["token"] = self.claim_token
+        return self.call("call", params)
 
     def close(self) -> None:
         if self._closed:

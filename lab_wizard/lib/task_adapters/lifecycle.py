@@ -3,17 +3,19 @@
 Every run does the same six things, and the order is the point, so it is written
 once here instead of in every generated setup file:
 
-1. **claim**    the transports this process will open, and (with server claims,
-                ``plans/server_plan.md`` Phase 9) the routed instruments it drives
+1. **claim**    the transports this process will open (``claims``)
 2. **resolve**  the instruments — *after* claiming, because constructing a local
                 rack can open its serial port, and opening before claiming is the
                 race claims exist to close
-3. **baseline** ``apply_baseline()`` on every bound instrument, so a setting an
+3. **claim**    the instruments reached through a server (``claims_after_resolve``).
+                Resolving a remote proxy opens nothing, and only the resolved
+                proxies say which server and path each instrument is
+4. **baseline** ``apply_baseline()`` on every bound instrument, so a setting an
                 earlier experiment changed cannot carry into this one
-4. **run**      the measurement
-5. **safe**     ``enter_safe_state()`` on every bound instrument that declares one,
-                **if the run did not succeed**
-6. **release**  the claims, always
+5. **run**      the measurement
+6. **safe**     ``enter_safe_state()`` on every bound instrument that declares one,
+                **if the run did not succeed** — while every claim is still held
+7. **release**  the claims, always
 
 Step 5 runs only on failure, abort, or an exception. A run that completes has
 already been through its own guards (``SafeGuard``, ``SourceGuard``) and ended
@@ -69,8 +71,16 @@ def bound_instruments(resources: object) -> list[InstrumentBehavior]:
 class RunLifecycle:
     """Claim, resolve, baseline, run, make safe on failure, release."""
 
-    def __init__(self, *, claims: Sequence[AbstractContextManager[Any]] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        claims: Sequence[AbstractContextManager[Any]] = (),
+        claims_after_resolve: Sequence[
+            Callable[[list[InstrumentBehavior]], AbstractContextManager[Any]]
+        ] = (),
+    ) -> None:
         self.claims = list(claims)
+        self.claims_after_resolve = list(claims_after_resolve)
 
     def run(self, resolve: Callable[[], R], execute: Callable[[R], Status]) -> Status:
         """Run one measurement. ``resolve`` builds the resources; ``execute`` runs them."""
@@ -82,6 +92,8 @@ class RunLifecycle:
 
             resources = resolve()
             instruments = bound_instruments(resources)
+            for make_claim in self.claims_after_resolve:
+                held.enter_context(make_claim(instruments))
             self._apply_baseline(instruments)
 
             try:
