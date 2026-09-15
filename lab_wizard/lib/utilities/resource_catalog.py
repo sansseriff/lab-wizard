@@ -30,13 +30,16 @@ from lab_wizard.lib.instruments.general.parent_child import (
 )
 
 
-Kind = Literal["instrument", "saver", "plotter"]
+Kind = Literal["instrument", "saver", "plotter", "step"]
 SCHEMA_VERSION = 3
 
 _KIND_DIRS = {
     "instrument": "instruments",
     "saver": "savers",
     "plotter": "plotters",
+    # Procedure step schemas (``*StepParams``), discovered the same way so a new
+    # step is picked up by dropping a file in — see lab_wizard.lib.procedures.
+    "step": "procedures/steps",
 }
 _SKIP_PARTS = {"__pycache__", "addons"}
 _source_maps: dict[str, dict[str, dict[str, Any]] | None] = {
@@ -152,7 +155,8 @@ def _scan_file(path: Path, kind: Kind) -> list[dict[str, str]]:
         raise ResourceAuditError(f"Could not index {path}: {exc}") from exc
     root = _root_dir(kind)
     relative = path.relative_to(root).with_suffix("")
-    module = f"lab_wizard.lib.{_KIND_DIRS[kind]}." + ".".join(relative.parts)
+    package = _KIND_DIRS[kind].replace("/", ".")
+    module = f"lab_wizard.lib.{package}." + ".".join(relative.parts)
     found: list[dict[str, str]] = []
     for node in tree.body:
         if not isinstance(node, ast.ClassDef) or not node.name.endswith("Params"):
@@ -267,6 +271,9 @@ def get_source_map(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
 def _runtime_base(kind: Kind) -> type:
     if kind == "instrument":
         return BaseModel
+    if kind == "step":
+        from lab_wizard.lib.procedures.spec import StepParams
+        return StepParams
     if kind == "saver":
         from lab_wizard.lib.savers.base import SaverParams
         return SaverParams

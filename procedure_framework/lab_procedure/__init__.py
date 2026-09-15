@@ -11,16 +11,31 @@ from lab_procedure.messages import (
     StepProgress,
 )
 from lab_procedure.runner import ProcedureRunner
-from lab_procedure.steps import Repeat, Sequence, Sweep, Wait
+from lab_procedure.steps import (
+    If,
+    Invert,
+    Repeat,
+    Retry,
+    Selector,
+    Sequence,
+    Sweep,
+    ValueAbove,
+    ValueBelow,
+    Wait,
+)
 
 __all__ = [
+    "If",
+    "Invert",
     "MessageBus",
     "Observation",
     "ProcedureRunner",
     "Repeat",
+    "Retry",
     "RunContext",
     "RunEnded",
     "RunStarted",
+    "Selector",
     "Sequence",
     "Status",
     "Step",
@@ -29,5 +44,7 @@ __all__ = [
     "StepFailed",
     "StepProgress",
     "Sweep",
+    "ValueAbove",
+    "ValueBelow",
     "Wait",
 ]

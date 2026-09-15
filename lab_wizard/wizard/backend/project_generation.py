@@ -79,6 +79,9 @@ class GenerateProjectRequest(BaseModel):
     selected_resources: list[SelectedResource] = Field(default_factory=list)
     project_prefix: str | None = None
     generation_style: str = "production"
+    # A named preset from config/measurements/<measurement>/, copied into the
+    # project's measurement.params. None means the measurement's own defaults.
+    params_preset: str | None = None
 
 
 def _format_measurement_slug(measurement_name: str) -> str:
@@ -113,10 +116,6 @@ def _measurement_info(measurement_name: str):
     if measurement_name not in all_meas:
         raise ValueError(f"Unknown measurement: {measurement_name}")
     return all_meas[measurement_name]
-
-
-def _requirements_for_measurement(measurement_name: str) -> list[FilledReq]:
-    return reqs_from_measurement(_measurement_info(measurement_name))
 
 
 def _setup_template_text(measurement_name: str) -> str:
@@ -789,6 +788,7 @@ def _default_project_yaml(
     savers: dict[str, Any],
     plotters: dict[str, Any],
     instrument_sources: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "project": {
@@ -810,7 +810,9 @@ def _default_project_yaml(
             },
         },
         "measurement": {
-            "params": _measurement_param_defaults(measurement_name),
+            "params": (
+                params if params is not None else _measurement_param_defaults(measurement_name)
+            ),
         },
         "resources": {
             "savers": {
@@ -837,13 +839,55 @@ def _default_project_yaml(
     }
 
 
+def _params_for(
+    config_dir: Path, measurement: str, preset: str | None, model: type[BaseModel] | None
+) -> dict[str, Any] | None:
+    """A project's initial ``measurement.params``: a preset, or ``None`` for defaults."""
+    if preset is None:
+        return None
+    from lab_wizard.lib.procedures.storage import load_preset
+
+    return load_preset(config_dir, measurement, preset, model)
+
+
 def generate_measurement_project(
     *,
     config_dir: Path,
     projects_dir: Path,
     req: GenerateProjectRequest,
 ) -> dict[str, Any]:
+    """Generate a project for a hand-written measurement under ``lib/measurements``."""
     logger.info("Generating project for measurement '%s'", req.measurement_name)
+    info = _measurement_info(req.measurement_name)
+    return generate_project(
+        config_dir=config_dir,
+        projects_dir=projects_dir,
+        req=req,
+        requirements=reqs_from_measurement(info),
+        template_text=_setup_template_text(req.measurement_name),
+        measurement_source=_measurement_source_text(req.measurement_name),
+        params=_params_for(
+            config_dir, req.measurement_name, req.params_preset, params_model_for_measurement(info)
+        ),
+    )
+
+
+def generate_project(
+    *,
+    config_dir: Path,
+    projects_dir: Path,
+    req: GenerateProjectRequest,
+    requirements: list[FilledReq],
+    template_text: str,
+    measurement_source: str,
+    params: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Write a project from a setup template and a measurement module.
+
+    Shared by hand-written measurements and composed procedures, which differ
+    only in where these pieces come from. ``params`` of ``None`` means the
+    measurement's own defaults.
+    """
     if req.generation_style == "explicit":
         req.generation_style = "production"
     allowed_styles = {
@@ -889,10 +933,7 @@ def generate_measurement_project(
                 "regenerate."
             )
 
-    requirements = _requirements_for_measurement(req.measurement_name)
     instrument_reqs, saver_reqs, plotter_reqs = _split_requirements(requirements)
-    template_text = _setup_template_text(req.measurement_name)
-    measurement_source = _measurement_source_text(req.measurement_name)
 
     # Only local instruments contribute params. A routed one is owned by its
     # server; copying a snapshot here would create a second copy to drift.
@@ -918,6 +959,7 @@ def generate_measurement_project(
         savers_subset,
         plotters_subset,
         resolved.instrument_sources,
+        params=params,
     )
     yaml_path = project_dir / f"{project_dir.name}.yaml"
     y = YAML(typ="rt")

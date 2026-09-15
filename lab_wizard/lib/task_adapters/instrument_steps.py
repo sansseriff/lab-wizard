@@ -15,7 +15,9 @@ from collections.abc import Mapping
 
 from lab_procedure import Status, Step
 
+from lab_wizard.lib.instruments.general.attenuator import Attenuator
 from lab_wizard.lib.instruments.general.counter import Counter
+from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,84 @@ class SetThreshold(Step):
         # meaningless, so a refusal fails the step rather than being ignored.
         if self.counter.set_threshold(self.threshold_mV) is False:
             return Status.FAILED
+        return Status.SUCCESS
+
+
+class SetAttenuation(Step):
+    """Set an attenuator's attenuation, in dB."""
+
+    def __init__(self, attenuator: Attenuator, attenuation_db: float, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.attenuator = attenuator
+        self.attenuation_db = attenuation_db
+
+    def run(self) -> Status:
+        if self.attenuator.set_attenuation(self.attenuation_db) is False:
+            return Status.FAILED
+        return Status.SUCCESS
+
+
+class OpenShutter(Step):
+    """Let light through an attenuator."""
+
+    def __init__(self, attenuator: Attenuator, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.attenuator = attenuator
+
+    def run(self) -> Status:
+        return Status.FAILED if self.attenuator.open_shutter() is False else Status.SUCCESS
+
+
+class CloseShutter(Step):
+    """Block light through an attenuator."""
+
+    def __init__(self, attenuator: Attenuator, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.attenuator = attenuator
+
+    def run(self) -> Status:
+        return Status.FAILED if self.attenuator.close_shutter() is False else Status.SUCCESS
+
+
+class Count(Step):
+    """Count for one gate and record ``counts``, ``int_time`` and ``count_rate``.
+
+    The generic counterpart of a measurement-specific counting step. The swept
+    parameters in force go into the observation too (``RunContext.observe``),
+    so a count inside a bias sweep is a row carrying its bias.
+    """
+
+    emits = ("counts", "int_time", "count_rate")
+
+    def __init__(self, counter: Counter, gate_time: float, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.counter = counter
+        self.gate_time = gate_time
+
+    def run(self) -> Status:
+        assert self.context is not None
+        counts = self.counter.count(self.gate_time)
+        self.context.observe(
+            {
+                "counts": counts,
+                "int_time": self.gate_time,
+                "count_rate": counts / self.gate_time if self.gate_time else 0.0,
+            }
+        )
+        return Status.SUCCESS
+
+
+class ReadVoltage(Step):
+    """Read a voltmeter and record the reading under ``field``."""
+
+    def __init__(self, sense: VSense, field: str = "voltage", name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.sense = sense
+        self.field = field
+
+    def run(self) -> Status:
+        assert self.context is not None
+        self.context.observe({self.field: self.sense.get_voltage()})
         return Status.SUCCESS
 
 

@@ -166,3 +166,167 @@ class Wait(Step):
             remaining = self.seconds - elapsed
             if not self.sleep(min(self.progress_interval, remaining)):
                 return Status.ABORTED
+
+
+# --------------------------------------------------------------------------
+# Control flow
+#
+# A procedure is a behavior tree: every step returns SUCCESS, FAILED or
+# ABORTED, so branching needs no expression language. A condition is a leaf
+# that returns FAILED instead of SUCCESS, and these composites decide what a
+# failure means. ABORTED always propagates at once — an operator stopping a run
+# must never be mistaken for a step that merely failed.
+# --------------------------------------------------------------------------
+
+
+class Retry(Step):
+    """Run ``child`` until it succeeds, at most ``max_attempts`` times.
+
+    A child that returns FAILED *or raises* is tried again — a counter timeout
+    is exactly the failure worth retrying. After the last attempt the final
+    exception is re-raised, or FAILED returned.
+    """
+
+    determinate = False
+
+    def __init__(self, max_attempts: int, child: Step, name: str | None = None) -> None:
+        super().__init__(name=name)
+        if max_attempts < 1:
+            raise ValueError("Retry max_attempts must be at least 1")
+        self.max_attempts = max_attempts
+        self.child = child
+        self.add_child(child)
+
+    def run(self) -> Status:
+        assert self.context is not None
+        assert self.node_id is not None
+        for attempt in range(self.max_attempts):
+            if self.aborted:
+                return Status.ABORTED
+            last_attempt = attempt == self.max_attempts - 1
+            try:
+                status = self.child.execute(self.context, self.node_id, position=attempt)
+            except Exception:
+                if last_attempt:
+                    raise
+                continue
+            if status is not Status.FAILED:
+                return status  # SUCCESS, or ABORTED propagating
+        return Status.FAILED
+
+
+class If(Step):
+    """Run ``condition``; on SUCCESS run ``then``, on FAILED run ``otherwise``.
+
+    With no ``otherwise``, a failed condition simply skips ``then`` and the
+    step succeeds. The result is the status of whichever branch ran.
+    """
+
+    def __init__(
+        self,
+        condition: Step,
+        then: Step,
+        otherwise: Step | None = None,
+        name: str | None = None,
+    ) -> None:
+        super().__init__(name=name)
+        self.condition = condition
+        self.then = then
+        self.otherwise = otherwise
+        self.add_child(condition)
+        self.add_child(then)
+        if otherwise is not None:
+            self.add_child(otherwise)
+
+    def run(self) -> Status:
+        assert self.context is not None
+        assert self.node_id is not None
+        verdict = self.condition.execute(self.context, self.node_id, position=0)
+        if verdict is Status.ABORTED:
+            return verdict
+        if verdict is Status.SUCCESS:
+            return self.then.execute(self.context, self.node_id, position=1)
+        if self.otherwise is None:
+            return Status.SUCCESS
+        return self.otherwise.execute(self.context, self.node_id, position=2)
+
+
+class Selector(Step):
+    """Try each child in order; succeed with the first that succeeds.
+
+    A fallback: ``Selector(fast_path, slow_path)``. FAILED only if every child
+    fails.
+    """
+
+    def __init__(self, *children: Step, name: str | None = None) -> None:
+        super().__init__(name=name)
+        for child in children:
+            self.add_child(child)
+
+    def run(self) -> Status:
+        assert self.context is not None
+        assert self.node_id is not None
+        for index, child in enumerate(self.children):
+            if self.aborted:
+                return Status.ABORTED
+            status = child.execute(self.context, self.node_id, position=index)
+            if status is not Status.FAILED:
+                return status
+        return Status.FAILED
+
+
+class Invert(Step):
+    """Succeed when ``child`` fails, fail when it succeeds. ABORTED passes through.
+
+    Turns a condition around: ``If(Invert(ValueAbove(...)), ...)``.
+    """
+
+    def __init__(self, child: Step, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.child = child
+        self.add_child(child)
+
+    def run(self) -> Status:
+        assert self.context is not None
+        assert self.node_id is not None
+        status = self.child.execute(self.context, self.node_id, position=0)
+        if status is Status.SUCCESS:
+            return Status.FAILED
+        if status is Status.FAILED:
+            return Status.SUCCESS
+        return status
+
+
+class _Comparison(Step):
+    """Compare the latest recorded ``field`` against ``threshold``."""
+
+    def __init__(self, field: str, threshold: float, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.field = field
+        self.threshold = threshold
+
+    def _latest(self) -> float:
+        assert self.context is not None
+        if self.field not in self.context.latest:
+            # A condition on a value this run never recorded is a mistake in
+            # the procedure, not a measurement outcome, so it is not FAILED.
+            recorded = ", ".join(sorted(self.context.latest)) or "nothing yet"
+            raise KeyError(
+                f"{type(self).__name__} reads {self.field!r}, but this run has "
+                f"recorded no such value (recorded: {recorded})"
+            )
+        return float(self.context.latest[self.field])
+
+
+class ValueAbove(_Comparison):
+    """SUCCESS if the latest ``field`` is above ``threshold``, else FAILED."""
+
+    def run(self) -> Status:
+        return Status.SUCCESS if self._latest() > self.threshold else Status.FAILED
+
+
+class ValueBelow(_Comparison):
+    """SUCCESS if the latest ``field`` is below ``threshold``, else FAILED."""
+
+    def run(self) -> Status:
+        return Status.SUCCESS if self._latest() < self.threshold else Status.FAILED

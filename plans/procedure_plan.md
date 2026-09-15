@@ -1,7 +1,7 @@
 # Procedure composition plan
 
-> **Status: in progress.** Phases 0 and 7, and 6.1-6.3, are built. Phases 1-2
-> are useful even if the GUI composer never ships.
+> **Status: in progress.** Phases 0-3 and 7, and 6.1-6.3, are built. Next: 6.4
+> (`mcr_curve` as a definition), then Phase 5, then the Phase 4 composer.
 
 How a measurement's *choreography* stops being hand-written Python buried in
 `lib/measurements/`, and becomes something composable, storable, and eventually
@@ -249,83 +249,115 @@ where every other model declares `num_channels` as a `ClassVar`.
 
 ---
 
-## Phase 1 — `StepSpec`: params models for steps ⬜
+## Phase 1 — Step schemas ✅ done
 
-The enabling infrastructure. Worth building on its own merits (validation,
-docs, intellisense) even if no GUI follows.
+Every step has a params model, and the generic renderer builds any of them.
 
-Steps currently take plain positional arguments — `SetVoltage(source, voltage)`,
-`CountAtBias(counter, bias, gate_time)`. Giving each a params model is the real
-cost of everything downstream, and it mirrors instruments exactly:
+- **1.1 ✅ `StepParams`** (`lib/procedures/spec.py`) — named `*StepParams`, not
+  the plan's `StepSpec`: the catalog finds classes ending in `Params`, and the
+  parallel with instrument `*Params` / `resource_class()` is the point.
+  `step_class()` names the runtime step. **The default `render` reads the
+  runtime constructor's signature** and renders each argument from the field of
+  the same name, positionally before a `*children` and by keyword elsewhere; so
+  a new step is a class whose field names match its constructor, and nothing
+  else. Only `Sweep` (a closure) and `Repeat` (a constructor argument named
+  `child_factory`) override it.
 
-```python
-class StepSpec(BaseModel):
-    type: str                       # discriminator, like instruments
-    name: str | None = None
+  Field values are one of: a nested step or list of steps (`AnyStep`, parsed to
+  its own class through the registry), a `RoleRef` (`{role: counter}`, with
+  `Annotated[RoleRef, Requires("Counter")]` declaring what may fill it), or a
+  `Value` — a literal, a `ParamRef` (`{param: readout.gate_time_s}`), or a
+  `SweptRef` (`{swept: bias_voltage}`). Rendering doubles as checking: the
+  `RenderContext` collects every bad reference instead of emitting code that
+  fails at run time.
+- **1.2 ✅ Specs for the vocabulary** (`lib/procedures/steps/`): `sequence`,
+  `sweep`, `repeat`, `wait`; `set_voltage`, `turn_on`,
+  `return_to_zero_and_off`, `source_guard`, `safe_guard`, `with_settings`,
+  `set_threshold`; plus new generic runtime steps `count`, `read_voltage`,
+  `set_attenuation`, `open_shutter`, `close_shutter`.
+- **1.3 ✅ Control flow** in `lab_procedure` itself: `Retry`, `If`, `Selector`,
+  `Invert`, `ValueAbove`, `ValueBelow`. Two renames from the plan: **`If`
+  instead of `Guard`** — `If(condition, then, otherwise)` says what happens on
+  both outcomes, where "guard" left the failed case ambiguous; and **`Invert`
+  instead of `StepFailed`**, because `lab_procedure.messages.StepFailed` already
+  exists. `Retry` retries a *raised* error as well as FAILED — a counter timeout
+  is the case that matters. ABORTED always propagates.
 
-    @classmethod
-    def step_class(cls) -> type[Step]: ...          # mirrors resource_class()
-    def child_slots(self) -> dict[str, StepSpec | list[StepSpec]]: ...
-    def render(self, kids: dict[str, str]) -> str: ...   # default covers ~95%
-
-class RoleRef(BaseModel):
-    role: str        # "voltage_source" — a name in the procedure's signature
-```
-
-- **1.1** `StepSpec` base + `RoleRef`, with a default `render` emitting
-  `StepCls(<children>, **scalar_fields, name=…)`.
-- **1.2** Specs for the existing vocabulary: `Sequence`, `Sweep`, `Repeat`,
-  `Wait`, `SourceGuard`, `SetVoltage`, `TurnOn`, `ReturnToZeroAndOff`.
-- **1.3** Control-flow additions: `Retry`, `Guard`, `Selector`, plus condition
-  leaves. These are what remove the no-branching restriction.
-- **1.4** A `StepSpec` registry mirroring [`resource_catalog`](../lab_wizard/lib/utilities/resource_catalog.py)
-  — AST scan, fingerprint cache, `load_params_class` equivalent.
-
-`Sweep`'s `child_factory: Callable[[object], Step]` renders as
-`lambda v: <subtree>` in generated Python. This is an argument *for* codegen: a
-YAML interpreter would have to reify that closure.
+  Conditions need something to read, so `RunContext` gained **`latest`** (the
+  last value recorded per field) and **`observe(data)`**, which emits one
+  observation with the swept parameters copied into `data` as well as
+  `metadata`. That is decision 2.6 made concrete: `PlotterSink` forwards only
+  `data`, so a row must carry its bias to be plottable against it.
+- **1.4 ✅ Registry — reused, not mirrored.** The resource catalog gained a
+  `step` kind pointed at `lib/procedures/steps/`, so discovery, fingerprint
+  caching and validation are the instruments' own. `lib/procedures/catalog.py`
+  adds only `step_catalog()`, describing each step's fields (step, steps, role
+  with required behaviors, value, literal), defaults and emitted fields, for the
+  Phase 4 palette.
 
 ---
 
-## Phase 2 — Procedure storage ⬜
+## Phase 2 — Procedure storage ✅ done
 
-- **2.1** `config/procedures/<name>.yml` — roles (name → behavior ABC), step
-  tree, params model shape. Written with the existing
-  `model_to_commented_map` / `to_commented_yaml_value` writers, so comments and
-  field descriptions survive exactly as they do for instruments.
-- **2.2** `config/measurements/<procedure>/<preset>.yml` — named params presets
-  for a procedure. This is the missing lab-level defaults layer (defect 4), and
-  it fills the empty directory (defect 5).
-- **2.3** Preset selection in the generation flow, defaulting to the code
-  defaults so nothing changes for existing measurements.
+- **2.1 ✅ `config/procedures/<name>.yml`** (`lib/procedures/storage.py`,
+  `definition.py`). `ProcedureDefinition` holds roles, a params tree, and the
+  body. Params are nested groups and typed leaves (`float`, `int`, `bool`,
+  `str`, `sweep`) with defaults, descriptions and units; defaults are validated
+  against their type on load. `check()` reports every problem at once:
+  undeclared roles or params, a role filled by the wrong behavior, a swept value
+  outside its sweep, a sweep param used as a scalar, a condition on a field no
+  step records, unregistered behaviors. `save_procedure` refuses a definition
+  that does not check. Names that would break generated code (non-identifiers,
+  pydantic attribute names, `params`/`resources`/`savers`/`plotters`/`project`
+  as roles) are rejected on load.
+- **2.2 ✅ Presets** in `config/measurements/<measurement>/<preset>.yml`, for
+  composed procedures **and hand-written measurements** — the defaults layer
+  both lacked. Validated against the params model on save and load, written
+  with field descriptions as comments.
+- **2.3 ✅ backend, ⬜ UI.** `GenerateProjectRequest.params_preset` selects one;
+  `None` keeps the measurement's own defaults, so nothing changes for existing
+  callers. Choosing a preset in the wizard is Phase 5.3.
 
 **Vocabulary:** *procedure* = reusable, instrument-generic definition.
 *measurement* = procedure + role bindings + params + savers/plotters = a project.
 
 ---
 
-## Phase 3 — Codegen ⬜
+## Phase 3 — Codegen ✅ done
 
-- **3.1** Tree walk: render children, then ask each spec to render itself.
-  The whole generator is roughly
+- **3.1 ✅ Tree walk** — `ProcedureDefinition.render_body()` is one call to the
+  root step's `render`, which recurses. **No generator code is specific to any
+  procedure or step**, which is tested: every step schema is checked against its
+  runtime constructor's signature.
+- **3.2 ✅ Roles** render as local variables bound once at the top of
+  `build_<name>_procedure` (`counter = resources.counter`); swept values as
+  lambda parameters, uniquified when sweeps nest over the same name.
+- **3.3 ✅ `<name>.py`** holds `build_<name>_procedure()` and
+  `<Name>Measurement`, with the tree between `# wizard:procedure:start/end`.
+  `refresh_procedure_source(config_dir, project_dir)`
+  (`wizard/backend/procedure_generation.py`) regenerates only that block from
+  the current definition and adds any import the new tree needs; edits outside
+  it survive.
 
-  ```python
-  def render(spec: StepSpec) -> str:
-      kids = {slot: render(c) for slot, c in spec.child_slots().items()}
-      return spec.render(kids)
-  ```
+  **Params models live in the generated setup file**, not the measurement
+  module: the setup file is what validates `measurement.params`, and a
+  top-level sibling import would break loading the setup file in isolation. A
+  model built at run time from the same definition validates presets; a test
+  keeps the two in agreement.
+- **3.4 ✅ One generator for both.** `generate_measurement_project` became a
+  thin wrapper over a shared `generate_project`, taking requirements, a setup
+  template, a measurement module and params; `generate_procedure_project`
+  supplies those from a definition instead of `lib/measurements`. *Not done:*
+  offering procedures in measurement creation — that is Phase 5.1.
 
-  **No per-procedure cases, ever.** Each `StepSpec` owns its rendering; adding a
-  step type requires no generator change. This is the same property
-  `_compose_setup` already has for instruments.
-- **3.2** `RoleRef` → setup-dataclass field resolution. The one piece of wiring
-  the generator knows about, and it is uniform.
-- **3.3** Emit `build_<name>_procedure()` into the project directory, inside
-  `# wizard:` markers so hand-edits outside survive.
-- **3.4** Hand-authored measurements keep working: `get_measurements` discovers
-  from the directory today, and composed procedures become a *second source*
-  presenting the same shape (roles + params model + something renderable).
-  Nothing should ever be forced through the GUI.
+**The proof:** `tests/test_procedure_projects.py` stores the hand-written PCR
+curve as a definition (no Python), plus a preset, generates a project against
+the simulated rack, and runs it both in process and as a script. The counter's
+config deliberately holds a 400 mV threshold, which counts nothing; the
+procedure sets its own, and every point matches the detector model.
+
+**Not built yet:** HTTP endpoints for procedures, presets and the step catalog.
+They belong with their first consumer, Phases 4 and 5.
 
 ---
 
@@ -536,6 +568,12 @@ served** — `config/instruments/yokogawa_aq2212_key_b3c9ab43/`, attribute
   project. **If this requires touching the generator, Phase 3 failed its
   no-per-procedure-cases property** and should be fixed rather than
   special-cased.
+
+  *Found while documenting Phases 1-3:* the shared sweep model names its fields
+  in volts (`start_V`, `stop_V`, `step_V`, `values_V`), which reads wrong for an
+  attenuation sweep in dB. Rename them to unit-free fields, keeping the volt
+  names as accepted aliases, before a stored MCR definition makes the wart
+  permanent.
 - **6.5** *(later)* A `Laser` ABC has an implementer waiting too —
   [`yokogawaAQ2212/modules/laser.py`](../lab_wizard/lib/instruments/yokogawaAQ2212/modules/laser.py),
   with the same `set_output` / safe-state shape. Not needed for MCR; noted so
@@ -691,9 +729,9 @@ Everything that has to be created or changed, across this plan and
 |---|---|---|
 | ✅ `SetThreshold`, `WithSettings` steps | new | 0.4, 0.5 |
 | ✅ `SafeGuard`; `SourceGuard` as a subclass keeping its flags | new | 7.5 |
-| `StepSpec`, `RoleRef`, spec per existing step | new | 1.1, 1.2 |
-| `Retry`, `Guard`, `Selector`; `ValueAbove` / `ValueBelow` / `StepFailed` | new | 1.3 |
-| `StepSpec` registry mirroring `resource_catalog` | new | 1.4 |
+| ✅ `StepParams`, `RoleRef` / `ParamRef` / `SweptRef`, spec per step | new | 1.1, 1.2 |
+| ✅ `Retry`, `If`, `Selector`, `Invert`; `ValueAbove` / `ValueBelow`; `RunContext.latest` / `observe` | new | 1.3 |
+| ✅ Step registry as a `step` kind of `resource_catalog`; `step_catalog()` | new | 1.4 |
 | ✅ `RunLifecycle`, `LocalTransportClaim` | new | 7.4 |
 | ✅ `pcr_curve` sets its threshold from `PCRReadoutParams` | change | 0.8 |
 | `mcr_curve` | new, composed | 6.4 |
@@ -714,8 +752,8 @@ Everything that has to be created or changed, across this plan and
 
 | Item | Kind | Phase |
 |---|---|---|
-| `config/procedures/` storage; presets in `config/measurements/` | new | 2.1, 2.2 |
-| Procedure codegen (tree walk, role resolution, wizard blocks) | new | 3 |
+| ✅ `config/procedures/` storage; presets in `config/measurements/` | new | 2.1, 2.2 |
+| ✅ Procedure codegen (tree walk, role resolution, wizard blocks, refresh) | new | 3 |
 | Generation switches local instruments to `from_attribute`; stops copying params into project YAML | change | 5.4, 5.5 |
 | Seven readers of the project's instrument copy move to the config tree | change | 5.7 |
 | Attribute-reference scan across `projects/` + rename/remove guard | new | 5.5 |
@@ -749,7 +787,7 @@ run-start drift warning; porting `AgilentN7764A` (6.6); the `Laser` ABC (6.5).
   can be added later without disturbing anything already generated.
 - **Plotting is column selection, not dimensionality reduction** — see 2.6.
 - **Condition leaves stay a small fixed set**: `ValueAbove`, `ValueBelow`,
-  `StepFailed`. Tier-2 dynamism is a minor use case initially, so no expression
+  and `Invert` (planned as `StepFailed`; that name is taken by a message class). Tier-2 dynamism is a minor use case initially, so no expression
   language, and no attempt to anticipate the general case.
 - **Instrument params never live in a project.** Categories 1 and 2 always
   come from a `config/instruments` tree, local or through a server; category 3

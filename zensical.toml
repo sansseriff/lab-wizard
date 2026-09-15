@@ -52,6 +52,7 @@ nav = [
     { "Instrument model" = "concepts/instrument-model.md" },
     { "Config & discovery" = "concepts/config-and-discovery.md" },
     { "Simulated instruments" = "concepts/simulated-instruments.md" },
+    { "Procedures" = "concepts/procedures.md" },
   ] },
   { "The wizard GUI" = [
     { "Overview" = "wizard/index.md" },
