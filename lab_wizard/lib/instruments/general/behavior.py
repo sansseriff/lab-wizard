@@ -55,6 +55,7 @@ __all__ = [
     "register_behavior",
     "behaviors",
     "behavior_name_for",
+    "specificity_of",
 ]
 
 
@@ -134,6 +135,11 @@ def behavior_name_for(obj_or_cls: Any, *, is_class: bool = False) -> str | None:
         except TypeError:
             continue
     return None
+
+
+def specificity_of(cls: type) -> int | None:
+    """The rank ``cls`` registered with, or ``None`` if it is not a behavior."""
+    return _REGISTERED.get(cls)
 
 
 def registered_behaviors() -> Iterable[type]:

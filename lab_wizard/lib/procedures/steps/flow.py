@@ -50,7 +50,7 @@ class SweepStepParams(StepParams):
     """
 
     type: Literal["sweep"] = "sweep"
-    parameter: str
+    parameter: str = Field(json_schema_extra={"column": "records"})
     values: ParamRef | list[float]
     body: AnyStep
 
@@ -69,9 +69,9 @@ class SweepStepParams(StepParams):
         if isinstance(self.values, ParamRef):
             decl = ctx.params.find(self.values.param) if ctx.params is not None else None
             if ctx.params is not None and decl is None:
-                ctx.problems.append(f"{where} reads param {self.values.param!r}, which is not declared")
+                ctx.problem(f"{where} reads param {self.values.param!r}, which is not declared")
             elif decl is not None and decl.type != "sweep":
-                ctx.problems.append(f"{where} reads {self.values.param!r}, which is not a sweep param")
+                ctx.problem(f"{where} reads {self.values.param!r}, which is not a sweep param")
             values = f"{ctx.params_var}.{self.values.param}.values()"
         else:
             values = repr(list(self.values))
@@ -89,7 +89,7 @@ class WithParameterStepParams(StepParams):
     """
 
     type: Literal["with_parameter"] = "with_parameter"
-    parameter: str
+    parameter: str = Field(json_schema_extra={"column": "records"})
     value: Value
     body: AnyStep
 
@@ -182,7 +182,7 @@ class ValueAboveStepParams(StepParams):
     """Succeed if the latest recorded ``field`` is above ``threshold``."""
 
     type: Literal["value_above"] = "value_above"
-    field: str
+    field: str = Field(json_schema_extra={"column": "reads"})
     threshold: Value
 
     @classmethod
@@ -194,7 +194,7 @@ class ValueBelowStepParams(StepParams):
     """Succeed if the latest recorded ``field`` is below ``threshold``."""
 
     type: Literal["value_below"] = "value_below"
-    field: str
+    field: str = Field(json_schema_extra={"column": "reads"})
     threshold: Value
 
     @classmethod

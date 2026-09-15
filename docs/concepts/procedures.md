@@ -92,6 +92,40 @@ around a `count` recovers from a timeout.
 Every recorded row is flat: it carries the swept values in force as well as the
 reading, so a nested sweep produces more rows, never a nested structure.
 
+## The Procedures section
+
+The wizard's **Procedures** section is the composer for all of this: no YAML
+needs to be written by hand. It lists every procedure — built into lab_wizard or
+saved in this workspace — and opens one for editing.
+
+The editor has three parts, and a panel that says whether what you have can be
+generated:
+
+* **Roles** — a name and a behavior each, which is the procedure's signature.
+  Beside each is how many of this workspace's instruments can fill it, so a role
+  that narrows where the procedure can run is visible as you declare it.
+* **Params** — groups and typed leaves, with a default, a unit, and what the
+  param means; the description becomes a comment in every project's YAML.
+* **Steps** — the tree. *Add step* offers the operations grouped by role, so
+  picking one under `counter` binds it to `counter`; a step whose behavior no
+  role has yet is offered too, and choosing it declares the role. *Wrap* puts a
+  step inside a new one (a sweep, a guard, a retry) without rebuilding it.
+
+A value is a literal until you press **Make param** on it, which declares a
+param with what you typed as its default and points the step at it. That is the
+whole difference between something frozen into the procedure and something every
+project and preset can set.
+
+Everything is checked after each edit, against the same rules used at save and
+generation time. Each problem is marked on the step it is about, and the sidebar
+lists them all; clicking one scrolls to it. Nothing that does not check can be
+saved. The **Python** tab shows the module the definition generates, the
+**YAML** tab the file it is saved as — editable, if hand-editing is quicker —
+and the **Presets** tab manages a saved procedure's presets.
+
+Saving a built-in under its own name writes this workspace's copy, which takes
+precedence; deleting that copy brings the built-in back.
+
 ## Checking
 
 A definition is checked before it is saved or generated, and every problem is

@@ -39,7 +39,14 @@ from typing import Any, Iterator, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, field_validator, model_validator
 
 from lab_wizard.lib.measurements.general.sweep_params import SweepParams
-from lab_wizard.lib.procedures.spec import AnyStep, ProcedureError, RenderContext, StepParams, python_identifier
+from lab_wizard.lib.procedures.spec import (
+    AnyStep,
+    ProcedureError,
+    RenderContext,
+    StepParams,
+    StepPath,
+    python_identifier,
+)
 
 
 __all__ = ["ParamDecl", "ParamTree", "ProcedureDefinition", "RoleDecl"]
@@ -228,41 +235,55 @@ class ProcedureDefinition(BaseModel):
             roles={role: python_identifier(role) for role in self.roles},
             params=self.param_tree,
         )
-        return self.body.render(ctx), ctx
+        ctx.paths.update((id(step), path) for path, step in self.body.walk_paths())
+        return ctx.step(self.body), ctx
 
-    def check(self) -> None:
-        """Raise :class:`ProcedureError` listing every reason this cannot be generated."""
-        problems: list[str] = []
-        try:
-            behaviors = self.role_behaviors()
-        except ProcedureError as exc:
-            problems.extend(exc.problems)
-            behaviors = {}
-        _expr, ctx = self.render_body()
-        problems.extend(ctx.problems)
-
+    def diagnose(self) -> list[tuple[StepPath, str]]:
+        """Every reason this cannot be generated, each with where it is."""
+        located: list[tuple[StepPath, str]] = []
         registered = _behaviors()
-        for role, where, requires in ctx.role_uses:
+        for role, decl in self.roles.items():
+            if decl.behavior not in registered:
+                located.append(
+                    (("roles", role), f"Unknown behavior {decl.behavior!r}; registered: {', '.join(sorted(registered))}")
+                )
+        behaviors = {role: registered[d.behavior] for role, d in self.roles.items() if d.behavior in registered}
+
+        _expr, ctx = self.render_body()
+        located.extend(ctx.located)
+
+        for role, where, requires, path in ctx.role_uses:
             declared = behaviors.get(role)
             if declared is None or not requires:
                 continue
             allowed = [registered[b] for b in requires if b in registered]
             if not any(issubclass(declared, cls) for cls in allowed):
-                problems.append(
-                    f"{where} needs a {' or '.join(requires)}, but role {role!r} is a "
-                    f"{self.roles[role].behavior}"
+                located.append(
+                    (
+                        path,
+                        f"{where} needs a {' or '.join(requires)}, but role {role!r} is a "
+                        f"{self.roles[role].behavior}",
+                    )
                 )
 
         emitted = set(self.emitted_fields())
-        for step in self.body.walk():
+        for path, step in self.body.walk_paths():
             field = getattr(step, "field", None)
             if step.type in ("value_above", "value_below") and field not in emitted:
-                problems.append(
-                    f"{step.label()} reads {field!r}, which no step in this procedure records "
-                    f"(recorded: {', '.join(sorted(emitted)) or 'nothing'})"
+                located.append(
+                    (
+                        path,
+                        f"{step.label()} reads {field!r}, which no step in this procedure records "
+                        f"(recorded: {', '.join(sorted(emitted)) or 'nothing'})",
+                    )
                 )
-        if problems:
-            raise ProcedureError(problems)
+        return located
+
+    def check(self) -> None:
+        """Raise :class:`ProcedureError` listing every reason this cannot be generated."""
+        located = self.diagnose()
+        if located:
+            raise ProcedureError([message for _path, message in located], located)
 
 
 def _behaviors() -> dict[str, type]:

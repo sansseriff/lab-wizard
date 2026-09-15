@@ -137,7 +137,7 @@ class ReadVoltageStepParams(StepParams):
 
     type: Literal["read_voltage"] = "read_voltage"
     sense: Annotated[RoleRef, Requires("VSense")]
-    field: str = "voltage"
+    field: str = Field(default="voltage", json_schema_extra={"column": "records"})
 
     @classmethod
     def step_class(cls) -> StepClass:

@@ -21,6 +21,8 @@
 		'/measurements/new': ['Measurements', 'Create'],
 		'/measurements/resources': ['Measurements', 'Create'],
 		'/measurements/projects': ['Measurements', 'Projects'],
+		'/procedures': ['Procedures'],
+		'/procedures/edit': ['Procedures', 'Edit'],
 		'/instruments': ['Instruments', 'Configured'],
 		'/instruments/custom': ['Instruments', 'Custom resources'],
 		'/servers': ['Servers', 'This workspace'],

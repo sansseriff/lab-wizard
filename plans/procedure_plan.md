@@ -1,7 +1,7 @@
 # Procedure composition plan
 
-> **Status: in progress.** Phases 0-3 and 7, and 6.1-6.4, are built. Next: Phase 5,
-> then the Phase 4 composer.
+> **Status: in progress.** Phases 0-4 and 7, and 6.1-6.4, are built; Phase 5 all
+> but its leftovers. Next: those leftovers, then 6.5-6.6.
 
 How a measurement's *choreography* stops being hand-written Python buried in
 `lib/measurements/`, and becomes something composable, storable, and eventually
@@ -361,25 +361,59 @@ They belong with their first consumer, Phases 4 and 5.
 
 ---
 
-## Phase 4 — The Procedures section ⬜
+## Phase 4 — The Procedures section ✅ done
 
 A seventh top-level section in [`Sidebar.svelte`](../lab_wizard/wizard/frontend/src/lib/components/Sidebar.svelte),
-beside Overview, Measurements, Instruments, Servers, Plotters, and Data. Its
-docstring says "Six top-level sections" and will need updating.
+beside Overview, Measurements, Instruments, Servers, Plotters, and Data.
 
-Requisite abilities, minimal set:
+### As built
 
-| # | Ability | Notes |
+| # | Ability | As built |
 |---|---|---|
-| 4.1 | Declare roles | name + behavior ABC from the registered behaviors; this is the signature |
-| 4.2 | Compose the tree | nest from a palette driven by the 1.4 registry |
-| 4.3 | Leaf operations filtered by role | pick a role → see the operations its ABC offers. The ABCs already carry the right method sets, with docstrings and units |
-| 4.4 | Narrow a role to a concrete type | `VSource` → `Sim928` widens the operation list and narrows what can bind. Make the tradeoff **visible** — it is exactly the portability cost |
-| 4.5 | Declare emitted data | the field names each leaf puts in its `Observation`. Feeds the plotter's axis dropdowns — see 2.6 |
-| 4.6 | Mark params vs literals | which scalars are exposed in the params model |
-| 4.7 | Save | → `config/procedures/<name>.yml` |
+| 4.1 | Declare roles | `RolesEditor`: name + behavior from the registered *bindable* behaviors (`ChannelProvider` is structural and excluded). Renaming a role rewrites every `{role: …}` that pointed at it |
+| 4.2 | Compose the tree | `StepNode` renders any step from its catalog entry — a field's `kind` picks its editor — so a new step schema appears with no frontend change. Move up/down, **Wrap** (put this step inside a new one), **Unwrap**, **Replace** |
+| 4.3 | Leaf operations filtered by role | the picker groups instrument steps under each declared role, and picking one binds that role. A step whose behavior no role has is offered under "Adds a *Behavior* role", and picking it declares the role — composing is how most roles get declared |
+| 4.4 | Narrow a role to a concrete type | **not built** — see below |
+| 4.5 | Declare emitted data | the Records panel lists the columns the definition produces, live; fields that name a column are marked, and a condition's field offers the recorded ones |
+| 4.6 | Mark params vs literals | every value is literal / param / swept, and **Make param** turns the literal typed in into a declared param with that default |
+| 4.7 | Save | `PUT /api/procedures/{name}` → `config/procedures`. A built-in's name saves a workspace override; deleting it restores the built-in |
 
-4.3 is what makes the window feel good to use, and it is cheap.
+**Backend** (`wizard/backend/procedures_api.py`, endpoints in `main.py`): list,
+read, save, delete, the step + behavior catalog, YAML in and out, presets, and
+`check`, which returns every problem **with the path of the step it is about**
+plus the Python the definition generates.
+
+**Problems are located.** `RenderContext` now records the path of the step being
+rendered with each problem (`ProcedureDefinition.diagnose()`), and pydantic's
+own errors already carry one. So a half-built tree — the normal state of one
+being composed — marks the step that is wrong rather than printing a paragraph.
+The composer never re-implements a rule: the backend is the only judge.
+
+**Also built, beyond the table:** a presets editor (there was no UI for presets
+at all), a YAML tab for hand editing, a Python tab showing the generated module,
+duplicate, rename (which deletes the old workspace copy), and an unsaved-changes
+guard.
+
+### Verified in a browser
+
+`tests/test_procedures_api.py` covers the endpoints. The UI itself was driven
+with Playwright against a real workspace of simulated instruments: open a
+built-in and see it check; build `dark_counts` from nothing — add `count` (which
+declares the `counter` role), make its gate time a param, add `close_shutter`
+(which declares an `Attenuator` role), reorder, wrap in `repeat`, break it by
+retyping the role's behavior and watch the problem appear on the step, fix,
+save, add a preset, and find it offered in measurement creation. Two bugs came
+out of that run and were fixed: a `structuredClone` of reactive state that threw,
+and params rows that wrapped in the narrow column.
+
+### Not done
+
+- **4.4 narrowing a role to a concrete type.** Nothing would use it yet: every
+  step asks for a behavior, so narrowing `VSource` to `Sim928` would only cost
+  portability and widen no operation list. It becomes worth building when a step
+  needs an operation no ABC offers.
+- **Drag and drop** for reordering; move up/down covers it for now.
+- **Undo.**
 
 ---
 
@@ -787,6 +821,7 @@ Everything that has to be created or changed, across this plan and
 | ✅ `StepParams`, `RoleRef` / `ParamRef` / `SweptRef`, spec per step | new | 1.1, 1.2 |
 | ✅ `Retry`, `If`, `Selector`, `Invert`; `ValueAbove` / `ValueBelow`; `RunContext.latest` / `observe` | new | 1.3 |
 | ✅ Step registry as a `step` kind of `resource_catalog`; `step_catalog()` | new | 1.4 |
+| ✅ `step_catalog` field kinds, `behavior_catalog`, located problems (`diagnose`) | new | 4 |
 | ✅ `RunLifecycle`, `LocalTransportClaim` | new | 7.4 |
 | ✅ `pcr_curve` sets its threshold from `PCRReadoutParams` | change | 0.8 |
 | ✅ `mcr_curve` — built-in procedure, simulated attenuator, `with_parameter` | new, composed | 6.4 |
@@ -809,18 +844,19 @@ Everything that has to be created or changed, across this plan and
 |---|---|---|
 | ✅ `config/procedures/` storage; presets in `config/measurements/` | new | 2.1, 2.2 |
 | ✅ Procedure codegen (tree walk, role resolution, wizard blocks, refresh) | new | 3 |
-| Generation switches local instruments to `from_attribute`; stops copying params into project YAML | change | 5.4, 5.5 |
+| ✅ `procedures_api.py`: catalog, check, save/delete, YAML, presets endpoints | new | 4 |
+| ✅ Generation switches local instruments to `from_attribute`; stops copying params into project YAML | change | 5.4, 5.5 |
 | Seven readers of the project's instrument copy move to the config tree | change | 5.7 |
-| Attribute-reference scan across `projects/` + rename/remove guard | new | 5.5 |
-| Run-time workspace lookup with a clear failure outside a workspace | change | 5.8 |
-| Remove `pedagogical_yaml_expanded` (backend, frontend radio, tests) | delete | 5.10 |
+| ✅ Attribute-reference scan across `projects/` + rename/remove guard | new | 5.5 |
+| ✅ Run-time workspace lookup with a clear failure outside a workspace | change | 5.8 |
+| ✅ Remove `pedagogical_yaml_expanded` (backend, frontend radio, tests) | delete | 5.10 |
 | ✅ Generated setup files call `RunLifecycle`; acquire leases for local roots | change | 7.6, server 9.11 |
 
 ### Frontend — `wizard/frontend/`
 
 | Item | Kind | Phase |
 |---|---|---|
-| Procedures section — seventh sidebar entry, composer | new | 4 |
+| ✅ Procedures section — seventh sidebar entry, composer, presets, YAML and Python tabs | new | 4 |
 | Procedure + preset selection in measurement creation | change | 5.1, 5.3 |
 | ✅ Live claims and force-release on Hardware ownership | new | server 9.10 |
 | Show a claimed instrument as busy in the measurement picker | new | server 9.10, deferred to 5 |

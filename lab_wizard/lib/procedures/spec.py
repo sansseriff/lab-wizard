@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AnyStep",
     "StepClass",
+    "StepPath",
     "ParamRef",
     "ProcedureError",
     "RenderContext",
@@ -57,11 +58,24 @@ __all__ = [
 StepClass = type[Step]
 
 
-class ProcedureError(ValueError):
-    """A procedure definition that cannot be generated, with every reason why."""
+StepPath = tuple[str | int, ...]
+"""Where in a definition something is: ``("body", "children", 2, "body")``.
 
-    def __init__(self, problems: list[str]) -> None:
+The same shape as a pydantic error's ``loc``, so a problem found by validation
+and one found by checking point at a step the same way.
+"""
+
+
+class ProcedureError(ValueError):
+    """A procedure definition that cannot be generated, with every reason why.
+
+    ``located`` pairs each problem with the path of the step (or role) it is
+    about, for an editor to mark; ``()`` when it is about the whole definition.
+    """
+
+    def __init__(self, problems: list[str], located: list[tuple[StepPath, str]] | None = None) -> None:
         self.problems = list(problems)
+        self.located = list(located) if located is not None else [((), p) for p in self.problems]
         super().__init__("; ".join(self.problems))
 
 
@@ -155,7 +169,13 @@ class RenderContext:
     swept: dict[str, str] = field(default_factory=dict)
     imports: set[tuple[str, str]] = field(default_factory=set)
     problems: list[str] = field(default_factory=list)
-    role_uses: list[tuple[str, str, tuple[str, ...]]] = field(default_factory=list)
+    # (role, where, required behaviors, path of the step using it)
+    role_uses: list[tuple[str, str, tuple[str, ...], StepPath]] = field(default_factory=list)
+    located: list[tuple[StepPath, str]] = field(default_factory=list)
+    # Where each step sits in the definition, by identity, and the path of the
+    # step being rendered now — shared by every scoped child context.
+    paths: dict[int, StepPath] = field(default_factory=dict)
+    path_stack: list[StepPath] = field(default_factory=list)
 
     def scoped(self, parameter: str) -> tuple["RenderContext", str]:
         """A child context in which ``parameter`` is a swept value."""
@@ -172,21 +192,37 @@ class RenderContext:
             imports=self.imports,
             problems=self.problems,
             role_uses=self.role_uses,
+            located=self.located,
+            paths=self.paths,
+            path_stack=self.path_stack,
         )
         return child, ident
+
+    @property
+    def path(self) -> StepPath:
+        return self.path_stack[-1] if self.path_stack else ()
+
+    def problem(self, message: str) -> None:
+        """Record a reason the tree cannot be generated, at the step being rendered."""
+        self.problems.append(message)
+        self.located.append((self.path, message))
 
     def use(self, cls: type) -> str:
         self.imports.add((cls.__module__, cls.__name__))
         return cls.__name__
 
     def step(self, spec: "StepParams") -> str:
-        return spec.render(self)
+        self.path_stack.append(self.paths.get(id(spec), self.path))
+        try:
+            return spec.render(self)
+        finally:
+            self.path_stack.pop()
 
     def role(self, ref: RoleRef, where: str, requires: tuple[str, ...]) -> str:
         if ref.role not in self.roles:
-            self.problems.append(f"{where} uses role {ref.role!r}, which the procedure does not declare")
+            self.problem(f"{where} uses role {ref.role!r}, which the procedure does not declare")
             return python_identifier(ref.role)
-        self.role_uses.append((ref.role, where, requires))
+        self.role_uses.append((ref.role, where, requires, self.path))
         return self.roles[ref.role]
 
     def value(self, value: Any, where: str) -> str:
@@ -194,16 +230,16 @@ class RenderContext:
             if self.params is not None:
                 decl = self.params.find(value.param)
                 if decl is None:
-                    self.problems.append(f"{where} reads param {value.param!r}, which is not declared")
+                    self.problem(f"{where} reads param {value.param!r}, which is not declared")
                 elif decl.type == "sweep":
-                    self.problems.append(
+                    self.problem(
                         f"{where} reads sweep param {value.param!r} as a single value; "
                         "only a Sweep's values can be a sweep"
                     )
             return f"{self.params_var}.{value.param}"
         if isinstance(value, SweptRef):
             if value.swept not in self.swept:
-                self.problems.append(
+                self.problem(
                     f"{where} reads swept value {value.swept!r} outside any Sweep over it"
                 )
                 return python_identifier(value.swept)
@@ -251,6 +287,18 @@ class StepParams(BaseModel):
         for child in self.child_steps():
             yield from child.walk()
 
+    def walk_paths(self, path: StepPath = ("body",)) -> Iterator[tuple[StepPath, "StepParams"]]:
+        """Like :meth:`walk`, with each step's path in the definition."""
+        yield path, self
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, StepParams):
+                yield from value.walk_paths((*path, name))
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    if isinstance(item, StepParams):
+                        yield from item.walk_paths((*path, name, index))
+
     @classmethod
     def role_requirements(cls) -> dict[str, tuple[str, ...]]:
         """``{field: behaviors}`` for every role field."""
@@ -295,7 +343,7 @@ class StepParams(BaseModel):
                 continue
             if p.name not in fields:
                 if p.default is inspect.Parameter.empty:
-                    ctx.problems.append(
+                    ctx.problem(
                         f"{type(self).__name__} has no field for {cls.__name__}'s "
                         f"required argument {p.name!r}"
                     )

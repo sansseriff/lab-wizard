@@ -1,7 +1,7 @@
 <script lang="ts">
 	/** The persistent navigation rail.
 	 *
-	 * Six top-level sections, each a noun rather than a task. A section with
+	 * Seven top-level sections, each a noun rather than a task. A section with
 	 * sub-pages expands when it is the active one; expanding is not a navigation
 	 * of its own, so clicking the header goes to the section's first page.
 	 *
@@ -15,6 +15,7 @@
 
 	import GaugeIcon from 'phosphor-svelte/lib/Gauge';
 	import PulseIcon from 'phosphor-svelte/lib/Pulse';
+	import TreeStructureIcon from 'phosphor-svelte/lib/TreeStructure';
 	import CircuitryIcon from 'phosphor-svelte/lib/Circuitry';
 	import HardDrivesIcon from 'phosphor-svelte/lib/HardDrives';
 	import ChartLineIcon from 'phosphor-svelte/lib/ChartLine';
@@ -43,6 +44,8 @@
 				{ href: '/measurements/projects', label: 'Projects' }
 			]
 		},
+		// Beside Measurements: a procedure is what a measurement is created from.
+		{ href: '/procedures', label: 'Procedures', icon: TreeStructureIcon, match: '/procedures' },
 		{
 			href: '/instruments',
 			label: 'Instruments',

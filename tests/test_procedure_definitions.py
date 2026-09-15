@@ -63,7 +63,15 @@ def test_every_step_schema_can_build_its_runtime_step():
 def test_the_catalog_describes_fields_for_a_palette():
     catalog = step_catalog()
     count = catalog["count"]
-    assert count["fields"]["counter"] == {"kind": "role", "requires": ["Counter"], "required": True, "default": None}
+    assert count["fields"]["counter"] == {
+        "kind": "role",
+        "requires": ["Counter"],
+        "required": True,
+        "optional": False,
+        "default": None,
+        "literal_type": None,
+        "column": None,
+    }
     assert count["fields"]["gate_time"]["kind"] == "value"
     assert count["emits"] == ["counts", "int_time", "count_rate"]
     assert catalog["sweep"]["fields"]["body"]["kind"] == "step"
