@@ -1,7 +1,7 @@
 # Procedure composition plan
 
-> **Status: in progress.** Phase 0 and Phase 6.1-6.3 are built. Phases 1-2 are
-> useful even if the GUI composer never ships.
+> **Status: in progress.** Phases 0 and 7, and 6.1-6.3, are built. Phases 1-2
+> are useful even if the GUI composer never ships.
 
 How a measurement's *choreography* stops being hand-written Python buried in
 `lib/measurements/`, and becomes something composable, storable, and eventually
@@ -549,61 +549,103 @@ served** — `config/instruments/yokogawa_aq2212_key_b3c9ab43/`, attribute
 
 ---
 
-## Phase 7 — Run lifecycle ⬜
+## Phase 7 — Run lifecycle ✅ done (routed-instrument claims wait on server Phase 9)
 
 Phases 0-6 decide what a procedure *is*. This decides what happens around one
 when it runs, and it is where the decisions in 5.4-5.6 and server Phase 9 meet.
 Every generated run does exactly this, in this order:
 
 ```
-1. resolve     every role by attribute_name, against its source tree
-2. claim       routed instruments: claim_acquire (all-or-nothing)
-               local instruments:  transport lease per root
+1. claim       local instruments:  transport lease per exclusive root, then preflight
+               routed instruments: claim_acquire (all-or-nothing) — server Phase 9, not built
+2. resolve     construct the instruments
 3. baseline    apply_baseline() on every bound instrument
-4. run         the Step tree
-5. safe        enter_safe_state() on every bound instrument whose ABC declares one
-6. release     claims and leases, in finally
+4. run         the measurement
+5. safe        enter_safe_state() on every bound instrument that declares one — if the run did not succeed
+6. release     claims and leases, always
 ```
 
-The order is not arbitrary. **Claim before baseline**, or another client can
-change a setting between our reset and our first step. Baseline is applied to
-what the run claimed — a channel holder resets its channel, not the shared
-counter state it has no right to write, and relies instead on server 9.12
-having left unclaimed ancestors at baseline. **Safe before
-release**, or the unit is handed to the next holder in whatever state the
-procedure ended in. Steps 5 and 6 run on failure and abort too.
+The order is not arbitrary. **Claim before resolve**, because constructing a
+local rack can open its serial port, and opening before claiming is the race
+claims exist to close. **Claim before baseline**, or another client can change a
+setting between our reset and our first step. Baseline is applied to what the
+run claimed — a channel holder resets its channel, not the shared counter state
+it has no right to write, and relies instead on server 9.12 having left
+unclaimed ancestors at baseline. **Safe before release**, or a failed run hands
+the next holder a biased source.
 
-- **7.1** **`apply_baseline()` on the instrument contract.** Re-applies
-  category-2 params to hardware, fully, every run. Implemented by every driver
-  that has category-2 params; a driver whose param is stored and never pushed
-  (Yokogawa/Ando `wavelength_nm` today) is a bug under this contract.
-  `Keysight53220AChannel.restore_configured_settings()` becomes its
-  implementation. Declared in `_query_methods_`? **No** — it writes.
-- **7.2** **`enter_safe_state()` on the behavior ABCs that have one:**
-  `VSource` (0 V, output off), `Attenuator` (maximum attenuation, shutter
-  closed — ✅ built in 6.1), later `Laser` (output off). **Correction:** this
-  said both 7.1 and 7.2 would be abstract and forwarded as one RPC. Building
-  `Attenuator` showed why 7.2 must not be: the permission gate records state per
-  RPC method via `_state_methods_`, and one entry maps to one state key, so an
-  opaque `enter_safe_state` call would hide the shutter closing from the gate.
-  `enter_safe_state` is therefore **concrete on the ABC**, built from the
-  abstract primitives, and through a proxy it decomposes into individually
-  recorded calls. `apply_baseline` (7.1) touches no safety state and can stay
-  abstract.
-- **7.3** **`_query_methods_` on the behavior ABCs** — `get_voltage`,
-  `get_gate_time`, `get_threshold`, `get_attenuation`, … — so the ABCs declare
-  their reads once and every driver inherits them (server Phase 9.2).
-- **7.4** **`RunLifecycle` in `lib/task_adapters/`**, wrapping
-  `ProcedureRunner.run`: steps 1-6 above, using `RunClaim` (server 9.7) for
-  routed roles and `leases.acquire` for local ones. One implementation, so the
-  ordering is decided once rather than re-derived in every generated file.
-- **7.5** **`SafeGuard(instrument, body)`** replaces `SourceGuard`'s hard-coded
-  shutdown with `enter_safe_state()`, and `SourceGuard` becomes a thin alias.
-  Still useful inside a procedure — e.g. shuttering between two sub-sweeps —
-  even though the lifecycle's step 5 covers the end of the run.
-- **7.6** **Generated setup files call `RunLifecycle`** instead of
-  `measurement.run_measurement()` directly, and stop calling
-  `preflight_local_project` on its own — acquisition subsumes the check.
+### Corrections made while building
+
+- **Resolve comes after claim, not before.** The plan listed resolve first. For
+  routed instruments either order works; for local ones it does not.
+- **Safe state runs only when a run does not succeed.** The plan ran it after
+  every run. But `iv_curve` exposes `turn_off_at_end: false` as a deliberate
+  choice, and a completed run has already been through its own
+  `SafeGuard`/`SourceGuard`. So the lifecycle is the *backstop* — failure,
+  abort, exception, Ctrl-C — and a successful run is left where its procedure
+  ended it. After an exception a failed safe state is logged, never raised, so
+  the original error survives; after a failed or aborted *status* it is raised,
+  because a source left biased must not pass as a quiet non-zero exit.
+- **Preflight is still needed; acquisition does not subsume it.** A lease stops
+  other processes, and stops a server opening the rack later, but cannot see a
+  server that opened it *before* the lease. So the claim leases first and then
+  preflights: once leased no server can open the rack, and preflight catches any
+  that already had. Either refusal releases every lease taken.
+- **`apply_baseline` is concrete, not abstract.** It lives on
+  `InstrumentBehavior` as a successful no-op — right for any instrument whose
+  params are all connection and identity — and drivers with bench-wiring params
+  override it. A concrete ABC method would run client-side on a proxy and reset
+  nothing, so `RemoteProxy` forwards it explicitly (`_ALWAYS_FORWARDED`). Unlike
+  `enter_safe_state`, it touches no safety state, so one opaque call is fine.
+
+### Items
+
+- **7.1** ✅ **`apply_baseline()`**. Default no-op on `InstrumentBehavior`.
+  Overridden by `Keysight53220AChannel` (this input's conditioning;
+  `restore_configured_settings` kept as an alias), `Keysight53220A` (trigger
+  written now, gate and timeout re-written at the next arm via
+  `_forget_hardware_state`, then every input), `YokoAttenuator` and
+  `Attenuator31` (the configured `wavelength_nm`, which was never sent before).
+  *Not done:* `PowerMeterParams.wavelength_nm` is still never pushed — the power
+  meter has no behavior ABC, so no run binds it and nothing would call it.
+- **7.2** ✅ **`enter_safe_state()`** on `VSource` (0 V, then off) and
+  `Attenuator` (6.1). Concrete on the ABC, so through a proxy it decomposes into
+  calls the permission gate records individually — see the correction in 6.1.
+  `Laser` waits for its ABC (6.5).
+- **7.3** ✅ **`_query_methods_`**, merged across the MRO by
+  `collect_query_methods` as a **union** — a subclass can add a query but not
+  quietly turn an inherited one into a write. Declared on `VSense`
+  (`get_voltage`, `measure`), `Counter` (`get_gate_time`, `get_threshold` — *not*
+  `count`, `count_rate` or `measure`, which arm the counter), `Attenuator`
+  (`get_attenuation`, `get_max_attenuation`), and `YokoAttenuator`
+  (`is_shutter_open`, `get_wavelength_nm`). `VSource` has no getters to declare.
+  Nothing consumes the declarations until server 9.5.
+- **7.4** ✅ **`RunLifecycle`** in `lib/task_adapters/lifecycle.py`, with
+  `run(resolve, execute)` rather than wrapping `ProcedureRunner.run`: the
+  measurement class keeps wiring its savers and plotters, and the lifecycle
+  needs `resolve` as a callable to construct instruments *after* claiming.
+  `bound_instruments` finds behaviors in the resources' fields and lists,
+  once each; a `RemoteOpaque` is left untouched. Claims are any context
+  managers, entered all-or-nothing. `LocalTransportClaim`
+  (`lib/client/local_claims.py`) is the local one.
+- **7.5** ✅ **`SafeGuard(instrument, body)`**, refusing at construction an
+  instrument whose class declares no safe state (checked on the class, since a
+  proxy answers any attribute). `SourceGuard` is a **subclass rather than an
+  alias**: it keeps its three flags, because `IVSafetyParams` exposes them; with
+  both exit flags set its exit *is* the declared safe state, and a partial exit
+  is honoured. Exit failures raise after a successful body and are logged after
+  a failed one, the same rule as `WithSettings`.
+- **7.6** ✅ **Generated setup files run through `RunLifecycle`**, claim local
+  transports in the local and mixed branches (none under `--remote`), and exit
+  non-zero when a run does not succeed. Server 9.11 is therefore done too. An
+  end-to-end test runs a generated PCR script while the test process holds the
+  counter's lease, and the script stops naming the holder.
+- **Tests:** `tests/conftest.py` now points `LAB_WIZARD_LEASE_DIR` at a
+  temporary directory for every test, including generated scripts run as
+  subprocesses. `test_run_lifecycle.py`, `test_local_claims.py`,
+  `test_baseline_and_safe_state.py`; 48 new tests. Mutating the channel
+  baseline to a no-op, or making the lifecycle run safe state after success,
+  fails them.
 
 ---
 
@@ -634,11 +676,11 @@ Everything that has to be created or changed, across this plan and
 | Item | Kind | Phase |
 |---|---|---|
 | ✅ `Attenuator` behavior ABC — set/get attenuation, shutter, `get_max_attenuation`, concrete `enter_safe_state` | new | 6.1 |
-| `_query_methods_` declarations on `Attenuator` | new | 7.3 |
+| ✅ `_query_methods_` declarations on `Attenuator` | new | 7.3 |
 | ✅ Rename Yokogawa `Attenuator` → `YokoAttenuator`; conform Yoko + Ando to the ABC | change | 6.2, 6.3 |
-| `enter_safe_state()` on `VSource` — concrete, like `Attenuator`'s | new method | 7.2 |
-| `apply_baseline()` on every driver with category-2 params; push the dead `wavelength_nm` | new method | 7.1 |
-| `_query_methods_` merge helper beside `state_effects.py`; declarations on `VSource`, `VSense`, `Counter`, `Attenuator` | new | 7.3, server 9.2 |
+| ✅ `enter_safe_state()` on `VSource` — concrete, like `Attenuator`'s | new method | 7.2 |
+| ✅ `apply_baseline()` on every behavior driver with category-2 params; push the dead `wavelength_nm` (power meter still pending — no ABC) | new method | 7.1 |
+| ✅ `_query_methods_` merge helper in `state_effects.py`; declarations on `VSense`, `Counter`, `Attenuator`, `YokoAttenuator` | new | 7.3, server 9.2 |
 | `channels_claimable()` on params — false by default; true for `Keysight53220A`, SIM900 slots, DBay | new method | server 9.1 |
 | ✅ Delete dead `settling_time` on `Sim928`/`Sim921`/`Fake928`; document `gate_time_s` | cleanup | 0.1, 0.2 |
 | ✅ `Attenuator` proxy class | new, one line | 6.3 |
@@ -648,11 +690,11 @@ Everything that has to be created or changed, across this plan and
 | Item | Kind | Phase |
 |---|---|---|
 | ✅ `SetThreshold`, `WithSettings` steps | new | 0.4, 0.5 |
-| `SafeGuard`; `SourceGuard` as alias | new | 7.5 |
+| ✅ `SafeGuard`; `SourceGuard` as a subclass keeping its flags | new | 7.5 |
 | `StepSpec`, `RoleRef`, spec per existing step | new | 1.1, 1.2 |
 | `Retry`, `Guard`, `Selector`; `ValueAbove` / `ValueBelow` / `StepFailed` | new | 1.3 |
 | `StepSpec` registry mirroring `resource_catalog` | new | 1.4 |
-| `RunLifecycle` | new | 7.4 |
+| ✅ `RunLifecycle`, `LocalTransportClaim` | new | 7.4 |
 | ✅ `pcr_curve` sets its threshold from `PCRReadoutParams` | change | 0.8 |
 | `mcr_curve` | new, composed | 6.4 |
 
@@ -679,7 +721,7 @@ Everything that has to be created or changed, across this plan and
 | Attribute-reference scan across `projects/` + rename/remove guard | new | 5.5 |
 | Run-time workspace lookup with a clear failure outside a workspace | change | 5.8 |
 | Remove `pedagogical_yaml_expanded` (backend, frontend radio, tests) | delete | 5.10 |
-| Generated setup files call `RunLifecycle`; acquire leases for local roots | change | 7.6, server 9.11 |
+| ✅ Generated setup files call `RunLifecycle`; acquire leases for local roots | change | 7.6, server 9.11 |
 
 ### Frontend — `wizard/frontend/`
 

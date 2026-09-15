@@ -37,6 +37,8 @@ class YokoAttenuator(Child[YokoAQ2212SlotDep, YokoAttenuatorParams], Attenuator)
     passes light and ``0`` blocks it.
     """
 
+    _query_methods_ = frozenset({"is_shutter_open", "get_wavelength_nm"})
+
     def __init__(self, dep: YokoAQ2212SlotDep, params: YokoAttenuatorParams):
         self._dep = dep
         self.params = params
@@ -72,6 +74,16 @@ class YokoAttenuator(Child[YokoAQ2212SlotDep, YokoAttenuatorParams], Attenuator)
 
     def get_max_attenuation(self) -> float:
         return self.params.max_attenuation
+
+    def apply_baseline(self) -> bool:
+        """Set the calibration wavelength to the configured one.
+
+        The attenuation calibration depends on wavelength, which is a fact about
+        the bench (which laser is plugged in). Until this, ``wavelength_nm`` was
+        stored and never sent, so the module kept whatever was last set.
+        """
+        self.set_wavelength_nm(self.params.wavelength_nm)
+        return True
 
     # ---- AQ2212-specific ---------------------------------------------------
 

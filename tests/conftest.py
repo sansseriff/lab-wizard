@@ -11,6 +11,8 @@ import sys
 import pathlib
 import types as _types_mod
 
+import pytest
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -100,3 +102,15 @@ import requests  # type: ignore
 
 requests.get = _fake_get  # type: ignore[assignment]
 requests.put = _fake_put  # type: ignore[assignment]
+
+
+@pytest.fixture(autouse=True)
+def _isolated_lease_dir(tmp_path_factory, monkeypatch):
+    """Keep transport leases out of ``~/.lab_wizard/leases``.
+
+    Generated setup files claim their transports for the length of a run, and
+    tests run them — including as subprocesses, which inherit this environment.
+    A real lease directory would let a test collide with a measurement actually
+    running on this machine, or leave a claim behind for one.
+    """
+    monkeypatch.setenv("LAB_WIZARD_LEASE_DIR", str(tmp_path_factory.mktemp("leases")))

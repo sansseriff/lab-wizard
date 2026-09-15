@@ -9,11 +9,14 @@ the two ways it reaches a measurement: the wizard's picker and a server proxy.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from lab_wizard.lib.client.proxies.attenuator import RemoteAttenuator
 from lab_wizard.lib.client.proxies.registry import proxy_class_for
+from lab_wizard.lib.client.session import Session
+from lab_wizard.lib.instruments.andoAQ8201A.comm import AndoAQ8201ASlotDep
 from lab_wizard.lib.instruments.andoAQ8201A.modules.attenuator31 import (
     Attenuator31,
     Attenuator31Params,
@@ -24,6 +27,7 @@ from lab_wizard.lib.instruments.general.attenuator import (
 )
 from lab_wizard.lib.instruments.general.behavior import behavior_name_for
 from lab_wizard.lib.instruments.general.state_effects import Arg, collect_state_methods
+from lab_wizard.lib.instruments.yokogawaAQ2212.comm import YokoAQ2212SlotDep
 from lab_wizard.lib.instruments.yokogawaAQ2212.modules.attenuator import (
     YokoAttenuator,
     YokoAttenuatorParams,
@@ -51,12 +55,12 @@ class RecordingDep:
 
 def _yoko(**dep_kwargs) -> tuple[YokoAttenuator, RecordingDep]:
     dep = RecordingDep(**dep_kwargs)
-    return YokoAttenuator(dep, YokoAttenuatorParams(slot=dep.slot)), dep  # type: ignore[arg-type]
+    return YokoAttenuator(cast(YokoAQ2212SlotDep, dep), YokoAttenuatorParams(slot=str(dep.slot))), dep
 
 
 def _ando(**dep_kwargs) -> tuple[Attenuator31, RecordingDep]:
     dep = RecordingDep(**dep_kwargs)
-    return Attenuator31(dep, Attenuator31Params(slot=dep.slot)), dep  # type: ignore[arg-type]
+    return Attenuator31(cast(AndoAQ8201ASlotDep, dep), Attenuator31Params(slot=str(dep.slot))), dep
 
 
 # --------------------------- the contract ---------------------------
@@ -174,7 +178,7 @@ def test_attenuator_resolves_to_a_typed_proxy():
 def test_remote_safe_state_decomposes_into_calls_the_gate_can_record():
     """Forwarded as one opaque RPC, the gate would never learn the shutter closed."""
     session = RecordingSession()
-    proxy = RemoteAttenuator(session, "inst://abc/def", "bench_attenuator")  # type: ignore[arg-type]
+    proxy = RemoteAttenuator(cast(Session, session), "inst://abc/def", "bench_attenuator")
     assert isinstance(proxy, Attenuator)
 
     assert proxy.enter_safe_state() is True

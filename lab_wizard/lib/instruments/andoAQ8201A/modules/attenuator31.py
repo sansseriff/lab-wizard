@@ -77,3 +77,8 @@ class Attenuator31(Child[AndoAQ8201ASlotDep, Attenuator31Params], Attenuator):
 
     def get_max_attenuation(self) -> float:
         return self.params.max_attenuation
+
+    def apply_baseline(self) -> bool:
+        """Set the calibration wavelength to the configured one (see ``YokoAttenuator``)."""
+        self.set_wavelength_nm(self.params.wavelength_nm)
+        return True

@@ -10,11 +10,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
+from lab_procedure import Status
+
 from lab_wizard.lib.client.composite_resources import CompositeResources
-from lab_wizard.lib.client.preflight import preflight_local_project
+from lab_wizard.lib.client.local_claims import LocalTransportClaim
 from lab_wizard.lib.client.server_discovery import load_server_urls
 from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
+from lab_wizard.lib.task_adapters.lifecycle import RunLifecycle
 from lab_wizard.lib.instruments.general.counter import Counter, StandInCounter
 from lab_wizard.lib.instruments.general.vsource import VSource, StandInVSource
 from lab_wizard.lib.plotters.plotter import GenericPlotter
@@ -77,25 +80,33 @@ if __name__ == "__main__":
     project = load_project_config(project_yaml)
 
     resource_source: object | None = None
+    claims: list[LocalTransportClaim] = []
     if args.remote:
         # Explicit override: route every *instrument* through one server. Savers
         # and plotters stay local — they write this machine's database and draw
         # on this machine's screen — which is why this is a composite rather
         # than a bare RemoteResources.
         resource_source = CompositeResources.all_remote(project, args.remote)
-    elif project.resources.instrument_sources:
-        # Per-attribute routing declared in the project YAML, so instruments may
-        # be split between this machine and one or more servers.
-        resource_source = CompositeResources.from_project(
-            project, server_urls=load_server_urls(project_dir)
-        )
     else:
-        # Fully local: this process opens the instruments itself, so refuse if a
-        # server on this machine already holds one of them. Naming the rack here
-        # beats an opaque failure deep inside a driver.
-        preflight_local_project(project.resources.instruments)
+        if project.resources.instrument_sources:
+            # Per-attribute routing declared in the project YAML, so instruments
+            # may be split between this machine and one or more servers.
+            resource_source = CompositeResources.from_project(
+                project, server_urls=load_server_urls(project_dir)
+            )
+        # This process opens every instrument left in the project's own tree —
+        # all of them for a local project, the unrouted ones for a mixed one —
+        # so it claims their transports for the run, and refuses if a server
+        # already holds one. Naming the rack here beats an opaque failure deep
+        # inside a driver.
+        claims.append(
+            LocalTransportClaim(project.resources.instruments, owner=project_dir.name)
+        )
 
-    resources = create_instrument_resources(project, resource_source)
-
-    measurement = PCRCurveMeasurement(resources)
-    measurement.run_measurement()
+    # Claim, build the instruments, reset them to their configured baseline,
+    # run, make them safe if the run fails, release. See lifecycle.py.
+    status = RunLifecycle(claims=claims).run(
+        resolve=lambda: create_instrument_resources(project, resource_source),
+        execute=lambda resources: PCRCurveMeasurement(resources).run_measurement(),
+    )
+    raise SystemExit(0 if status is Status.SUCCESS else 1)

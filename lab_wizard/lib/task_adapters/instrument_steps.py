@@ -95,15 +95,69 @@ class ReturnToZeroAndOff(Step):
         return Status.SUCCESS
 
 
-class SourceGuard(Step):
+def _report_exit_failure(status: Status, what: str, detail: str) -> None:
+    """Raise, or log if the body already failed.
+
+    Cleanup that fails after a successful body is an error in its own right.
+    After a failed or aborted body it must not raise: ``on_exit`` runs inside
+    ``Step.execute``'s ``finally``, so a new exception would replace the body's
+    — and the body's is the one worth reading.
+    """
+    if status is Status.SUCCESS:
+        raise RuntimeError(f"Could not {what}: {detail}")
+    logger.error("Could not %s after %s: %s", what, status.value, detail)
+
+
+class SafeGuard(Step):
+    """Run a body, then put an instrument into its declared safe state.
+
+    The safe state comes from the instrument's behavior — ``VSource`` is 0 V and
+    output off, ``Attenuator`` is shutter closed at maximum attenuation — so one
+    guard works for every behavior that declares one. It runs in ``on_exit``,
+    which :meth:`Step.execute` always calls from its ``finally``, because a
+    sibling cleanup step after the body would be skipped the moment the body
+    aborts or fails.
+    """
+
+    def __init__(self, instrument: object, body: Step, *, name: str | None = None) -> None:
+        super().__init__(name=name)
+        # Checked on the class, not the instance: a remote proxy answers any
+        # attribute name reflectively, so the instance would always say yes.
+        if not callable(getattr(type(instrument), "enter_safe_state", None)):
+            raise TypeError(
+                f"{type(instrument).__name__} declares no safe state, so "
+                "SafeGuard has nothing to return it to"
+            )
+        self.instrument = instrument
+        self.body = body
+        self.add_child(body)
+
+    def run(self) -> Status:
+        assert self.context is not None
+        assert self.node_id is not None
+        return self.body.execute(self.context, self.node_id, position=0)
+
+    def on_exit(self, status: Status) -> None:
+        self._attempt(status, "enter the safe state", getattr(self.instrument, "enter_safe_state"))
+
+    def _attempt(self, status: Status, what: str, action) -> None:
+        try:
+            ok = action()
+        except Exception as exc:  # noqa: BLE001 - reported below, never swallowed
+            _report_exit_failure(status, what, repr(exc))
+            return
+        if ok is False:
+            _report_exit_failure(status, what, "the instrument reported failure")
+
+
+class SourceGuard(SafeGuard):
     """Run a body with the source enabled, guaranteeing safe shutdown.
 
     Turns the source on (optionally) on enter, runs the single ``body`` child,
     and on exit — *even on failure or abort* — returns to zero and/or turns the
-    output off. Shutdown lives in ``on_exit`` (which
-    :meth:`Step.execute` always runs in its ``finally``) precisely because a
-    sibling cleanup step after the body would be skipped the moment the body
-    aborts or fails.
+    output off. With both exit flags set, that is exactly ``VSource``'s declared
+    safe state. Clearing one is a deliberate choice a measurement exposes (the
+    IV curve's ``safety`` params do), so it is honoured rather than overridden.
     """
 
     def __init__(
@@ -116,28 +170,24 @@ class SourceGuard(Step):
         turn_off_at_end: bool = True,
         name: str | None = None,
     ) -> None:
-        super().__init__(name=name)
+        super().__init__(source, body, name=name)
         self.source = source
-        self.body = body
         self.turn_on_at_start = turn_on_at_start
         self.return_to_zero = return_to_zero
         self.turn_off_at_end = turn_off_at_end
-        self.add_child(body)
 
     def on_enter(self) -> None:
         if self.turn_on_at_start:
             self.source.turn_on()
 
-    def run(self) -> Status:
-        assert self.context is not None
-        assert self.node_id is not None
-        return self.body.execute(self.context, self.node_id, position=0)
-
     def on_exit(self, status: Status) -> None:
+        if self.return_to_zero and self.turn_off_at_end:
+            super().on_exit(status)
+            return
         if self.return_to_zero:
-            self.source.set_voltage(0.0)
+            self._attempt(status, "return the source to 0 V", lambda: self.source.set_voltage(0.0))
         if self.turn_off_at_end:
-            self.source.turn_off()
+            self._attempt(status, "turn the source off", self.source.turn_off)
 
 
 class WithSettings(Step):
@@ -220,9 +270,4 @@ class WithSettings(Step):
         self._applied = []
         if not failures:
             return
-        detail = "; ".join(failures)
-        if status is Status.SUCCESS:
-            raise RuntimeError(f"Could not restore overridden settings: {detail}")
-        # The body already failed or aborted. Raising here would replace that
-        # error with this one, and the original is the one worth reading.
-        logger.error("Could not restore overridden settings after %s: %s", status.value, detail)
+        _report_exit_failure(status, "restore overridden settings", "; ".join(failures))

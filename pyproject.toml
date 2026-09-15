@@ -28,5 +28,15 @@ lab-procedure = { workspace = true, editable = true }
 
 [dependency-groups]
 dev = [
+    "ty>=0.0.81",
     "zensical>=0.0.43",
 ]
+
+[tool.ty.environment]
+# lab_procedure is a workspace member whose package lives one level down, under
+# procedure_framework/; the editable install's import hook is invisible to ty.
+extra-paths = ["procedure_framework"]
+
+[tool.ty.src]
+# ref/ holds vendored and legacy reference code, not this project's source.
+exclude = ["ref", "site", "projects", "lab_wizard/wizard/frontend"]

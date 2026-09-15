@@ -39,6 +39,13 @@ def _make_remote_forwarder(method_name: str) -> Callable[..., Any]:
     return forwarder
 
 
+# Concrete on every behavior ABC, but meaningless client-side: its whole job is
+# to act on the server's instrument. Forwarded as one call, unlike
+# ``enter_safe_state``, which deliberately runs client-side so the permission
+# gate sees each output change.
+_ALWAYS_FORWARDED = frozenset({"apply_baseline"})
+
+
 class RemoteProxy:
     """Mixin that gives a proxy its session and ``inst://...`` path, and
     auto-forwards every abstract method inherited from a behavior ABC.
@@ -75,8 +82,9 @@ class RemoteProxy:
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        # Union of every abstract method visible on this class's MRO.
-        abstract_names: set[str] = set()
+        # Union of every abstract method visible on this class's MRO, plus the
+        # concrete methods that only make sense on the server's side.
+        abstract_names: set[str] = set(_ALWAYS_FORWARDED)
         for base in cls.__mro__:
             abstract_names |= set(getattr(base, "__abstractmethods__", ()))
         # Inject a forwarder for each abstract method the subclass didn't

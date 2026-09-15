@@ -41,7 +41,7 @@ class RecordingCounter(StandInCounter):
 class Probe(Step):
     """Records the counter's settings as the body sees them, then succeeds or fails."""
 
-    def __init__(self, counter: RecordingCounter, outcome: object = Status.SUCCESS) -> None:
+    def __init__(self, counter: RecordingCounter, outcome: Status | Exception = Status.SUCCESS) -> None:
         super().__init__(name="probe")
         self.counter = counter
         self.outcome = outcome
@@ -54,7 +54,7 @@ class Probe(Step):
         }
         if isinstance(self.outcome, Exception):
             raise self.outcome
-        return self.outcome  # type: ignore[return-value]
+        return self.outcome
 
 
 def _run(step: Step) -> Status:
@@ -118,6 +118,8 @@ def test_settings_are_restored_on_abort():
     counter.threshold_mV = -50.0
 
     class AbortingProbe(Step):
+        parent_step: Step | None = None
+
         def run(self) -> Status:
             assert self.parent_step is not None
             self.parent_step.abort()
@@ -125,7 +127,7 @@ def test_settings_are_restored_on_abort():
 
     probe = AbortingProbe()
     step = WithSettings(counter, {"threshold": 30.0}, probe)
-    probe.parent_step = step  # type: ignore[attr-defined]
+    probe.parent_step = step
 
     assert _run(step) is Status.ABORTED
     assert counter.threshold_mV == -50.0

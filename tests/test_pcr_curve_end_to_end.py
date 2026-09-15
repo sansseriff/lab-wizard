@@ -532,3 +532,32 @@ def test_generated_setup_runs_as_a_script(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_generated_setup_refuses_a_counter_another_process_has_claimed(tmp_path: Path) -> None:
+    """The script claims its transports before opening anything.
+
+    This test process holds the counter's lease, and it is alive and is not the
+    script — so the script must stop with the holder's name rather than open
+    the counter underneath it.
+    """
+    from lab_wizard.lib.client import leases
+
+    out = _generate_project(tmp_path)
+    setup_path = Path(out["setup_file"])
+    counter_key = _counter_params().transport_key()
+    assert counter_key
+    leases.acquire(counter_key, owner="a measurement already running")
+    try:
+        result = subprocess.run(
+            [sys.executable, str(setup_path)],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=str(setup_path.parent),
+        )
+    finally:
+        leases.release(counter_key)
+
+    assert result.returncode != 0
+    assert "a measurement already running" in result.stderr

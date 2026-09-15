@@ -54,6 +54,7 @@ class Attenuator(InstrumentBehavior, specificity=TERMINAL):
         "open_shutter": ("shutter", "open"),
         "close_shutter": ("shutter", "closed"),
     }
+    _query_methods_ = frozenset({"get_attenuation", "get_max_attenuation"})
 
     @abstractmethod
     def set_attenuation(self, attenuation_db: float) -> bool:

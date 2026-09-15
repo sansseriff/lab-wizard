@@ -24,6 +24,8 @@ class VSense(InstrumentBehavior, specificity=TERMINAL):
     implement this interface.
     """
 
+    _query_methods_ = frozenset({"get_voltage", "measure"})
+
     # ---- Abstract API ----
     @abstractmethod
     def get_voltage(self) -> float: ...

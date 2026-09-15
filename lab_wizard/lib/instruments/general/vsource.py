@@ -66,6 +66,23 @@ class VSource(InstrumentBehavior, specificity=TERMINAL):
         """
         pass
 
+    def enter_safe_state(self) -> bool:
+        """Drive the output to 0 V, then turn it off.
+
+        Zero first, so the output is not switched off from a bias — an SNSPD
+        sees a step either way, but a smaller one this way round. Both are
+        attempted even if the first reports failure.
+
+        Concrete and built from the abstract primitives, like
+        ``Attenuator.enter_safe_state``: through a server proxy it runs as
+        ``set_voltage`` and ``turn_off`` calls that the permission gate records
+        individually, instead of one opaque call that would hide the output
+        switching off.
+        """
+        zeroed = self.set_voltage(0.0)
+        off = self.turn_off()
+        return bool(zeroed and off)
+
 
 class StandInVSource(VSource):
     """

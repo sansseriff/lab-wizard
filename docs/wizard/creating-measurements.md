@@ -115,9 +115,32 @@ uv run iv_curve_setup.py             # local: loads the project YAML
 uv run iv_curve_setup.py --remote tcp://lab-server:12300   # remote
 ```
 
-The template's `__main__` block uses local resources, a per-attribute
-`CompositeResources`, or the all-remote override, then runs the sibling
-measurement module. The same procedure works in each mode because measurements
-consume behavior ABCs, which both local instruments and
-[remote proxies](../remote/architecture.md) satisfy. Observations flow through
-the procedure data bus to the configured saver and plotter adapters.
+The template's `__main__` block picks local resources, a per-attribute
+`CompositeResources`, or the all-remote override, then hands the run to
+[`RunLifecycle`](../../lab_wizard/lib/task_adapters/lifecycle.py). The same
+procedure works in each mode because measurements consume behavior ABCs, which
+both local instruments and [remote proxies](../remote/architecture.md) satisfy.
+Observations flow through the procedure data bus to the configured saver and
+plotter adapters.
+
+Every run goes through the same steps, in this order:
+
+1. **Claim.** Every exclusive transport this process will open is leased for
+   the length of the run, and every instrument server on the machine is asked
+   whether it already holds one. Either refusal stops the run with the holder's
+   name, before any instrument is opened. Instruments routed to a server are not
+   claimed yet — see `plans/server_plan.md` Phase 9.
+2. **Resolve.** The instruments are constructed — only now, because opening a
+   serial-backed rack before claiming it is the race claims exist to close.
+3. **Baseline.** `apply_baseline()` writes each bound instrument's configured
+   bench settings (coupling, impedance, wavelength, …), so a setting an earlier
+   experiment changed cannot carry into this one.
+4. **Run** the measurement.
+5. **Safe state, if the run failed.** On a failure, an abort, an exception or
+   Ctrl-C, each instrument that declares a safe state is put in it — a source to
+   0 V and off, an attenuator shutter-closed at maximum attenuation. A run that
+   completes is left where its own procedure ended it, so a choice like the IV
+   curve's `turn_off_at_end: false` is honoured.
+6. **Release** the claims, always.
+
+The script exits non-zero when the run does not succeed.

@@ -580,7 +580,7 @@ must pass both.
 - **9.10** **UI.** Hardware ownership page lists live claims — holder, units,
   expiry — with a force-release for same-machine callers only, and the conflict
   warning on `/measurements/resources` shows a claimed instrument as busy.
-- **9.11** **Wire leases into local runs.** Generated setup files acquire the
+- **9.11** ✅ **Wire leases into local runs.** *(Built with procedure plan 7.6: `LocalTransportClaim` leases every exclusive local root, then preflights, since a lease cannot see a server that opened the rack earlier.)* Generated setup files acquire the
   transport lease for each local root instead of only preflighting (fixes the
   7.2 gap above). The local analogue of a claim, at transport granularity,
   which is correct because a local run owns the whole transport.

@@ -7,7 +7,7 @@ plan carries a status block at the top; this table is the summary.
 |---|---|---|
 | [server_plan.md](server_plan.md) | **Mostly complete; Phase 9 proposed** | Phase 9 run-scoped claims (with threaded dispatch and lease acquisition for local runs), push notifications (6.3), forced `attribute` refs (8.6), per-attribute source selection in the picker, merged-tree edit UI |
 | [database_plan.md](database_plan.md) | **Mostly complete** | `query.py` pandas helpers, the `measurements_full` view, Alembic migrations |
-| [procedure_plan.md](procedure_plan.md) | **In progress** | Phase 0 and 6.1-6.3 built. Next: Phase 7's instrument contract (`apply_baseline`, `enter_safe_state` on `VSource`, `_query_methods_`), then Phases 1-3 and `mcr_curve` |
+| [procedure_plan.md](procedure_plan.md) | **In progress** | Phases 0 and 7, and 6.1-6.3, built. Next: server Phase 9.0 (threaded dispatch), then Phases 1-3 and `mcr_curve` |
 | [runner_plan.md](runner_plan.md) | **Not started** | Everything past listing projects — no launch endpoint, no run view, and both plotters are still placeholders |
 
 ## Relationship to `docs/roadmap.md`

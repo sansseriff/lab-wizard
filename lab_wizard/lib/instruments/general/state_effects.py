@@ -19,6 +19,14 @@ An instrument opts into the server's permission state machine by declaring a
     - ``Result()``    record the method's return value
     - any other value record it as a literal
 
+Separately, ``_query_methods_`` is a set of method names that only *read* —
+they change nothing another caller could depend on. It is merged across the MRO
+by :func:`collect_query_methods`, so a behavior ABC declares its getters once
+and every driver inherits them. The list is deliberately an allowlist: anything
+undeclared counts as a write. ``_state_methods_`` cannot stand in for it, because
+it lists only *safety-relevant* state changes, and most mutating methods are
+absent from it. See ``plans/server_plan.md`` 9.2.
+
 This module is deliberately dependency-free and lives in the instrument layer,
 so instruments never import server code. The server's permission gate imports
 these helpers, not the other way around.
@@ -78,3 +86,16 @@ def collect_state_methods(cls: type) -> dict[str, tuple[str, Any]]:
         if own:
             merged.update(own)
     return merged
+
+
+def collect_query_methods(cls: type) -> frozenset[str]:
+    """Union of ``_query_methods_`` declarations across a class's MRO.
+
+    A union, not an override: a subclass adds queries but cannot quietly turn an
+    inherited one into a write. That keeps the allowlist failing closed — the
+    only way a method becomes a query is by someone naming it.
+    """
+    merged: set[str] = set()
+    for klass in cls.__mro__:
+        merged.update(klass.__dict__.get("_query_methods_", ()))
+    return frozenset(merged)

@@ -97,6 +97,22 @@ class InstrumentBehavior(ABC):
         if specificity is not None:
             register_behavior(cls, specificity)
 
+    def apply_baseline(self) -> bool:
+        """Re-apply this instrument's configured bench settings to the hardware.
+
+        Called on every bound instrument at the start of a run, so a setting a
+        previous experiment changed — on a server-held instrument, possibly
+        another client's — cannot carry into this one. It writes the
+        *bench-wiring* params (coupling, impedance, wavelength, ...) and nothing
+        else: outputs belong to the safe state, and a procedure's own values are
+        set by the procedure. See ``plans/procedure_plan.md`` 7.1.
+
+        A driver with bench-wiring params overrides this. The default does
+        nothing, which is correct for an instrument whose params are all
+        connection and identity. Returns True on success.
+        """
+        return True
+
 
 def behaviors() -> tuple[tuple[str, type], ...]:
     """Registered behaviors as ``(name, class)``, most specific first.

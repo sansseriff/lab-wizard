@@ -32,8 +32,9 @@ channel's input conditioning and the instrument's trigger/gate settings from
 left alone; ``settings`` is a deep copy holding what the hardware should be
 right now. Runtime setters (``set_threshold``, ``set_coupling``, ...) update
 ``settings``, so the re-apply after a ``CONFigure`` restores the level a sweep
-just set instead of reverting to YAML. :meth:`Keysight53220AChannel.restore_configured_settings`
-goes back to the config values.
+just set instead of reverting to YAML. ``apply_baseline`` goes back to the
+config values — on one input for a channel, and on the trigger, gate, and every
+input for the whole counter.
 """
 
 from __future__ import annotations
@@ -371,10 +372,19 @@ class Keysight53220AChannel(Counter):
             write(f"INP{channel}:LEV:AUTO ON")
         return True
 
-    def restore_configured_settings(self) -> bool:
-        """Discard runtime changes and go back to the configured params."""
+    def apply_baseline(self) -> bool:
+        """Discard runtime changes to this input and write its configured params.
+
+        Only this input. The trigger and gate belong to the whole counter, and a
+        run bound to one input has no business resetting them — see
+        :meth:`Keysight53220A.apply_baseline`.
+        """
         self.settings = self.params.model_copy(deep=True)
         return self.apply_input_settings()
+
+    def restore_configured_settings(self) -> bool:
+        """Older name for :meth:`apply_baseline`."""
+        return self.apply_baseline()
 
     def set_coupling(self, coupling: Literal["AC", "DC"]) -> bool:
         self.settings.coupling = coupling
@@ -755,6 +765,19 @@ class Keysight53220A(Instrument, ChannelProvider[Keysight53220AChannel]):
         return int(_parse_float(self.query("DATA:POIN?")))
 
     # ---- Configuration -----------------------------------------------------
+
+    def apply_baseline(self) -> bool:
+        """Discard runtime changes everywhere and write the configured params.
+
+        Trigger settings are written now. The gate and the measurement timeout
+        are part of arming, so the armed-setup cache is dropped instead and the
+        next measurement writes them from the restored settings. Every input is
+        reset through its own :meth:`Keysight53220AChannel.apply_baseline`.
+        """
+        self.settings = self.params.model_copy(deep=True)
+        self._forget_hardware_state()
+        self.apply_trigger_settings()
+        return all([channel.apply_baseline() for channel in self.channels])
 
     def apply_configuration(self) -> bool:
         """Push the trigger, gate, and every channel's conditioning to hardware.

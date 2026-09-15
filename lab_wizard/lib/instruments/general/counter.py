@@ -52,6 +52,10 @@ class Counter(InstrumentBehavior, specificity=TERMINAL):
     its own ``__del__``/``atexit``. Subclasses do not implement ``disconnect``.
     """
 
+    # Only the getters. ``count``, ``count_rate`` and ``measure`` are *writes*:
+    # on a real counter they configure and arm the instrument for this input.
+    _query_methods_ = frozenset({"get_gate_time", "get_threshold"})
+
     @abstractmethod
     def count(self, gate_time: float | None = None) -> int:
         """Count events for one gate and return the number of events.

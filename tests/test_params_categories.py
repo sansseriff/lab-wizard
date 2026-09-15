@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -70,7 +71,7 @@ def _every_instrument_params_model() -> list[type[BaseModel]]:
                 walk(nested)
 
     for type_str in list_available_types("instrument"):
-        walk(load_params_class(type_str))
+        walk(cast(type[BaseModel], load_params_class(type_str)))
     return list(seen)
 
 
