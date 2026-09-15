@@ -21,7 +21,7 @@ class IVBiasParams(BaseModel):
     """How the bias source is swept."""
 
     sweep: SweepParams = Field(
-        default_factory=lambda: LinearSweepParams(start_V=0.0, stop_V=1.4, step_V=0.005)
+        default_factory=lambda: LinearSweepParams(start=0.0, stop=1.4, step=0.005)
     )
     settle_s: float = 0.05
 

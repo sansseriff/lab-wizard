@@ -179,7 +179,11 @@ def model_to_commented_map(
     """Build a CommentedMap from a Pydantic model, attaching Field descriptions."""
     excluded = set(exclude_fields)
     priority = _yaml_priority_fields(type(model))
-    rest = [f for f in type(model).model_fields if f not in set(priority)]
+    fields = type(model).model_fields
+    rest = [f for f in fields if f not in set(priority)]
+    # A model that serializes by alias (ExplicitSweepParams stores ``points``
+    # but writes ``values``) is written the same way here as by model_dump.
+    by_alias = bool(type(model).model_config.get("serialize_by_alias"))
     cm = CommentedMap()
     for field_name in priority + rest:
         if field_name in excluded:
@@ -189,11 +193,12 @@ def model_to_commented_map(
             continue
         if drop_enabled_true and field_name == "enabled" and field_value is True:
             continue
-        cm[field_name] = to_commented_yaml_value(field_value)
+        key = (fields[field_name].serialization_alias or field_name) if by_alias else field_name
+        cm[key] = to_commented_yaml_value(field_value)
         description = _field_description(model, field_name)
         if description:
             cm.yaml_add_eol_comment(  # type: ignore[no-untyped-call]
-                description, key=field_name
+                description, key=key
             )
     return cm
 

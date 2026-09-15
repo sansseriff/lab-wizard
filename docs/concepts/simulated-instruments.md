@@ -83,6 +83,23 @@ With the default 0.3 µA critical current, the transition lands at 0.03 V.
 `noise_volts` defaults to 0, making runs exactly reproducible; set it (with
 `seed`) to exercise code that has to cope with a jittery reading.
 
+## Light in the path: the attenuator
+
+`fake_attenuator` is a standalone simulated variable optical attenuator. Like the
+simulated counter, it is its own box rather than a module in the rack, so it
+names the detector it sits in front of with `detector_name`; give it the same
+name as the rack and the counter.
+
+Setting attenuation scales the light reaching the detector by
+`10 ** (-dB / 10)`, and closing its shutter blocks it entirely. Dark counts are
+unaffected, so a closed-shutter count measures the background. It clamps to
+`max_attenuation` and quantizes to 0.001 dB, as a real one does, and implements
+the `Attenuator` behavior, so it can fill any procedure role that needs one.
+
+`tests/test_mcr_curve.py` generates the built-in `mcr_curve` procedure against a
+rack, counter and attenuator on one detector, and checks the measured count rate
+against the model at each attenuation.
+
 ## Using them
 
 Add a `fakegpib` in Manage Instruments — its "scan" action offers a simulated

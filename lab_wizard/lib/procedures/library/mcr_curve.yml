@@ -1,0 +1,102 @@
+# Maximum count rate curve: photon count rate against optical attenuation, at a
+# fixed bias.
+#
+# Rebuilt from the old snspd_measure mcrCurve.py as a procedure. The run holds
+# the bias, counts once with the shutter closed (background), then opens it and
+# steps the attenuation from dark to bright, counting and reading the device
+# voltage at every point. Every row carries `phase` (background or signal), so
+# the background-subtracted rate and normalized efficiency are computed from the
+# saved rows afterwards, as before.
+#
+# Not carried over: the old script's cascade of four attenuator channels stepped
+# in tandem to extend the range. One attenuator covers the sweep here; a cascade
+# can be written as nested sweeps over two attenuator roles.
+schema_version: 1
+name: mcr_curve
+description: Count rate against optical attenuation at a fixed bias, with a background count.
+roles:
+  voltage_source:
+    behavior: VSource
+    description: Biases the detector.
+  voltage_sense:
+    behavior: VSense
+    description: Reads the voltage across the detector, to show it stayed superconducting.
+  counter:
+    behavior: Counter
+  attenuator:
+    behavior: Attenuator
+params:
+  bias:
+    voltage:
+      type: float
+      default: 0.0
+      unit: V
+      description: bias applied for the whole run
+    settle_s:
+      type: float
+      default: 1.0
+      unit: s
+  attenuation:
+    sweep:
+      type: sweep
+      default: {mode: linear, start: 30.0, stop: 0.0, step: 1.0}
+      unit: dB
+      description: dark to bright, so the detector is never flooded first
+    settle_s:
+      type: float
+      default: 1.0
+      unit: s
+  readout:
+    gate_time_s:
+      type: float
+      default: 1.0
+      unit: s
+    threshold_mV:
+      type: float
+      default: -50.0
+      unit: mV
+body:
+  type: sequence
+  children:
+    - type: set_threshold
+      counter: {role: counter}
+      threshold_mV: {param: readout.threshold_mV}
+    - type: source_guard
+      source: {role: voltage_source}
+      body:
+        type: safe_guard
+        instrument: {role: attenuator}
+        body:
+          type: sequence
+          children:
+            - type: set_voltage
+              source: {role: voltage_source}
+              voltage: {param: bias.voltage}
+            - type: wait
+              seconds: {param: bias.settle_s}
+            - type: with_parameter
+              parameter: phase
+              value: background
+              body:
+                type: sequence
+                children:
+                  - {type: close_shutter, attenuator: {role: attenuator}}
+                  - {type: wait, seconds: {param: attenuation.settle_s}}
+                  - {type: count, counter: {role: counter}, gate_time: {param: readout.gate_time_s}}
+            - {type: open_shutter, attenuator: {role: attenuator}}
+            - type: with_parameter
+              parameter: phase
+              value: signal
+              body:
+                type: sweep
+                parameter: attenuation_db
+                values: {param: attenuation.sweep}
+                body:
+                  type: sequence
+                  children:
+                    - type: set_attenuation
+                      attenuator: {role: attenuator}
+                      attenuation_db: {swept: attenuation_db}
+                    - {type: wait, seconds: {param: attenuation.settle_s}}
+                    - {type: count, counter: {role: counter}, gate_time: {param: readout.gate_time_s}}
+                    - {type: read_voltage, sense: {role: voltage_sense}, field: device_voltage}

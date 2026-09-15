@@ -1,7 +1,7 @@
 # Procedure composition plan
 
-> **Status: in progress.** Phases 0-3 and 7, and 6.1-6.3, are built. Next: 6.4
-> (`mcr_curve` as a definition), then Phase 5, then the Phase 4 composer.
+> **Status: in progress.** Phases 0-3 and 7, and 6.1-6.4, are built. Next: Phase 5,
+> then the Phase 4 composer.
 
 How a measurement's *choreography* stops being hand-written Python buried in
 `lib/measurements/`, and becomes something composable, storable, and eventually
@@ -487,7 +487,7 @@ Largely additive — the existing two-page flow survives.
 
 ---
 
-## Phase 6 — `Attenuator` ABC and `mcr_curve` — 6.1-6.3 ✅ done, 6.4-6.6 ⬜
+## Phase 6 — `Attenuator` ABC and `mcr_curve` — 6.1-6.4 ✅ done, 6.5-6.6 ⬜
 
 The first procedure *authored* rather than hand-written, and the honest test of
 whether Phases 1-5 work. `mcr_curve` sweeps optical attenuation and records
@@ -560,20 +560,42 @@ served** — `config/instruments/yokogawa_aq2212_key_b3c9ab43/`, attribute
     `tests/test_attenuator.py`.
   - The Ando status-parser test is shaped to the existing parser
     (wavelength at characters 6-10), not to a captured instrument reply.
-- **6.4** Build `mcr_curve`. It does not exist — only a commented-out import in
-  [`lib/__init__.py`](../lab_wizard/lib/__init__.py#L46) and an `MCR_CURVE` enum
-  value in [`schema.py`](../lab_wizard/lib/savers/schema.py#L27).
-  (`docs/roadmap.md` says it still uses a jinja template; that is stale — there
-  is nothing to migrate.) Compose it in the Procedures window and generate a
-  project. **If this requires touching the generator, Phase 3 failed its
-  no-per-procedure-cases property** and should be fixed rather than
-  special-cased.
+- **6.4 ✅ `mcr_curve`, as a procedure only.** No hand-written Python: the
+  definition is `lib/procedures/library/mcr_curve.yml`, and **generating it
+  required no generator change** — Phase 3's property held. What it did need:
+  - **Built-in procedures.** `config/` is gitignored workspace state, so a
+    shipped procedure cannot live there. Built-ins live in the package;
+    `load_procedure` prefers a workspace procedure of the same name, and
+    deleting that override restores the built-in. Added to the package data.
+  - **A `with_parameter` step** (`WithParameter` in `lab_procedure`), which
+    labels the rows its body records. The old `mcrCurve.py` counted once with
+    the shutter closed and then swept; every row now carries
+    `phase: background` or `phase: signal`, so background subtraction and
+    normalized efficiency are computed from the saved rows, as before.
+  - **A simulated attenuator** (`fake_rack/fake_attenuator.py`), a standalone
+    root wired by `detector_name`. Transmission is `10 ** (-dB / 10)`, a closed
+    shutter is dark, dark counts are unaffected; `SnspdModel` gained
+    `optical_transmission`.
+  - **Unit-free sweep fields** (`start`, `stop`, `step`, `values`), with the
+    volt-named ones still accepted on load. `ExplicitSweepParams` stores
+    `points` — `values` is its method — and serializes under `values`, and
+    `model_to_commented_map` now honours `serialize_by_alias`.
 
-  *Found while documenting Phases 1-3:* the shared sweep model names its fields
-  in volts (`start_V`, `stop_V`, `step_V`, `values_V`), which reads wrong for an
-  attenuation sweep in dB. Rename them to unit-free fields, keeping the volt
-  names as accepted aliases, before a stored MCR definition makes the wart
-  permanent.
+  Faithful to the old script: fixed bias, background through a closed shutter,
+  dark-to-bright attenuation sweep, counts and device voltage per point. **Not
+  carried over:** its cascade of four attenuator channels stepped in tandem to
+  extend the range; one attenuator covers the sweep, and a cascade is two
+  attenuator roles with nested sweeps. `tests/test_mcr_curve.py` checks the
+  measured rate at every attenuation against the detector model, the
+  background, that the detector stayed superconducting, and that the run ended
+  in the attenuator's safe state.
+
+  **Found, not fixed — the database loses procedure names.** `RunType` is an
+  enum, and `DatabaseSaver` stores any run type it does not list as `OTHER`.
+  `mcr_curve` is listed; a lab's own procedure would not be, so its runs could
+  not be told apart in the database. Making `runs.run_type` a plain string is a
+  schema change (and there are no migrations yet — `database_plan.md`), so it is
+  left as a decision rather than made here.
 - **6.5** *(later)* A `Laser` ABC has an implementer waiting too —
   [`yokogawaAQ2212/modules/laser.py`](../lab_wizard/lib/instruments/yokogawaAQ2212/modules/laser.py),
   with the same `set_output` / safe-state shape. Not needed for MCR; noted so
@@ -734,7 +756,7 @@ Everything that has to be created or changed, across this plan and
 | ✅ Step registry as a `step` kind of `resource_catalog`; `step_catalog()` | new | 1.4 |
 | ✅ `RunLifecycle`, `LocalTransportClaim` | new | 7.4 |
 | ✅ `pcr_curve` sets its threshold from `PCRReadoutParams` | change | 0.8 |
-| `mcr_curve` | new, composed | 6.4 |
+| ✅ `mcr_curve` — built-in procedure, simulated attenuator, `with_parameter` | new, composed | 6.4 |
 
 ### Server and client — `lib/server/`, `lib/client/`
 

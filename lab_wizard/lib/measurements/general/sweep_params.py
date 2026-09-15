@@ -1,69 +1,87 @@
-"""Shared, typed sweep parameters for measurements.
+"""Shared, typed sweep parameters for measurements and procedures.
 
-A sweep is a 1-D sequence of set-points (volts, by convention). Two shapes are
-supported and discriminated on a ``mode`` field so they round-trip cleanly
-through YAML:
+A sweep is a 1-D sequence of set-points. Two shapes are supported and
+discriminated on a ``mode`` field so they round-trip cleanly through YAML:
 
     bias:
       sweep:
         mode: linear        # LinearSweepParams
-        start_V: 0.0
-        stop_V: 1.4
-        step_V: 0.005
+        start: 0.0
+        stop: 1.4
+        step: 0.005
 
     bias:
       sweep:
         mode: explicit      # ExplicitSweepParams
-        values_V: [0.0, 0.1, 0.25, 0.5]
+        values: [0.0, 0.1, 0.25, 0.5]
 
 Both expose :meth:`values`, so a measurement consumes the set-points without
 caring which shape authored them. YAML stores the *values* (or the rule that
 generates them); Python decides how to step through them.
+
+The fields carry no unit. The same sweep drives a bias in volts and an
+attenuation in decibels, so the unit belongs to what is swept — a param's
+``unit`` in a procedure definition, a field description in a measurement. The
+original volt-suffixed names (``start_V``, ``stop_V``, ``step_V``,
+``values_V``) are still accepted when loading, so existing projects and presets
+are unaffected; they are written under the new names.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class LinearSweepParams(BaseModel):
     """Evenly-spaced sweep defined by endpoints and a step.
 
-    ``stop_V`` is inclusive: the endpoint is always emitted even when it is not
-    an exact multiple of ``step_V`` from ``start_V``. ``step_V`` is treated as a
-    magnitude; the direction is inferred from ``start_V``/``stop_V``.
+    ``stop`` is inclusive: the endpoint is always emitted even when it is not
+    an exact multiple of ``step`` from ``start``. ``step`` is treated as a
+    magnitude; the direction is inferred from ``start``/``stop``.
     """
 
+    model_config = ConfigDict(populate_by_name=True)
+
     mode: Literal["linear"] = "linear"
-    start_V: float = 0.0
-    stop_V: float = 1.0
-    step_V: float = 0.01
+    start: float = Field(default=0.0, validation_alias=AliasChoices("start", "start_V"))
+    stop: float = Field(default=1.0, validation_alias=AliasChoices("stop", "stop_V"))
+    step: float = Field(default=0.01, validation_alias=AliasChoices("step", "step_V"))
 
     def values(self) -> list[float]:
-        if self.step_V <= 0:
-            raise ValueError("step_V must be a positive magnitude")
-        span = self.stop_V - self.start_V
+        if self.step <= 0:
+            raise ValueError("step must be a positive magnitude")
+        span = self.stop - self.start
         if span == 0:
-            return [self.start_V]
-        step = self.step_V if span > 0 else -self.step_V
+            return [self.start]
+        step = self.step if span > 0 else -self.step
         n = int(round(span / step))
-        points = [self.start_V + i * step for i in range(n + 1)]
-        tol = 1e-9 * max(1.0, abs(self.stop_V))
-        if abs(points[-1] - self.stop_V) > tol:
-            points.append(self.stop_V)
+        points = [self.start + i * step for i in range(n + 1)]
+        tol = 1e-9 * max(1.0, abs(self.stop))
+        if abs(points[-1] - self.stop) > tol:
+            points.append(self.stop)
         return points
 
 
 class ExplicitSweepParams(BaseModel):
     """An explicit, ordered list of sweep set-points."""
 
+    # Written under the alias by default, so a dump — project YAML, a preset —
+    # says ``values`` rather than the internal ``points``.
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
     mode: Literal["explicit"] = "explicit"
-    values_V: list[float] = Field(default_factory=list)
+    # ``values`` is also the method name, so the field is stored as ``points``
+    # and appears in YAML under ``values`` (or the older ``values_V``).
+    points: list[float] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("values", "values_V", "points"),
+        serialization_alias="values",
+    )
 
     def values(self) -> list[float]:
-        return list(self.values_V)
+        return list(self.points)
 
 
 SweepParams = Annotated[

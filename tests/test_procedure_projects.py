@@ -70,7 +70,7 @@ PCR_DEFINITION: dict[str, Any] = {
     "roles": {"voltage_source": {"behavior": "VSource"}, "counter": {"behavior": "Counter"}},
     "params": {
         "bias": {
-            "sweep": {"type": "sweep", "default": {"mode": "linear", "start_V": 0.0, "stop_V": 0.03, "step_V": 0.002}},
+            "sweep": {"type": "sweep", "default": {"mode": "linear", "start": 0.0, "stop": 0.03, "step": 0.002}},
             "settle_s": {"type": "float", "default": 0.05, "unit": "s"},
         },
         "readout": {
@@ -208,7 +208,7 @@ def test_the_generated_project_carries_the_preset_and_the_procedure(tmp_path: Pa
     out = _generate(tmp_path)
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
     assert payload["project"]["measurement_type"] == "composed_pcr"
-    assert payload["measurement"]["params"]["bias"]["sweep"] == {"mode": "explicit", "values_V": SWEEP_V}
+    assert payload["measurement"]["params"]["bias"]["sweep"] == {"mode": "explicit", "values": SWEEP_V}
 
     module_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
     assert "def build_composed_pcr_procedure(" in module_text

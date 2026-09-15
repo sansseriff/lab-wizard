@@ -168,6 +168,28 @@ class Wait(Step):
                 return Status.ABORTED
 
 
+class WithParameter(Step):
+    """Run ``body`` with ``parameter`` set to ``value``, as a sweep would.
+
+    Every observation recorded inside carries it, so a run can label its rows —
+    ``phase: background`` for a dark count, ``phase: signal`` for the sweep —
+    without a sweep of one value.
+    """
+
+    def __init__(self, parameter: str, value: object, body: Step, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.parameter = parameter
+        self.value = value
+        self.body = body
+        self.add_child(body)
+
+    def run(self) -> Status:
+        assert self.context is not None
+        assert self.node_id is not None
+        with self.context.bound_parameter(self.parameter, self.value):
+            return self.body.execute(self.context, self.node_id, position=0)
+
+
 # --------------------------------------------------------------------------
 # Control flow
 #

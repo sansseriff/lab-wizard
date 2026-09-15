@@ -78,3 +78,28 @@ def test_generator_defaults_round_trip_through_model(name, model):
 
 def test_unknown_measurement_has_no_param_defaults():
     assert _measurement_param_defaults("does_not_exist") == {}
+
+
+def test_sweeps_are_unit_free_and_still_read_the_volt_named_fields():
+    """The same sweep drives volts and decibels, so its fields carry no unit.
+    Projects and presets written with the old names must keep loading."""
+    from pydantic import TypeAdapter
+
+    from lab_wizard.lib.measurements.general.sweep_params import SweepParams
+
+    adapter = TypeAdapter(SweepParams)
+    old = adapter.validate_python({"mode": "linear", "start_V": 0.0, "stop_V": 20.0, "step_V": 10.0})
+    new = adapter.validate_python({"mode": "linear", "start": 0.0, "stop": 20.0, "step": 10.0})
+    assert old.values() == new.values() == [0.0, 10.0, 20.0]
+    assert new.model_dump(mode="json") == {"mode": "linear", "start": 0.0, "stop": 20.0, "step": 10.0}
+
+    explicit = adapter.validate_python({"mode": "explicit", "values_V": [30.0, 10.0]})
+    assert explicit.values() == [30.0, 10.0]
+    assert explicit.model_dump(mode="json") == {"mode": "explicit", "values": [30.0, 10.0]}
+
+
+def test_an_explicit_sweep_is_written_to_yaml_under_values():
+    from lab_wizard.lib.measurements.general.sweep_params import ExplicitSweepParams
+    from lab_wizard.lib.utilities.config_io import model_to_commented_map
+
+    assert dict(model_to_commented_map(ExplicitSweepParams(values=[1.0]))) == {"mode": "explicit", "values": [1.0]}

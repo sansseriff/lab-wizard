@@ -6,7 +6,19 @@ from typing import Literal
 
 from pydantic import Field
 
-from lab_procedure import If, Invert, Repeat, Retry, Selector, Sequence, Sweep, ValueAbove, ValueBelow, Wait
+from lab_procedure import (
+    If,
+    Invert,
+    Repeat,
+    Retry,
+    Selector,
+    Sequence,
+    Sweep,
+    ValueAbove,
+    ValueBelow,
+    Wait,
+    WithParameter,
+)
 
 from lab_wizard.lib.procedures.spec import (
     StepClass,
@@ -67,6 +79,26 @@ class SweepStepParams(StepParams):
         body = inner.step(self.body)
         name = f", name={self.name!r}" if self.name else ""
         return f"{ctx.use(Sweep)}({self.parameter!r}, {values}, lambda {ident}: {body}{name})"
+
+
+class WithParameterStepParams(StepParams):
+    """Run ``body`` with ``parameter`` set to ``value``; its rows carry it.
+
+    Labels part of a run — ``phase: background`` — the way a sweep labels each
+    point with its value.
+    """
+
+    type: Literal["with_parameter"] = "with_parameter"
+    parameter: str
+    value: Value
+    body: AnyStep
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return WithParameter
+
+    def swept_parameters(self) -> tuple[str, ...]:
+        return (self.parameter,)
 
 
 class RepeatStepParams(StepParams):

@@ -43,14 +43,12 @@
 
 # # Measurements
 # from lib.measurements.iv_curve.iv_curve import IVCurveMeasurement
-# from lib.measurements.mcr_curve.mcr_curve import MCRCurveMeasurement
 # from lib.measurements.pcr_curve.pcr_curve import PCRCurve
 # from lib.measurements.general.genericMeasurement import GenericMeasurement
 
 # # Template classes from setup files (parameter models)
 # from lib.measurements.iv_curve.iv_curve_setup_template import IVCurveParams, IVCurveResources
 # from lib.measurements.pcr_curve.pcr_curve_setup_template import PCRCurveParams, InstrumentConfig as PCRInstrumentConfig
-# from lib.measurements.mcr_curve.mcr_curve_setup_template import MCRCurveParams, InstrumentConfig as MCRInstrumentConfig
 
 # # Plotters
 # from lib.plotters.genericPlotter import GenericPlotter as GenericPlotterBase

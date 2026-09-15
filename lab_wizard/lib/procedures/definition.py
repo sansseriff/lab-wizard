@@ -9,7 +9,7 @@ Stored as YAML under ``config/procedures/<name>.yml``::
       counter: {behavior: Counter}
     params:
       bias:
-        sweep: {type: sweep, default: {mode: linear, start_V: 0.0, stop_V: 0.04, step_V: 0.001}}
+        sweep: {type: sweep, default: {mode: linear, start: 0.0, stop: 0.04, step: 0.001}}
         settle_s: {type: float, default: 0.05, unit: s}
       readout:
         gate_time_s: {type: float, default: 1.0, unit: s}

@@ -23,7 +23,7 @@ roles:
   counter: {behavior: Counter}
 params:
   attenuation:
-    sweep: {type: sweep, default: {mode: linear, start_V: 0.0, stop_V: 30.0, step_V: 1.0}}
+    sweep: {type: sweep, default: {mode: linear, start: 0.0, stop: 30.0, step: 1.0}}
     settle_s: {type: float, default: 0.2, unit: s}
   readout:
     gate_time_s: {type: float, default: 1.0, unit: s}
@@ -47,8 +47,11 @@ body:
 with that behavior can fill the role when a project is generated.
 
 **Params** are groups and typed leaves: `float`, `int`, `bool`, `str`, or
-`sweep` (linear or explicit, as in every measurement). They become the
-project's `measurement.params` and a pydantic model in the generated setup file.
+`sweep`. A sweep is linear (`start`, `stop`, `step`) or explicit (`values`),
+with no unit in the field names — the same sweep drives volts or decibels, so
+the unit goes on the param. (The older `start_V`-style names still load.)
+Params become the project's `measurement.params` and a pydantic model in the
+generated setup file.
 
 **The body** is the step tree. A step's fields hold one of:
 
@@ -67,6 +70,7 @@ project's `measurement.params` and a pydantic model in the generated setup file.
 | `sequence` | children in order; stops at the first that does not succeed |
 | `sweep` | its body once per value, binding `parameter` |
 | `repeat`, `wait` | the obvious |
+| `with_parameter` | its body with `parameter` set to `value`, so its rows carry it — `phase: background` |
 | `retry` | its child until it succeeds, up to `max_attempts`; a raised error is retried too |
 | `if` | `then` if `condition` succeeds, else `otherwise` (or nothing) |
 | `selector` | children in order until one succeeds |
@@ -95,6 +99,15 @@ reported at once: a role or param that is not declared, a role filled by the
 wrong behavior (`count` given a `VSource`), a swept value used outside its
 sweep, a sweep param used as a single number, or a condition on a field no step
 records.
+
+## Built-in procedures
+
+Procedures that ship with lab_wizard live in
+`lab_wizard/lib/procedures/library/`. A workspace procedure of the same name
+takes precedence, so a lab adapts a built-in by saving its own copy; deleting
+that copy brings the built-in back. The first built-in is **`mcr_curve`**: count
+rate against optical attenuation at a fixed bias, with a background count taken
+through a closed shutter, rebuilt from the old `mcrCurve.py`.
 
 ## Presets
 

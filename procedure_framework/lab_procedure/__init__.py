@@ -22,6 +22,7 @@ from lab_procedure.steps import (
     ValueAbove,
     ValueBelow,
     Wait,
+    WithParameter,
 )
 
 __all__ = [
@@ -47,4 +48,5 @@ __all__ = [
     "ValueAbove",
     "ValueBelow",
     "Wait",
+    "WithParameter",
 ]

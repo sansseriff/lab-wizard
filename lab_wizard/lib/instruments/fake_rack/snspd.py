@@ -156,6 +156,9 @@ class SnspdModel:
         self.params = params or SnspdModelParams()
         self.bias_voltage = 0.0
         self.output_enabled = False
+        # Fraction of the incident light that reaches the detector, set by
+        # whatever attenuator sits in the path. Dark counts do not depend on it.
+        self.optical_transmission = 1.0
         self._normal = False
         self._rng = random.Random(self.params.seed)
 
@@ -167,6 +170,12 @@ class SnspdModel:
     def set_output_enabled(self, enabled: bool) -> None:
         """An open output sources no current, so the detector sees 0 V."""
         self.output_enabled = bool(enabled)
+
+    # -- what an attenuator does ----------------------------------------------
+
+    def set_optical_transmission(self, fraction: float) -> None:
+        """Scale the light reaching the detector: 1 is unattenuated, 0 is dark."""
+        self.optical_transmission = min(1.0, max(0.0, float(fraction)))
 
     # -- what the meter sees --------------------------------------------------
 
@@ -281,7 +290,11 @@ class SnspdModel:
         current, _ = self.solve()  # settles the branch; everything below reads it
         if self._normal or not self.output_enabled:
             return 0.0
-        photons = self.params.incident_photon_rate_hz * self.detection_efficiency(current)
+        photons = (
+            self.params.incident_photon_rate_hz
+            * self.optical_transmission
+            * self.detection_efficiency(current)
+        )
         dark = self.dark_count_rate(current)
         return (photons + dark) * self.discriminator_fraction(threshold_mV)
 

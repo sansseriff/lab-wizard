@@ -20,7 +20,7 @@ class PCRBiasParams(BaseModel):
     """How the bias source is swept while counting."""
 
     sweep: SweepParams = Field(
-        default_factory=lambda: LinearSweepParams(start_V=0.0, stop_V=1.0, step_V=0.01)
+        default_factory=lambda: LinearSweepParams(start=0.0, stop=1.0, step=0.01)
     )
     settle_s: float = 0.05
 
