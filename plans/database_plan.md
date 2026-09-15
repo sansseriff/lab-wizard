@@ -1,5 +1,10 @@
 # Lab Measurement Database: Design and Implementation Plan
 
+> **Status: mostly complete.** All six tables are implemented in
+> [`lib/savers/schema.py`](../lab_wizard/lib/savers/schema.py) and
+> `DatabaseSaver` writes one row per observation. Not built: the `query.py`
+> pandas helpers, the `measurements_full` SQL view, and Alembic migrations.
+
 ## Background and Motivation
 
 The existing lab software uses an Action framework — a hierarchical task system where Action objects expose an `.evaluate()` method called from the main event loop. Actions can contain other actions, and complex behaviors like coarse scans and entanglement visibility searches are composed by nesting Actions inside Actions. The existing saving system mirrors this hierarchy: results are flattened from nested Action structures into JSON files.

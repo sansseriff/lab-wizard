@@ -1,3 +1,15 @@
+# Running measurements from the GUI
+
+> **Status: not started.** `/api/projects` lists generated projects and the
+> Projects page renders them, but nothing runs one — there is no launch
+> endpoint and no run view. Both plotters
+> ([`mpl_plotter.py`](../lab_wizard/lib/plotters/mpl_plotter.py),
+> [`bokeh_plotter.py`](../lab_wizard/lib/plotters/bokeh_plotter.py)) are still
+> placeholders that store the last payload and print, so the live-plot half of
+> this plan has no backend yet.
+>
+> Kept as written — this is the original brief, not a worked plan.
+
 You will notice that this repo/tool 'lab wizard' has a way of creating projects that are pre-written using a GUI that works to load instruments, database, and plotting systems using a yaml config tree for setting and parameter handling. 
 
 Right now, the GUI does not support directly running of created projects after they have been created by workflows like the "create measurement" workflow. 

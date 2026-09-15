@@ -17,7 +17,7 @@ end-to-end.
   [`flat_resource_io`](../lab_wizard/lib/utilities/flat_resource_io.py) examples
   both reference a file/CSV saver, but none exists. A `FileSaverParams(SaverParams)`
   + `FileSaver(GenericSaver)` dropped into `lib/savers/` would be auto-discovered.
-- ❌ **No query/analysis layer.** `database_plan.md` describes a `query.py` of
+- ❌ **No query/analysis layer.** `plans/database_plan.md` describes a `query.py` of
   pandas helpers and a `measurements_full` SQL view; neither is implemented. No
   Alembic migrations are set up either.
 

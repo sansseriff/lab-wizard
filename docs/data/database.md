@@ -93,7 +93,7 @@ backend, so moving to Postgres later (if many machines need concurrent writes)
 is mostly a connection-string change.
 
 !!! note "Reading the data"
-    `database_plan.md` (repo root) sketches a thin `query.py` of pandas helpers
+    `plans/database_plan.md` sketches a thin `query.py` of pandas helpers
     (`get_measurements`, `get_runs`, `get_histogram`) and a `measurements_full`
     SQL view that joins run/device/wafer/cryostat metadata. The query helpers and
     Alembic migrations are **not yet implemented** — see the [Roadmap](../roadmap.md).
