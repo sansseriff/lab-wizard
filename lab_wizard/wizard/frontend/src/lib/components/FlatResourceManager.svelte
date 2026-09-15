@@ -37,7 +37,7 @@
 
 	let { kind, label, lede }: { kind: 'saver' | 'plotter'; label: string; lede: string } = $props();
 
-	const apiBase = `/api/manage-${kind}s`;
+	const apiBase = $derived(`/api/manage-${kind}s`);
 
 	let items = $state<ResourceItem[]>([]);
 	let metadata = $state<Record<string, ResourceMeta>>({});

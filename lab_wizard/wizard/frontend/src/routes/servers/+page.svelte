@@ -11,20 +11,25 @@
 	 * workspace is a *client* — that is a complete, deliberate configuration, and
 	 * the fix is Configure, not Start.
 	 */
+	import { untrack } from 'svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import Pill from '$lib/components/Pill.svelte';
 	import { workstation, type ServerStatus } from '$lib/stores/workstation.svelte';
 
 	let { data } = $props();
 
-	let serverStatus: ServerStatus | null = $state(data.serverStatus ?? null);
+	// Seeded from the load payload, then kept current by the actions below, so
+	// only the initial value is wanted for these three.
+	let serverStatus: ServerStatus | null = $state(untrack(() => data.serverStatus ?? null));
 	let serverBusy = $state(false);
 	let serverError: string | null = $state(null);
 	/** Whether a started server should outlive the wizard (run as a daemon). */
-	let keepAsDaemon = $state(data.serverStatus?.detached ?? false);
+	let keepAsDaemon = $state(untrack(() => data.serverStatus?.detached ?? false));
 
 	let bindDraft = $state(
-		data.serverStatus?.has_config ? (data.serverStatus?.bind ?? '') : data.suggestedBind
+		untrack(() =>
+			data.serverStatus?.has_config ? (data.serverStatus?.bind ?? '') : data.suggestedBind
+		)
 	);
 	let editingBind = $state(false);
 

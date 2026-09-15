@@ -6,7 +6,7 @@
 	import type { MeasurementChoice } from './+page';
 
 	let { data } = $props();
-	const choices: MeasurementChoice[] = (data?.choices ?? []) as MeasurementChoice[];
+	const choices: MeasurementChoice[] = $derived((data?.choices ?? []) as MeasurementChoice[]);
 	let selected = $state<MeasurementChoice | null>(null);
 
 	function resourcesUrl(choice: MeasurementChoice): string {

@@ -17,11 +17,14 @@
 	import Pill from '$lib/components/Pill.svelte';
 	import TrashIcon from 'phosphor-svelte/lib/Trash';
 	import PlugIcon from 'phosphor-svelte/lib/Plug';
+	import { untrack } from 'svelte';
 	import type { RemoteServer, TestResult } from './+page.ts';
 
 	let { data } = $props();
 
-	let servers: RemoteServer[] = $state(data.servers ?? []);
+	// Seeded from the load payload, then replaced by each API response below, so
+	// only the initial value is wanted here.
+	let servers: RemoteServer[] = $state(untrack(() => data.servers ?? []));
 	let newName = $state('');
 	let newUrl = $state('');
 	let statusMessage: { text: string; ok: boolean } | null = $state(null);

@@ -13,6 +13,7 @@
 	import { fetchWithConfig } from '$lib/api';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import { untrack } from 'svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import ArrowClockwiseIcon from 'phosphor-svelte/lib/ArrowClockwise';
@@ -21,11 +22,13 @@
 
 	let { data }: { data: HardwareStatusData } = $props();
 
-	let owner = $state(data.owner);
-	let transport = $state(data.transport);
-	let servers = $state(data.servers);
-	let claims: ServerClaims[] = $state(data.claims);
-	let error: string | null = $state(data.error ?? null);
+	// Seeded from the load payload, then refreshed together by `refresh()` below,
+	// so only the initial value is wanted here.
+	let owner = $state(untrack(() => data.owner));
+	let transport = $state(untrack(() => data.transport));
+	let servers = $state(untrack(() => data.servers));
+	let claims: ServerClaims[] = $state(untrack(() => data.claims));
+	let error: string | null = $state(untrack(() => data.error ?? null));
 	let busy = $state(false);
 	let message: { text: string; ok: boolean } | null = $state(null);
 

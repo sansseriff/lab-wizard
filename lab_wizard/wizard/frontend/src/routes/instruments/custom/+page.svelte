@@ -52,7 +52,7 @@
 	};
 
 	let { data } = $props();
-	const sources: Source[] = (data?.sources ?? []) as Source[];
+	const sources: Source[] = $derived((data?.sources ?? []) as Source[]);
 	// Sources offering a browsable tree: this workspace, and other workspaces'
 	// daemons on this machine. A remote machine is flat by design.
 	const treeSources = $derived(sources.filter((s) => s.tree !== null));

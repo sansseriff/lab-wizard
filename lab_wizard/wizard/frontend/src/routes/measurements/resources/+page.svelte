@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import TreeNode from '$lib/components/TreeNode.svelte';
 	import type { TreeItem, TreePathRef } from '$lib/components/TreeNode.svelte';
@@ -90,15 +91,16 @@
 	};
 
 	let { data } = $props();
-	const measurementName: string | null = data?.measurementName ?? null;
-	const measurementKind: 'measurement' | 'procedure' =
-		data?.measurementKind === 'procedure' ? 'procedure' : 'measurement';
-	const presets: string[] = (data?.presets ?? []) as string[];
+	const measurementName: string | null = $derived(data?.measurementName ?? null);
+	const measurementKind: 'measurement' | 'procedure' = $derived(
+		data?.measurementKind === 'procedure' ? 'procedure' : 'measurement'
+	);
+	const presets: string[] = $derived((data?.presets ?? []) as string[]);
 	// A named preset from config/measurements/<name>/, or '' for the defaults.
 	let paramsPreset = $state('');
-	const reqs: ResourceReq[] = (data?.requirements ?? []) as ResourceReq[];
-	const sources: Source[] = (data?.sources ?? []) as Source[];
-	const ownServer: { name: string; url: string } | null = data?.ownServer ?? null;
+	const reqs: ResourceReq[] = $derived((data?.requirements ?? []) as ResourceReq[]);
+	const sources: Source[] = $derived((data?.sources ?? []) as Source[]);
+	const ownServer: { name: string; url: string } | null = $derived(data?.ownServer ?? null);
 
 	// Sources offering a browsable tree: this workspace, and other workspaces'
 	// daemons on this machine. A remote machine is flat by design.
@@ -109,9 +111,12 @@
 	const saverReqs = $derived(reqs.filter((r) => r.resource_kind === 'saver'));
 	const plotterReqs = $derived(reqs.filter((r) => r.resource_kind === 'plotter'));
 
-	// Instrument selection state (one per variable)
+	// Instrument selection state (one per variable). Seeded once and then owned
+	// by the user's choices, so the requirement list is read untracked.
 	const selected: Record<string, SelectedChoice | null> = $state({});
-	for (const r of reqs) if (r.resource_kind === 'instrument' && !(r.variable_name in selected)) selected[r.variable_name] = null;
+	for (const r of untrack(() => reqs))
+		if (r.resource_kind === 'instrument' && !(r.variable_name in selected))
+			selected[r.variable_name] = null;
 
 	// --- Transport conflicts for a locally-run project ---------------------
 	//
@@ -227,7 +232,7 @@
 
 	// Saver / plotter selection state — multi-select (set of "type:key" strings) per variable
 	const flatSelected: Record<string, Set<string>> = $state({});
-	for (const r of reqs) {
+	for (const r of untrack(() => reqs)) {
 		if (r.resource_kind !== 'instrument' && !(r.variable_name in flatSelected)) {
 			flatSelected[r.variable_name] = new Set();
 		}

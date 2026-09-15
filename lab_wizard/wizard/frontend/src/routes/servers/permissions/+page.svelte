@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import { workstation } from '$lib/stores/workstation.svelte';
 	import Panel from '$lib/components/Panel.svelte';
@@ -18,10 +19,14 @@
 
 	let { data } = $props();
 
-	let instruments: PermInstrument[] = $state(data.instruments ?? []);
-	let rules: Rule[] = $state((data.permissions?.rules ?? []).map((r) => ({ ...r })));
+	// Seeded from the load payload, then edited here and saved back, so only the
+	// initial value is wanted: re-reading `data` would discard unsaved edits.
+	let instruments: PermInstrument[] = $state(untrack(() => data.instruments ?? []));
+	let rules: Rule[] = $state(
+		untrack(() => (data.permissions?.rules ?? []).map((r) => ({ ...r })))
+	);
 	let stateDefaults: Record<string, Record<string, any>> = $state(
-		data.permissions?.state_defaults ?? {}
+		untrack(() => data.permissions?.state_defaults ?? {})
 	);
 
 	let statusMessage: { text: string; ok: boolean } | null = $state(null);

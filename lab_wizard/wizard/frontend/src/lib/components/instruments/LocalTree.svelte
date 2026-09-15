@@ -24,12 +24,15 @@
 		ChainStep,
 		RootTransport
 	} from '$lib/types/instruments';
+	import { untrack } from 'svelte';
 	import type { TransportBadge } from '$lib/components/TreeNode.svelte';
 
 	let { data, autoOpenAdd = false }: { data: any; autoOpenAdd?: boolean } = $props();
-	let tree: TreeItem[] = $state(data.tree ?? []);
-	let metadata: Record<string, InstrumentMeta> = $state(data.metadata ?? {});
-	let roots: Record<string, RootTransport> = $state(data.roots ?? {});
+	// Seeded from the page's load, then refetched in place after each edit, so
+	// only the initial value is wanted here.
+	let tree: TreeItem[] = $state(untrack(() => data.tree ?? []));
+	let metadata: Record<string, InstrumentMeta> = $state(untrack(() => data.metadata ?? {}));
+	let roots: Record<string, RootTransport> = $state(untrack(() => data.roots ?? {}));
 	// Read from the shared store rather than this page's load: fetching it here
 	// would block navigation on a server probe (see `+page.ts`), and it is the
 	// same fact the topbar already shows.
