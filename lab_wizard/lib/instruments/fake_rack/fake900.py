@@ -32,6 +32,7 @@ from lab_wizard.lib.instruments.fake_rack.children import (
 from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModelParams
 from lab_wizard.lib.instruments.fake_rack.wiring import shared_detector
 from lab_wizard.lib.instruments.fake_rack.virtual_rack import (
+    FakePrologixSerial,
     VirtualGpibDevice,
     VirtualSim900,
     VirtualSlotModule,
@@ -150,3 +151,18 @@ class Fake900(Sim900):
     Slot routing, child instantiation, and the ``CONN``/escape framing are all
     inherited from :class:`Sim900`; only the declared parent differs.
     """
+
+    def instantiate_child(self, params: Any, *, key: str | None = None) -> Any:
+        """Attach a module, plugging its emulation into the slot if it is empty.
+
+        See :meth:`FakeGpib.instantiate_child`: a mainframe opened from params
+        without children has no modules until they are attached.
+        """
+        gpib = self._dep.gpib_comm
+        serial_dep = gpib.controller.serial_dep
+        mainframe = serial_dep.bus.devices.get(gpib.address) if isinstance(serial_dep, FakePrologixSerial) else None
+        builder = getattr(params, "virtual_module", None)
+        slot = int(params.slot)
+        if isinstance(mainframe, VirtualSim900) and slot not in mainframe.modules and builder is not None:
+            mainframe.modules[slot] = builder(mainframe.model)
+        return super().instantiate_child(params, key=key)

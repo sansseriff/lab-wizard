@@ -8,6 +8,8 @@ without duplicating code.
 
 from __future__ import annotations
 
+import importlib
+
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -292,12 +294,24 @@ def _runtime_class_name(params_class_name: str) -> str:
     )
 
 
+def _channel_class_ref(leaf: _NodeRef) -> tuple[str, str]:
+    """Module and name of the class a channel provider's channels are.
+
+    Read off the provider's ``channel_class`` rather than guessed from its name:
+    a provider can reuse another driver's channels (``FakeCounter`` has
+    ``Keysight53220AChannel``), and that class lives in the other driver's module.
+    """
+    module, params_cls = _type_info(leaf.type)
+    provider = getattr(importlib.import_module(module), _runtime_class_name(params_cls))
+    channel_cls = provider.channel_class
+    return channel_cls.__module__, channel_cls.__name__
+
+
 def _selected_runtime_type(leaf: _NodeRef, channel_index: int | None) -> str:
-    _module, params_cls = _type_info(leaf.type)
-    inst_cls = _runtime_class_name(params_cls)
     if channel_index is not None:
-        return f"{inst_cls}Channel"
-    return inst_cls
+        return _channel_class_ref(leaf)[1]
+    _module, params_cls = _type_info(leaf.type)
+    return _runtime_class_name(params_cls)
 
 
 def _selected_runtime_imports(
@@ -309,9 +323,9 @@ def _selected_runtime_imports(
     for sel, leaf in zip(selections, leaves):
         channel_index = getattr(sel, "channel_index", None)
         module, params_cls = _type_info(leaf.type)
-        imports.add((module, _selected_runtime_type(leaf, channel_index)))
+        imports.add((module, _runtime_class_name(params_cls)))
         if channel_index is not None:
-            imports.add((module, _runtime_class_name(params_cls)))
+            imports.add(_channel_class_ref(leaf))
     return imports
 
 

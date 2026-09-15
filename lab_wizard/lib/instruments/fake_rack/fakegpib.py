@@ -158,6 +158,21 @@ class FakeGpib(PrologixGPIB):
         )
         return cls(controller, params)  # type: ignore[arg-type]
 
+    def instantiate_child(self, child_params: Any, *, key: str | None = None) -> Any:
+        """Attach a device, plugging its emulation into the bus if it is not there.
+
+        The bus is built from the config's children when the controller opens,
+        which covers a tree built from config. Code that builds each level from
+        its own params — the embedded project style — opens the controller with
+        no children, so the device is added here as it is attached, the way
+        plugging an instrument into a real bus makes it answer.
+        """
+        address = int(child_params.gpib_address)
+        builder = getattr(child_params, "virtual_device", None)
+        if address not in self.bus.devices and builder is not None:
+            self.bus.add(address, builder())
+        return super().instantiate_child(child_params, key=key)
+
     @property
     def bus(self) -> VirtualGpibBus:
         """The emulated bus behind this controller, for tests to inspect."""

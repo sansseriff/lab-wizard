@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import math
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -179,7 +180,7 @@ def _selections() -> list[SelectedResource]:
     ]
 
 
-def _generate(tmp_path: Path) -> dict[str, Any]:
+def _generate(tmp_path: Path, style: str = "production") -> dict[str, Any]:
     config_dir = tmp_path / "config"
     _write_instruments(config_dir)
     definition = load_procedure(config_dir, "mcr_curve")
@@ -198,7 +199,10 @@ def _generate(tmp_path: Path) -> dict[str, Any]:
         config_dir=config_dir,
         projects_dir=tmp_path / "projects",
         req=GenerateProjectRequest(
-            measurement_name="mcr_curve", selected_resources=_selections(), params_preset="quick"
+            measurement_name="mcr_curve",
+            selected_resources=_selections(),
+            params_preset="quick",
+            generation_style=style,
         ),
     )
 
@@ -265,6 +269,27 @@ def test_the_generated_mcr_project_runs_as_a_script(tmp_path: Path):
     setup_path = Path(out["setup_file"])
     result = subprocess.run(
         [sys.executable, str(setup_path)], capture_output=True, text=True, timeout=300, cwd=str(setup_path.parent)
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_an_embedded_mcr_project_runs_outside_any_workspace(tmp_path: Path):
+    """The escape hatch's reason to exist: the project folder is all it needs.
+
+    Two things this caught. The generator guessed a channel class as
+    ``<Instrument>Channel``, which does not exist for a provider reusing another
+    driver's channels (``FakeCounter``). And the simulated rack only wired
+    modules declared as config children, which the embedded style — building
+    each level from its own params — never passes, so nothing answered.
+    """
+    out = _generate(tmp_path, style="pedagogical_embedded")
+    moved = tmp_path / "elsewhere" / Path(out["project_dir"]).name
+    shutil.copytree(out["project_dir"], moved)
+    setup_path = moved / Path(out["setup_file"]).name
+
+    result = subprocess.run(
+        [sys.executable, str(setup_path)], capture_output=True, text=True, timeout=300, cwd=str(moved)
     )
     assert result.returncode == 0, result.stderr
     assert "Traceback" not in result.stderr
