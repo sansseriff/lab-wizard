@@ -4,7 +4,8 @@
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Callout from '$lib/components/Callout.svelte';
-	import { TrashIcon, PlusIcon } from 'phosphor-svelte';
+	import TrashIcon from 'phosphor-svelte/lib/TrashIcon';
+	import PlusIcon from 'phosphor-svelte/lib/PlusIcon';
 	import type {
 		PermInstrument,
 		Permissions,

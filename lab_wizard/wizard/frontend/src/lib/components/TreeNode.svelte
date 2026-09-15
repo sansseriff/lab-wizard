@@ -24,7 +24,10 @@
 </script>
 
 <script lang="ts">
-	import { CaretDown, CaretRight, ArrowCounterClockwise, Trash } from 'phosphor-svelte';
+	import CaretDown from 'phosphor-svelte/lib/CaretDown';
+	import CaretRight from 'phosphor-svelte/lib/CaretRight';
+	import ArrowCounterClockwise from 'phosphor-svelte/lib/ArrowCounterClockwise';
+	import Trash from 'phosphor-svelte/lib/Trash';
 	import Self from './TreeNode.svelte';
 
 	type Props = {

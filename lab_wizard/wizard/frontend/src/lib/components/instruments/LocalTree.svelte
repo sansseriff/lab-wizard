@@ -15,7 +15,7 @@
 	import Pill from '$lib/components/Pill.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import { workstation } from '$lib/stores/workstation.svelte';
-	import { PlusIcon } from 'phosphor-svelte';
+	import PlusIcon from 'phosphor-svelte/lib/PlusIcon';
 	import type {
 		TreeItem,
 		InstrumentMeta,

@@ -15,7 +15,10 @@
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import { workspaceName, type LocalServer } from '$lib/types/instruments';
-	import { ArrowClockwise, ArrowCounterClockwise, Plus, Trash } from 'phosphor-svelte';
+	import ArrowClockwise from 'phosphor-svelte/lib/ArrowClockwise';
+	import ArrowCounterClockwise from 'phosphor-svelte/lib/ArrowCounterClockwise';
+	import Plus from 'phosphor-svelte/lib/Plus';
+	import Trash from 'phosphor-svelte/lib/Trash';
 
 	type RootTransport = {
 		transport_sharing: 'exclusive' | 'shared';
