@@ -39,6 +39,16 @@ export class ProcedureEditor {
 	/** Where the loaded procedure lived, and under which name. */
 	origin = $state<Origin>(null);
 	loadedName = $state<string | null>(null);
+	/** Identity survives list reordering. Paths are derived from the current tree. */
+	selectedStep = $state<Step | null>(null);
+	selectedParameter = $state<string | null>(null);
+	selectedRole = $state<string | null>(null);
+	collapsedSteps = $state<Step[]>([]);
+	revealVersion = $state(0);
+	steps = $derived.by(() => walkSteps(this.definition, this.catalog));
+	selectedPath = $derived(this.steps.find(({ step }) => step === this.selectedStep)?.path ?? null);
+	checkedJson = $state<string | null>(null);
+	checkCurrent = $derived.by(() => this.checkedJson === this.json);
 
 	readonly catalog: Catalog;
 	#timer: ReturnType<typeof setTimeout> | null = null;
@@ -50,26 +60,35 @@ export class ProcedureEditor {
 		this.origin = origin;
 		this.loadedName = loadedName;
 		this.savedJson = JSON.stringify(definition);
+		this.selectedStep =
+			this.definition.body?.type === 'sequence'
+				? (this.definition.body.children?.[0] ?? null)
+				: this.definition.body;
 	}
 
 	json = $derived(JSON.stringify(this.definition));
 	dirty = $derived(this.json !== this.savedJson);
 
-	markSaved(origin: Origin) {
-		this.savedJson = this.json;
+	markSaved(origin: Origin, definition: Definition = this.definition) {
+		this.savedJson = JSON.stringify(definition);
 		this.origin = origin;
-		this.loadedName = this.definition.name;
+		this.loadedName = definition.name;
 	}
 
 	// ------------------------- checking -------------------------
 
 	scheduleCheck(delayMs = 300) {
 		if (this.#timer) clearTimeout(this.#timer);
+		// Invalidate in-flight answers immediately, including the debounce window.
+		this.#generation++;
+		this.checking = true;
 		this.#timer = setTimeout(() => this.runCheck(), delayMs);
 	}
 
 	async runCheck() {
+		if (this.#timer) clearTimeout(this.#timer);
 		const generation = ++this.#generation;
+		const json = this.json;
 		this.checking = true;
 		try {
 			const result = await fetchWithConfig<CheckResult>('/api/procedures/check', 'POST', {
@@ -78,6 +97,7 @@ export class ProcedureEditor {
 			// An answer about an older edit would mark problems that are already fixed.
 			if (generation !== this.#generation) return;
 			this.check = result;
+			this.checkedJson = json;
 			this.checkError = null;
 		} catch (e) {
 			if (generation !== this.#generation) return;
@@ -90,7 +110,11 @@ export class ProcedureEditor {
 	/** Problems grouped under the deepest step (or role) their path falls inside. */
 	placedProblems = $derived.by(() => this.#placeProblems());
 
-	#placeProblems(): { byStep: Map<string, Problem[]>; byRole: Map<string, Problem[]>; general: Problem[] } {
+	#placeProblems(): {
+		byStep: Map<string, Problem[]>;
+		byRole: Map<string, Problem[]>;
+		general: Problem[];
+	} {
 		const byStep = new Map<string, Problem[]>();
 		const byRole = new Map<string, Problem[]>();
 		const general: Problem[] = [];
@@ -118,6 +142,26 @@ export class ProcedureEditor {
 
 	// ------------------------- tree edits -------------------------
 
+	selectStep(path: Path) {
+		this.selectedStep = this.step(path) ?? null;
+		const ancestors = this.steps
+			.filter((entry) => entry.path.every((part, i) => path[i] === part))
+			.map(({ step }) => step);
+		this.collapsedSteps = this.collapsedSteps.filter((step) => !ancestors.includes(step));
+		this.revealVersion++;
+	}
+
+	toggleStep(step: Step) {
+		this.collapsedSteps = this.collapsedSteps.includes(step)
+			? this.collapsedSteps.filter((item) => item !== step)
+			: [...this.collapsedSteps, step];
+	}
+
+	dispose() {
+		if (this.#timer) clearTimeout(this.#timer);
+		this.#generation++;
+	}
+
 	step(path: Path): Step {
 		return getAt(this.definition, path);
 	}
@@ -125,16 +169,32 @@ export class ProcedureEditor {
 	setAt(path: Path, value: unknown) {
 		const parent = getAt(this.definition, path.slice(0, -1));
 		const last = path[path.length - 1];
+		const selected = parent[last] === this.selectedStep;
 		if (value === undefined) delete parent[last];
 		else parent[last] = value;
+		if (selected) this.selectStep(path);
 	}
 
 	removeStep(path: Path) {
 		const parent = getAt(this.definition, path.slice(0, -1));
 		const last = path[path.length - 1];
+		const owner = this.steps
+			.filter(
+				(entry) =>
+					entry.path.length < path.length && entry.path.every((part, i) => path[i] === part)
+			)
+			.at(-1);
 		if (Array.isArray(parent)) parent.splice(Number(last), 1);
 		else if (path.length === 1) this.definition.body = { type: 'sequence', children: [] };
-		else delete parent[last];
+		else {
+			const field = this.catalog.steps[owner?.step.type ?? '']?.fields[String(last)];
+			if (field?.optional) delete parent[last];
+			else parent[last] = { type: 'sequence', children: [] };
+		}
+		this.selectedStep = Array.isArray(parent)
+			? (parent[Math.min(Number(last), parent.length - 1)] ?? owner?.step ?? null)
+			: (owner?.step ?? this.definition.body);
+		this.revealVersion++;
 	}
 
 	moveStep(path: Path, delta: number) {
@@ -153,15 +213,22 @@ export class ProcedureEditor {
 		);
 	}
 
-	insertStep(target: Path, type: string, preferredRole: string | null = null) {
+	insertStep(target: Path, type: string, preferredRole: string | null = null, index?: number) {
 		const step = this.build(type, preferredRole);
 		const container = getAt(this.definition, target);
-		if (Array.isArray(container)) container.push(step);
-		else this.setAt(target, step);
+		if (Array.isArray(container)) {
+			const at = index ?? container.length;
+			container.splice(at, 0, step);
+			this.selectStep([...target, at]);
+		} else {
+			this.setAt(target, step);
+			this.selectStep(target);
+		}
 	}
 
 	replaceStep(path: Path, type: string, preferredRole: string | null = null) {
 		this.setAt(path, this.build(type, preferredRole));
+		this.selectStep(path);
 	}
 
 	/** Put a new step of `type` where `path` is, with the old step inside its first slot. */
@@ -169,11 +236,14 @@ export class ProcedureEditor {
 		const old = $state.snapshot(this.step(path));
 		const wrapper = this.build(type);
 		const spec = this.catalog.steps[type];
-		const slot = Object.entries(spec.fields).find(([, f]) => f.kind === 'step' || f.kind === 'steps');
+		const slot = Object.entries(spec.fields).find(
+			([, f]) => f.kind === 'step' || f.kind === 'steps'
+		);
 		if (!slot) return;
 		const [name, field] = slot;
 		wrapper[name] = field.kind === 'steps' ? [old] : old;
 		this.setAt(path, wrapper);
+		this.selectStep(path);
 	}
 
 	/** Lift the only child of a container step into its place. */
@@ -187,6 +257,7 @@ export class ProcedureEditor {
 		}
 		if (children.length !== 1) return;
 		this.setAt(path, $state.snapshot(children[0]));
+		this.selectStep(path);
 	}
 
 	// ------------------------- roles -------------------------
@@ -237,7 +308,10 @@ export class ProcedureEditor {
 	// ------------------------- params -------------------------
 
 	/** Declare a param at a dotted path, creating groups along the way. */
-	addParam(dotted: string, decl: { type: string; default?: unknown; unit?: string | null }): string {
+	addParam(
+		dotted: string,
+		decl: { type: string; default?: unknown; unit?: string | null }
+	): string {
 		const taken = new Set(paramLeaves(this.definition.params).map((p) => p.name));
 		let name = dotted;
 		for (let n = 2; taken.has(name); n++) name = `${dotted}_${n}`;

@@ -1,0 +1,115 @@
+.procedure-editor .editor-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 21rem;
+	align-items: start;
+	gap: 16px;
+}
+.procedure-editor .editor-detail {
+	min-width: 0;
+	position: sticky;
+	top: 62px;
+	max-height: calc(100dvh - 80px);
+	overflow-y: auto;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: var(--surface);
+	padding: 16px;
+	overflow-wrap: anywhere;
+}
+.procedure-editor .editor-row {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 5px 12px;
+	width: 100%;
+	min-width: 0;
+	padding: 10px;
+	border-radius: 4px;
+	text-align: left;
+	font-size: 13px;
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+.procedure-editor .editor-row:hover {
+	background: var(--surface-2);
+}
+.procedure-editor .editor-row[aria-pressed='true'] {
+	background: var(--accent-wash);
+	color: var(--accent-strong);
+}
+.procedure-editor .editor-row-summary {
+	margin-left: auto;
+	font-size: 12px;
+	color: var(--muted);
+}
+.procedure-editor .editor-field {
+	display: block;
+	margin-top: 16px;
+}
+.procedure-editor .editor-field > span:first-child {
+	display: block;
+	margin-bottom: 6px;
+	font-size: 12px;
+	color: var(--ink-2);
+}
+.procedure-editor .editor-detail h3 {
+	font-size: 16px;
+	font-weight: 600;
+}
+.procedure-editor .editor-detail :is(input, select, textarea) {
+	max-width: 100%;
+}
+.procedure-editor .editor-empty {
+	padding: 20px 14px;
+	font-size: 13px;
+	color: var(--muted);
+}
+.procedure-editor .editor-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-top: 16px;
+}
+.procedure-editor .editor-code {
+	display: block;
+	width: 100%;
+	min-width: 0;
+	height: 60vh;
+	min-height: 240px;
+	margin: 0;
+	padding: 16px;
+	border: 0;
+	border-radius: 0;
+	background: var(--surface);
+	color: var(--ink);
+	font-family: var(--font-mono, monospace);
+	font-size: 13px;
+	line-height: 1.65;
+	tab-size: 2;
+	overflow: auto;
+	resize: vertical;
+}
+.procedure-editor .editor-code:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: -2px;
+}
+.procedure-editor .editor-code-status {
+	padding: 10px 14px;
+	border-top: 1px solid var(--line);
+	font-size: 12px;
+	color: var(--muted);
+}
+@media (max-width: 1099px) {
+	.procedure-editor .editor-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.procedure-editor .editor-detail {
+		position: static;
+		max-height: none;
+	}
+}
+@media (pointer: coarse) {
+	.procedure-editor .editor-row {
+		min-height: 44px;
+	}
+}

@@ -1,44 +1,36 @@
 <script lang="ts">
-	/** One step of the tree, with its fields and its children.
-	 *
-	 * Rendered entirely from the step's catalog entry: a field's `kind` picks its
-	 * editor, so a new step type in `lib/procedures/steps` appears here with no
-	 * frontend change. Children render as nested nodes, indented, so the tree's
-	 * shape on screen is the shape of the generated code.
-	 */
-	import CaretDownIcon from 'phosphor-svelte/lib/CaretDown';
-	import CaretRightIcon from 'phosphor-svelte/lib/CaretRight';
+	/** Edit only the selected step. Field editors remain catalog-driven. */
+	import { stepContext, stepTitle, cleanupSummary, humanize } from './presentation';
 	import ArrowUpIcon from 'phosphor-svelte/lib/ArrowUp';
 	import ArrowDownIcon from 'phosphor-svelte/lib/ArrowDown';
 	import XIcon from 'phosphor-svelte/lib/X';
 	import PlusIcon from 'phosphor-svelte/lib/Plus';
-	import Self from './StepNode.svelte';
 	import StepPicker from './StepPicker.svelte';
 	import ValueInput from './ValueInput.svelte';
 	import type { ProcedureEditor } from './editor.svelte';
-	import { type FieldSpec, type Path, boundNames, pathKey, roleFits } from './model';
+	import { type FieldSpec, type Path, pathKey, roleFits } from './model';
 
 	let {
 		editor,
 		path,
-		scope = [],
-		/** Where this node sits: a list item can move; a slot or the root cannot. */
-		place = 'slot',
-		index = 0,
-		count = 1,
-		optional = false
+		onreference
 	}: {
 		editor: ProcedureEditor;
 		path: Path;
-		scope?: string[];
-		place?: 'root' | 'slot' | 'list';
-		index?: number;
-		count?: number;
-		/** An optional slot, which can be emptied rather than reset. */
-		optional?: boolean;
+		onreference: (kind: 'params' | 'roles', name: string) => void;
 	} = $props();
+	const context = $derived(stepContext(editor.definition, editor.catalog, path));
+	const scope = $derived(context.scope);
+	const place = $derived(context.place);
+	const index = $derived(context.index);
+	const count = $derived(context.count);
+	const optional = $derived(context.optional);
 
-	type Picker = { title: string; containersOnly?: boolean; pick: (type: string, role: string | null) => void };
+	type Picker = {
+		title: string;
+		containersOnly?: boolean;
+		pick: (type: string, role: string | null) => void;
+	};
 
 	const catalog = $derived(editor.catalog);
 	const step = $derived(editor.step(path));
@@ -46,18 +38,22 @@
 	const key = $derived(pathKey(path));
 	const problems = $derived(editor.placedProblems.byStep.get(key) ?? []);
 	const fieldEntries = $derived(Object.entries(spec?.fields ?? {}));
-	const scalarFields = $derived(fieldEntries.filter(([, f]) => f.kind !== 'step' && f.kind !== 'steps'));
-	const childFields = $derived(fieldEntries.filter(([, f]) => f.kind === 'step' || f.kind === 'steps'));
-	const innerScope = $derived(step ? [...scope, ...boundNames(step, spec)] : scope);
+	const scalarFields = $derived(
+		fieldEntries.filter(([, f]) => f.kind !== 'step' && f.kind !== 'steps')
+	);
+	const childFields = $derived(
+		fieldEntries.filter(([, f]) => f.kind === 'step' || f.kind === 'steps')
+	);
+	const innerScope = $derived(scope);
 	const records = $derived(editor.check?.records ?? []);
 	const canUnwrap = $derived.by(() => {
 		if (!step || !childFields.length) return false;
 		let n = 0;
-		for (const [name, f] of childFields) n += f.kind === 'steps' ? (step[name]?.length ?? 0) : step[name] ? 1 : 0;
+		for (const [name, f] of childFields)
+			n += f.kind === 'steps' ? (step[name]?.length ?? 0) : step[name] ? 1 : 0;
 		return n === 1;
 	});
 
-	let collapsed = $state(false);
 	let picker = $state<Picker | null>(null);
 
 	function fieldHasProblem(name: string): boolean {
@@ -67,11 +63,6 @@
 	function problemText(message: string, problemPath: Path): string {
 		const field = problemPath.length > path.length ? String(problemPath[path.length]) : null;
 		return field && message === 'Field required' ? `${field} is required` : message;
-	}
-
-	function childCount(name: string, field: FieldSpec): number {
-		if (field.kind === 'steps') return step[name]?.length ?? 0;
-		return step[name] ? 1 : 0;
 	}
 
 	function roleOptions(field: FieldSpec) {
@@ -84,7 +75,9 @@
 
 	function onRoleChange(name: string, field: FieldSpec, value: string) {
 		if (value === '__new__') {
-			const behavior = field.requires[0] ?? Object.keys(catalog.behaviors).find((b) => catalog.behaviors[b].bindable);
+			const behavior =
+				field.requires[0] ??
+				Object.keys(catalog.behaviors).find((b) => catalog.behaviors[b].bindable);
 			if (!behavior) return;
 			editor.setAt([...path, name], { role: editor.addRole(name, behavior) });
 			return;
@@ -112,46 +105,51 @@
 	}
 </script>
 
-{#if step && spec}
-	<div
-		id="step-{key}"
-		class="rounded border bg-surface {problems.length ? 'border-crit/50' : 'border-line'}"
-	>
-		<div class="flex items-center gap-1.5 px-2 py-1.5">
-			<button
-				class="rounded p-0.5 text-muted hover:bg-surface-2"
-				onclick={() => (collapsed = !collapsed)}
-				aria-label={collapsed ? 'Expand step' : 'Collapse step'}
-			>
-				{#if collapsed}<CaretRightIcon size={12} />{:else}<CaretDownIcon size={12} />{/if}
-			</button>
-			<span class="mono text-[12.5px] font-semibold" title={spec.doc}>{step.type}</span>
-			{#if problems.length}
-				<span class="text-[11px] font-semibold text-crit">{problems.length} problem{problems.length === 1 ? '' : 's'}</span>
-			{/if}
-			<span class="hidden min-w-0 truncate text-[11.5px] text-muted md:inline">{spec.summary}</span>
-
-			<div class="ml-auto flex shrink-0 items-center gap-1">
-				<input
-					class="lw-input w-28 py-0.5 text-[11px]"
-					value={step.name ?? ''}
-					onchange={(e) => editor.setAt([...path, 'name'], e.currentTarget.value || undefined)}
-					placeholder="label"
-					title="Optional label, shown in run logs"
-					aria-label="Step label"
-				/>
+<section class="inspector space-y-4" aria-label="Selected step" id="step-inspector">
+	{#if step}
+		<div>
+			<p class="mono text-xs text-muted">{step.type}</p>
+			<h2 class="mt-1 text-base font-semibold">{stepTitle(step)}</h2>
+			{#if spec}<p class="mt-1 text-xs leading-relaxed text-muted">
+					{spec.summary.replaceAll('``', '')}
+				</p>{/if}
+		</div>
+		{#if context.breadcrumbs.length}
+			<nav aria-label="Step ancestors" class="flex flex-wrap items-center gap-1 text-xs text-muted">
+				{#each context.breadcrumbs as entry, i}
+					{#if i > 0}<span aria-hidden="true">/</span>{/if}
+					<button
+						class="text-left hover:text-accent hover:underline"
+						onclick={() => editor.selectStep(entry.path)}>{stepTitle(entry.step)}</button
+					>
+				{/each}
+			</nav>
+		{/if}
+		<label class="block"
+			><span class="lw-label">Step label (optional)</span>
+			<input
+				class="lw-input"
+				value={step.name ?? ''}
+				onchange={(e) => editor.setAt([...path, 'name'], e.currentTarget.value || undefined)}
+				placeholder="A name for this step"
+				aria-label="Step label"
+			/>
+		</label>
+		<details class="border-y border-line py-2">
+			<summary class="cursor-pointer text-xs text-ink-2">Step actions</summary>
+			<div class="mt-2 flex flex-wrap gap-1.5">
 				{#if place === 'list'}
 					<button
 						class="lw-btn lw-btn-sm px-1"
 						disabled={index === 0}
 						onclick={() => editor.moveStep(path, -1)}
-						aria-label="Move up"><ArrowUpIcon size={12} /></button
+						aria-label="Move up"><ArrowUpIcon size={12} /> Move up</button
 					>
 					<button
 						class="lw-btn lw-btn-sm px-1"
 						disabled={index === count - 1}
 						onclick={() => editor.moveStep(path, 1)}
-						aria-label="Move down"><ArrowDownIcon size={12} /></button
+						aria-label="Move down"><ArrowDownIcon size={12} /> Move down</button
 					>
 				{/if}
 				<button
@@ -184,28 +182,50 @@
 					<button
 						class="lw-btn lw-btn-sm px-1"
 						onclick={() => editor.removeStep(path)}
-						aria-label={optional || place === 'list' ? 'Remove step' : 'Reset step to an empty sequence'}
-						title={optional || place === 'list' ? 'Remove' : 'Empty this slot'}><XIcon size={12} /></button
+						aria-label={optional || place === 'list'
+							? 'Remove step'
+							: 'Reset step to an empty sequence'}
+						title={optional || place === 'list' ? 'Remove' : 'Empty this slot'}
+						><XIcon size={12} /> {optional || place === 'list' ? 'Remove' : 'Empty'}</button
+					>
+				{/if}
+				{#if place === 'list'}
+					<button
+						class="lw-btn lw-btn-sm"
+						onclick={() =>
+							(picker = {
+								title: `Insert before ${stepTitle(step)}`,
+								pick: (type, role) => editor.insertStep(path.slice(0, -1), type, role, index)
+							})}>Insert before</button
+					>
+					<button
+						class="lw-btn lw-btn-sm"
+						onclick={() =>
+							(picker = {
+								title: `Insert after ${stepTitle(step)}`,
+								pick: (type, role) => editor.insertStep(path.slice(0, -1), type, role, index + 1)
+							})}>Insert after</button
 					>
 				{/if}
 			</div>
-		</div>
-
-		{#if !collapsed}
+		</details>
+		{#if spec}
 			{#if scalarFields.length || problems.length || spec.emits.length}
-				<div class="space-y-1.5 border-t border-line px-3 py-2">
+				<div class="space-y-4">
 					{#each scalarFields as [name, field] (name)}
-						<div class="grid grid-cols-[8.5rem_minmax(0,1fr)] items-center gap-2">
+						<div class="space-y-1.5">
 							<span
-								class="mono truncate text-[11.5px] {fieldHasProblem(name) ? 'font-semibold text-crit' : 'text-ink-2'}"
+								class="block text-xs {fieldHasProblem(name)
+									? 'font-semibold text-crit'
+									: 'text-ink-2'}"
 								title={name}
 							>
-								{name}{field.required ? '' : '?'}
+								{humanize(name)}{field.required ? '' : ' (optional)'}
 							</span>
 
 							{#if field.kind === 'role'}
 								<select
-									class="lw-select mono w-auto min-w-[12rem]"
+									class="lw-select mono min-w-0 w-full"
 									value={step[name]?.role ?? ''}
 									onchange={(e) => onRoleChange(name, field, e.currentTarget.value)}
 									aria-label="{name}: role"
@@ -213,24 +233,44 @@
 									<option value="">— choose a role —</option>
 									{#each roleOptions(field) as opt (opt.role)}
 										<option value={opt.role} disabled={!opt.fits}>
-											{opt.role} ({opt.behavior}){opt.fits ? '' : ` — needs ${field.requires.join(' or ')}`}
+											{opt.role} ({opt.behavior}){opt.fits
+												? ''
+												: ` — needs ${field.requires.join(' or ')}`}
 										</option>
 									{/each}
 									<option value="__new__">New {field.requires[0] ?? ''} role…</option>
 								</select>
+								{#if step[name]?.role}<button
+										class="text-xs text-accent hover:underline"
+										onclick={() => onreference('roles', step[name].role)}>Edit role ↗</button
+									>{/if}
 							{:else if field.kind === 'value' || field.kind === 'values'}
-								<ValueInput {editor} path={[...path, name]} {field} fieldName={name} scope={innerScope} />
+								<ValueInput
+									{editor}
+									path={[...path, name]}
+									{field}
+									fieldName={name}
+									scope={innerScope}
+									{onreference}
+								/>
 							{:else if field.kind === 'value_map'}
 								<div class="space-y-1">
 									{#each mapEntries(name) as [entryKey] (entryKey)}
-										<div class="flex items-center gap-1.5">
+										<div class="flex flex-wrap items-center gap-1.5">
 											<input
 												class="lw-input mono w-32"
 												value={entryKey}
 												onchange={(e) => renameMapKey(name, entryKey, e.currentTarget.value.trim())}
 												aria-label="Setting name"
 											/>
-											<ValueInput {editor} path={[...path, name, entryKey]} {field} fieldName={entryKey} scope={innerScope} />
+											<ValueInput
+												{editor}
+												path={[...path, name, entryKey]}
+												{field}
+												fieldName={entryKey}
+												scope={innerScope}
+												{onreference}
+											/>
 											<button
 												class="lw-btn lw-btn-sm px-1"
 												onclick={() => delete step[name][entryKey]}
@@ -238,7 +278,9 @@
 											>
 										</div>
 									{/each}
-									<button class="lw-btn lw-btn-sm" onclick={() => addMapEntry(name)}>Add setting</button>
+									<button class="lw-btn lw-btn-sm" onclick={() => addMapEntry(name)}
+										>Add setting</button
+									>
 								</div>
 							{:else if field.literal_type === 'bool'}
 								<label class="flex items-center gap-1.5 text-xs">
@@ -250,9 +292,9 @@
 									{step[name] ? 'yes' : 'no'}
 								</label>
 							{:else}
-								<div class="flex items-center gap-2">
+								<div class="flex flex-wrap items-center gap-2">
 									<input
-										class="lw-input mono w-48"
+										class="lw-input mono min-w-0 w-full"
 										value={step[name] ?? ''}
 										list={field.column === 'reads' ? `records-${key}` : undefined}
 										onchange={(e) =>
@@ -289,70 +331,73 @@
 				</div>
 			{/if}
 
-			{#each childFields as [name, field] (name)}
-				<div class="border-t border-line px-3 py-2">
-					{#if childFields.length > 1 || field.kind === 'step'}
-						<div class="mb-1 flex items-center gap-2">
-							<span class="mono text-[11px] text-muted">{name}{field.optional ? '?' : ''}</span>
-							{#if innerScope.length > scope.length}
-								<span class="text-[11px] text-muted">
-									with <span class="mono">{innerScope.slice(scope.length).join(', ')}</span>
-								</span>
-							{/if}
-						</div>
-					{/if}
-					<div class="space-y-1.5 border-l-2 border-line pl-3">
-						{#if field.kind === 'steps'}
-							{#each step[name] ?? [] as child, i (child)}
-								<Self
-									{editor}
-									path={[...path, name, i]}
-									scope={innerScope}
-									place="list"
-									index={i}
-									count={step[name].length}
-								/>
-							{/each}
-						{:else if step[name]}
-							<Self {editor} path={[...path, name]} scope={innerScope} optional={field.optional} />
-						{/if}
-
-						{#if field.kind === 'steps' || !step[name]}
+			{#if context.bindings.length}
+				<div class="border-t border-line pt-3 text-xs">
+					<h3 class="mb-1 text-muted">Inherited row labels</h3>
+					{#each context.bindings as [name, value]}<div class="break-words">
+							<span class="mono">{name}</span> = {value}
+						</div>{/each}
+				</div>
+			{/if}
+			{#if cleanupSummary(step, editor.definition)}
+				<div class="border-t border-line pt-3 text-xs text-ink-2">
+					{cleanupSummary(step, editor.definition)}
+					<p class="mt-1 text-muted">Cleanup also runs after failure or abort.</p>
+				</div>
+			{/if}
+			{#if childFields.length}
+				<div class="space-y-2 border-t border-line pt-3">
+					<h3 class="text-xs text-muted">Enclosed steps</h3>
+					{#each childFields as [name, field]}
+						{#if field.kind === 'step' && step[name]}
 							<button
-								class="flex items-center gap-1 rounded px-1.5 py-1 text-[11.5px] text-accent hover:bg-accent-wash"
+								class="block text-left text-xs text-accent hover:underline"
+								onclick={() => editor.selectStep([...path, name])}
+								>{humanize(name)} · {stepTitle(step[name])} ↗</button
+							>
+						{:else}
+							<button
+								class="lw-btn lw-btn-sm"
 								onclick={() =>
 									(picker = {
-										title: `Add a step to ${step.type}${childFields.length > 1 ? `.${name}` : ''}`,
+										title: `Add to ${stepTitle(step)} · ${name}`,
 										pick: (type, role) => editor.insertStep([...path, name], type, role)
 									})}
+								><PlusIcon size={12} />
+								{field.kind === 'steps'
+									? 'Add step'
+									: `Add ${humanize(name).toLowerCase()} step`}</button
 							>
-								<PlusIcon size={11} /> Add step
-								{#if childCount(name, field) === 0 && field.kind === 'steps'}
-									<span class="text-muted">— empty</span>
-								{/if}
-							</button>
 						{/if}
-					</div>
+					{/each}
 				</div>
-			{/each}
-		{/if}
-	</div>
-
-	{#if picker}
-		<StepPicker
-			{editor}
-			title={picker.title}
-			containersOnly={picker.containersOnly}
-			onclose={() => (picker = null)}
-			onpick={(type, role) => {
-				picker?.pick(type, role);
-				picker = null;
-			}}
-		/>
+			{/if}
+		{:else}<p class="text-sm text-crit">
+				Unknown step type. Replace or remove it using Step actions.
+			</p>{/if}
 	{/if}
-{:else}
-	<div class="rounded border border-crit/50 px-3 py-2 text-xs text-crit">
-		Unknown step type <span class="mono">{step?.type}</span>
-		<button class="lw-btn lw-btn-sm ml-2" onclick={() => editor.removeStep(path)}>Remove</button>
-	</div>
+</section>
+{#if picker}
+	<StepPicker
+		{editor}
+		title={picker.title}
+		containersOnly={picker.containersOnly}
+		onclose={() => (picker = null)}
+		onpick={(type, role) => {
+			picker?.pick(type, role);
+			picker = null;
+		}}
+	/>
 {/if}
+
+<style>
+	.inspector {
+		min-width: 0;
+		overflow-wrap: anywhere;
+		scroll-margin-top: 64px;
+	}
+	.inspector :global(input),
+	.inspector :global(select) {
+		max-width: 100%;
+	}
+</style>

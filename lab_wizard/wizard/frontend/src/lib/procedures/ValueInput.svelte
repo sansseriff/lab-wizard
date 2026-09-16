@@ -8,13 +8,15 @@
 	 */
 	import type { ProcedureEditor } from './editor.svelte';
 	import { type FieldSpec, type Path, getAt, isRef, paramLeaves, parseLiteral } from './model';
+	import { valueSummary } from './presentation';
 
 	let {
 		editor,
 		path,
 		field,
 		fieldName,
-		scope
+		scope,
+		onreference
 	}: {
 		editor: ProcedureEditor;
 		/** Path to the value itself: the step's path plus the field name (or map key). */
@@ -23,15 +25,24 @@
 		fieldName: string;
 		/** Names enclosing sweeps bind here. */
 		scope: string[];
+		onreference?: (kind: 'params' | 'roles', name: string) => void;
 	} = $props();
 
 	const value = $derived(getAt(editor.definition, path));
 	const sweepsOnly = $derived(field.kind === 'values');
 	const mode = $derived(
-		isRef(value, 'param') ? 'param' : isRef(value, 'swept') ? 'swept' : sweepsOnly ? 'list' : 'literal'
+		isRef(value, 'param')
+			? 'param'
+			: isRef(value, 'swept')
+				? 'swept'
+				: sweepsOnly
+					? 'list'
+					: 'literal'
 	);
 	const params = $derived(
-		paramLeaves(editor.definition.params).filter((p) => (sweepsOnly ? p.decl.type === 'sweep' : p.decl.type !== 'sweep'))
+		paramLeaves(editor.definition.params).filter((p) =>
+			sweepsOnly ? p.decl.type === 'sweep' : p.decl.type !== 'sweep'
+		)
 	);
 
 	let promoting = $state(false);
@@ -77,7 +88,13 @@
 			typeof field.default === 'number' &&
 			Number.isInteger(field.default);
 		const type =
-			typeof current === 'boolean' ? 'bool' : typeof current === 'string' ? 'str' : integer ? 'int' : 'float';
+			typeof current === 'boolean'
+				? 'bool'
+				: typeof current === 'string'
+					? 'str'
+					: integer
+						? 'int'
+						: 'float';
 		const created = editor.addParam(name, {
 			type,
 			default: current === undefined ? undefined : current
@@ -95,12 +112,12 @@
 		aria-label="{fieldName}: kind of value"
 	>
 		{#if sweepsOnly}
-			<option value="param">sweep param</option>
+			<option value="param">Sweep parameter</option>
 			<option value="list">fixed list</option>
 		{:else}
-			<option value="literal">literal</option>
-			<option value="param">param</option>
-			<option value="swept" disabled={!scope.length}>swept value</option>
+			<option value="literal">Fixed value</option>
+			<option value="param">Parameter</option>
+			<option value="swept" disabled={!scope.length}>Current sweep value</option>
 		{/if}
 	</select>
 
@@ -146,17 +163,36 @@
 		/>
 	{:else if typeof value === 'boolean'}
 		<label class="flex items-center gap-1.5 text-xs">
-			<input type="checkbox" checked={value} onchange={(e) => editor.setAt(path, e.currentTarget.checked)} />
+			<input
+				type="checkbox"
+				checked={value}
+				onchange={(e) => editor.setAt(path, e.currentTarget.checked)}
+			/>
 			{value ? 'yes' : 'no'}
 		</label>
 	{:else}
 		<input
 			class="lw-input mono w-28"
 			value={literalText(value)}
-			onchange={(e) => editor.setAt(path, e.currentTarget.value === '' ? undefined : parseLiteral(e.currentTarget.value))}
+			onchange={(e) =>
+				editor.setAt(
+					path,
+					e.currentTarget.value === '' ? undefined : parseLiteral(e.currentTarget.value)
+				)}
 			placeholder="value"
 			aria-label="{fieldName}: literal"
 		/>
+	{/if}
+
+	{#if mode === 'param'}
+		<div class="w-full break-words text-xs text-muted">
+			{valueSummary(value, editor.definition)}
+			{#if onreference}<button
+					class="ml-1 text-accent hover:underline"
+					onclick={() => onreference?.('params', (value as { param: string }).param)}
+					>Edit parameter ↗</button
+				>{/if}
+		</div>
 	{/if}
 
 	{#if mode === 'literal' && value !== undefined}
@@ -179,7 +215,7 @@
 				onclick={startPromote}
 				title="Expose this value as a param, with what you typed as its default"
 			>
-				Make param
+				Make parameter
 			</button>
 		{/if}
 	{/if}

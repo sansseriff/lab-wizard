@@ -10,6 +10,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import type { ProcedureEditor } from './editor.svelte';
 	import { type StepSpec, roleFits } from './model';
+	import { stepTitle } from './presentation';
 
 	let {
 		editor,
@@ -43,7 +44,12 @@
 			.filter((s) => !containersOnly || isContainer(s))
 			.filter((s) => {
 				const q = query.trim().toLowerCase();
-				return !q || s.type.includes(q) || s.summary.toLowerCase().includes(q);
+				return (
+					!q ||
+					s.type.includes(q) ||
+					stepTitle({ type: s.type }).toLowerCase().includes(q) ||
+					s.summary.toLowerCase().includes(q)
+				);
 			})
 			.sort((a, b) => a.type.localeCompare(b.type))
 	);
@@ -54,7 +60,10 @@
 			behavior: decl.behavior,
 			steps: visible.filter((s) => {
 				const fields = roleFields(s);
-				return fields.length > 0 && fields.some((f) => f.requires.length && roleFits(catalog, decl.behavior, f.requires));
+				return (
+					fields.length > 0 &&
+					fields.some((f) => f.requires.length && roleFits(catalog, decl.behavior, f.requires))
+				);
 			})
 		}))
 	);
@@ -89,13 +98,18 @@
 		class="flex w-full flex-col items-start rounded px-2.5 py-1.5 text-left hover:bg-accent-wash"
 		onclick={() => onpick(spec.type, role)}
 	>
-		<span class="mono text-[12.5px] font-semibold">{spec.type}</span>
-		<span class="text-[11.5px] text-muted">{spec.summary}</span>
+		<span class="text-[13px] font-semibold">{stepTitle({ type: spec.type })}</span>
+		<span class="text-xs text-muted">{spec.summary.replaceAll('``', '')}</span>
 	</button>
 {/snippet}
 
 <Modal {title} {onclose} width="max-w-3xl">
-	<input class="lw-input mb-3" bind:value={query} placeholder="Search steps" aria-label="Search steps" />
+	<input
+		class="lw-input mb-3"
+		bind:value={query}
+		placeholder="Search steps"
+		aria-label="Search steps"
+	/>
 
 	<div class="grid gap-4 sm:grid-cols-2">
 		{#each byRole as group (group.role)}
@@ -124,7 +138,9 @@
 
 		{#if anyRole.length && Object.keys(editor.definition.roles).length}
 			<section>
-				<h3 class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Any role</h3>
+				<h3 class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+					Any role
+				</h3>
 				{#each anyRole as spec (spec.type)}
 					{@render stepButton(spec, null)}
 				{/each}
@@ -134,7 +150,7 @@
 		{#each needingRole as [behavior, specs] (behavior)}
 			<section>
 				<h3 class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
-					Adds a {behavior} role
+					Adds {behavior} role
 				</h3>
 				{#each specs as spec (spec.type)}
 					{@render stepButton(spec, null)}

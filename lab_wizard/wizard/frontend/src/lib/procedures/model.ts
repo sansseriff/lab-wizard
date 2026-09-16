@@ -101,7 +101,10 @@ export function isParamDecl(entry: ParamDecl | ParamGroup | undefined): entry is
 	return !!entry && typeof (entry as ParamDecl).type === 'string';
 }
 
-export function isRef(value: unknown, key: 'param' | 'swept' | 'role'): value is Record<string, string> {
+export function isRef(
+	value: unknown,
+	key: 'param' | 'swept' | 'role'
+): value is Record<string, string> {
 	return !!value && typeof value === 'object' && !Array.isArray(value) && key in (value as object);
 }
 
@@ -145,8 +148,27 @@ export function paramLeaves(group: ParamGroup, prefix = ''): { name: string; dec
 	return out;
 }
 
+/** Groups and leaves in display order, with paths for the parameter inspector. */
+export function paramNodes(
+	group: ParamGroup,
+	path: string[] = []
+): { path: string[]; entry: ParamDecl | ParamGroup }[] {
+	return Object.entries(group ?? {}).flatMap(([name, entry]) => {
+		const current = [...path, name];
+		return [{ path: current, entry }, ...(isParamDecl(entry) ? [] : paramNodes(entry, current))];
+	});
+}
+
+export function validIdentifier(name: string): boolean {
+	return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
+}
+
 /** Can a role of `behavior` fill a field requiring one of `requires`? */
-export function roleFits(catalog: Catalog, behavior: string | undefined, requires: string[]): boolean {
+export function roleFits(
+	catalog: Catalog,
+	behavior: string | undefined,
+	requires: string[]
+): boolean {
 	if (!requires.length) return true;
 	const satisfies = (behavior && catalog.behaviors[behavior]?.satisfies) || [];
 	return requires.some((r) => satisfies.includes(r));
@@ -155,7 +177,9 @@ export function roleFits(catalog: Catalog, behavior: string | undefined, require
 /** Names a step binds for the steps inside it — a sweep's parameter. */
 export function boundNames(step: Step, spec: StepSpec | undefined): string[] {
 	if (!spec) return [];
-	const hasChildren = Object.values(spec.fields).some((f) => f.kind === 'step' || f.kind === 'steps');
+	const hasChildren = Object.values(spec.fields).some(
+		(f) => f.kind === 'step' || f.kind === 'steps'
+	);
 	if (!hasChildren) return [];
 	return Object.entries(spec.fields)
 		.filter(([name, f]) => f.column === 'records' && typeof step[name] === 'string' && step[name])
