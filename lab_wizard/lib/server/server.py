@@ -14,8 +14,6 @@ The config file is a small YAML:
       # parent of this file's directory (i.e. the workspace config/). The server
       # hosts every configured instrument with an attribute_name.
       config_dir: ..
-      # Optional override: host a single project's resources instead of config_dir.
-      # project_yaml: ../../../projects/foo/foo.yaml
 """
 
 from __future__ import annotations
@@ -35,7 +33,6 @@ from lab_wizard.lib.server.external_state import attach_external_state
 from lab_wizard.lib.server.permissions import PermissionGate, load_permissions
 from lab_wizard.lib.server.registry import InstrumentRegistry
 from lab_wizard.lib.server.wire import WireServer
-from lab_wizard.lib.utilities.model_tree import load_project_config
 
 
 def _load_server_config(path: Path) -> dict[str, Any]:
@@ -60,6 +57,16 @@ def _load_server_config(path: Path) -> dict[str, Any]:
         cfg["server"] = server = {}
     if not isinstance(server, dict):
         raise ValueError(f"'server' in {path} must be a mapping")
+    if server.get("project_yaml"):
+        # Retired with procedure_plan.md 5.4. A project carries no instrument
+        # params any more, so this mode has nothing left to host.
+        raise ValueError(
+            f"The 'project_yaml' hosting mode has been retired (in {path}). A "
+            "project no longer carries a copy of its instruments' params — it "
+            "names them and resolves them against a config tree. Remove that "
+            "line to host this workspace's config/instruments, or set "
+            "'config_dir' to the workspace whose instruments this server owns."
+        )
     if not server.get("bind") and not server.get("ipc", True):
         raise ValueError(
             f"Server config at {path} disables ipc and sets no 'bind', so it has "
@@ -109,18 +116,10 @@ def main(argv: list[str] | None = None) -> int:
         else config_path.parent.parent
     ).resolve()
 
-    if server_cfg.get("project_yaml"):
-        # Override mode: host a single project's resources (eager — opens hardware).
-        project_yaml = (config_path.parent / server_cfg["project_yaml"]).resolve()
-        log.info("Loading project from %s (override mode)", project_yaml)
-        project = load_project_config(project_yaml)
-        log.info("Instantiating instrument tree (this opens hardware connections)")
-        registry = InstrumentRegistry(project.resources)
-    else:
-        # Default mode: host the whole config/instruments tree (lazy — hardware
-        # opens on first request).
-        log.info("Hosting config/instruments tree from %s (lazy)", config_dir)
-        registry = InstrumentRegistry.from_config_dir(str(config_dir))
+    # The server hosts the whole config/instruments tree, lazily: hardware opens
+    # on the first request for it.
+    log.info("Hosting config/instruments tree from %s (lazy)", config_dir)
+    registry = InstrumentRegistry.from_config_dir(str(config_dir))
 
     paths = registry.list_paths()
     log.info("Registered %d paths:", len(paths))
@@ -165,8 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         bind=binds,
         registry=registry,
         gate=gate,
-        # Only config-dir hosting has a servable tree; project_yaml mode does not.
-        config_dir=None if server_cfg.get("project_yaml") else str(config_dir),
+        config_dir=str(config_dir),
     )
 
     def _handle_signal(signum: int, _frame: Any) -> None:

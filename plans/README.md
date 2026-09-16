@@ -7,7 +7,7 @@ plan carries a status block at the top; this table is the summary.
 |---|---|---|
 | [server_plan.md](server_plan.md) | **Mostly complete** | Phase 9 (run claims, parallel dispatch) built. Left: push notifications (6.3), forced `attribute` refs (8.6), per-attribute source selection in the picker, merged-tree edit UI |
 | [database_plan.md](database_plan.md) | **Mostly complete** | `query.py` pandas helpers, the `measurements_full` view, Alembic migrations |
-| [procedure_plan.md](procedure_plan.md) | **In progress** | Phases 0-5 (5 mostly), 6.1-6.4 and 7 built. Next: Phase 5's leftovers (custom-resource flow, retiring the server's `project_yaml` mode, busy instruments in the picker), then 6.5-6.6 |
+| [procedure_plan.md](procedure_plan.md) | **In progress** | Phases 0-5, 6.1-6.4 and 7 built. Next: 6.5 (`Laser` ABC), 6.6 (port `AgilentN7764A`), and the deferred 5.6 provenance |
 | [runner_plan.md](runner_plan.md) | **Not started** | Everything past listing projects — no launch endpoint, no run view, and both plotters are still placeholders |
 
 ## Relationship to `docs/roadmap.md`

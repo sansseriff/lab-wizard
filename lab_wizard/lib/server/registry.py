@@ -1,19 +1,17 @@
 """Instrument tree indexing for the server.
 
-Two construction modes:
+Built from a *params* tree (``from_config_dir`` / ``from_instruments``), which
+is walked without touching hardware: the ``inst://`` path index, the
+``attribute_name`` index, and static per-path metadata (``behavior_abc`` /
+``type_hint``) all come from the params' instrument classes. Live instrument
+objects are instantiated **on first ``resolve``** and cached, so booting the
+daemon (or merely listing/describing what it can provide) never opens a serial
+port or GPIB connection.
 
-- **Lazy, config-dir hosting** (``from_config_dir`` / ``from_instruments``): the
-  server's primary mode. It walks the *params* tree (``load_instruments`` output)
-  without touching hardware, building the ``inst://`` path index, the
-  ``attribute_name`` index, and static per-path metadata (``behavior_abc`` /
-  ``type_hint``) derived from the params' instrument classes. Live instrument
-  objects are instantiated **on first ``resolve``** and cached, so booting the
-  daemon (or merely listing/describing what it can provide) never opens a serial
-  port or GPIB connection.
-
-- **Eager, single-``ResourceConfig`` hosting** (``InstrumentRegistry(resources)``):
-  the original Phase-1 behavior, kept for the optional per-project ``project_yaml``
-  override and for tests. It instantiates every instrument up front.
+There used to be a second, eager mode that instantiated one project's
+``ResourceConfig`` up front, for the ``project_yaml`` hosting override. Both are
+retired: a project names its instruments and resolves them against a config
+tree, so it has no instrument params of its own to host.
 
 Path scheme:
     inst://<root_key>[/<child_key>]*[/channel/<idx>]
@@ -38,7 +36,6 @@ from lab_wizard.lib.instruments.general.transport import (
     DEFAULT_STATE_AUTHORITY,
     DEFAULT_TRANSPORT_SHARING,
 )
-from lab_wizard.lib.utilities.model_tree import ResourceConfig
 
 
 PATH_PREFIX = "inst://"
@@ -135,10 +132,7 @@ def _teardown(path: str, obj: Any) -> None:
 class InstrumentRegistry:
     """Index from ``inst://`` path to instrument object, with lazy hosting."""
 
-    def __init__(self, resources: ResourceConfig) -> None:
-        # Eager mode: instantiate the whole tree from a single ResourceConfig
-        # (override / tests). Lazy mode is built via the ``from_*`` classmethods
-        # below.
+    def __init__(self) -> None:
         self._index: dict[str, Any] = {}
         self._attribute_index: dict[str, str] = {}
         self._descriptions: dict[str, dict[str, Any]] = {}
@@ -147,7 +141,6 @@ class InstrumentRegistry:
         self._root_transports: dict[str, dict[str, Any]] = {}
         self._params: dict[str, Any] = {}
         self._transport_locks: dict[str, threading.RLock] = {}
-        self._build_eager(resources.instruments)
 
     # ------------------------- construction -------------------------
 
@@ -170,67 +163,9 @@ class InstrumentRegistry:
     @classmethod
     def from_instruments(cls, instruments: dict[str, Any]) -> "InstrumentRegistry":
         """Build a lazy registry from a ``{key: ParentParams}`` dict."""
-        self = cls.__new__(cls)
-        self._index = {}
-        self._attribute_index = {}
-        self._descriptions = {}
-        self._factories = {}
-        self._classes = {}
-        self._root_transports = {}
-        self._params = {}
-        self._transport_locks = {}
+        self = cls()
         self._build_lazy(instruments)
         return self
-
-    # ------------------------- eager build -------------------------
-
-    def _build_eager(self, instruments: dict[str, Any]) -> None:
-        for root_key, root_params in instruments.items():
-            if not hasattr(root_params, "create_inst"):
-                raise TypeError(
-                    f"Root params {type(root_params).__name__!s} at key {root_key!r} "
-                    "does not implement create_inst(); top-level instruments must "
-                    "inherit CanInstantiate."
-                )
-            inst = root_params.create_inst()
-            path = f"{PATH_PREFIX}{root_key}"
-            self._register_live(path, inst, root_params)
-            self._index_root_transport(path, root_params)
-            self._walk_eager(inst, root_params, path)
-
-    def _walk_eager(self, inst: Any, params: Any, parent_path: str) -> None:
-        children_params = getattr(params, "children", None)
-        if isinstance(children_params, dict):
-            for child_key, child_params in children_params.items():
-                child_inst = inst.make_child(child_key)
-                child_path = f"{parent_path}/{child_key}"
-                self._register_live(child_path, child_inst, child_params)
-                self._walk_eager(child_inst, child_params, child_path)
-
-        channels = getattr(inst, "channels", None)
-        channel_params = getattr(params, "channels", None)
-        if isinstance(channels, list):
-            for i, channel in enumerate(channels):
-                ch_path = f"{parent_path}/channel/{i}"
-                ch_params = (
-                    channel_params.get(i)
-                    if isinstance(channel_params, dict)
-                    else None
-                )
-                self._register_live(ch_path, channel, ch_params)
-
-    def _register_live(self, path: str, obj: Any, params: Any | None) -> None:
-        if path in self._index:
-            raise ValueError(f"Duplicate path {path!r}")
-        self._index[path] = obj
-        self._classes[path] = type(obj)
-        self._descriptions[path] = {
-            "behavior_abc": _behavior_abc_name(obj),
-            "type_hint": type(obj).__name__,
-        }
-        self._index_attribute(path, params)
-
-    # ------------------------- lazy build -------------------------
 
     def _build_lazy(self, instruments: dict[str, Any]) -> None:
         for root_key, root_params in instruments.items():

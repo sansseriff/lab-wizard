@@ -114,6 +114,9 @@ def _local_source(config_dir: str) -> dict[str, Any]:
         "tree": get_configured_tree(config_dir),
         "metadata": get_instrument_metadata(),
         "attributes": attributes,
+        # Filled in by the caller when this workspace's own server is running:
+        # its claims are claims on this very hardware.
+        "claims": [],
         "editable": True,
         "reachable": True,
         "error": None,
@@ -121,6 +124,42 @@ def _local_source(config_dir: str) -> dict[str, Any]:
 
 
 # --------------------------- server-backed sources ---------------------------
+
+
+def _claims_for(session: Session, name: str) -> list[dict[str, Any]]:
+    """Run claims a server currently holds, as the picker's "busy" answer.
+
+    A claim is a running measurement's exclusive hold on part of the tree
+    (``plans/server_plan.md`` Phase 9). Binding a claimed instrument is allowed
+    — the claim may well end before the new project runs — so this is shown as
+    a warning, not a block. Never fatal: a server too old to know the RPC still
+    lists its instruments.
+    """
+    try:
+        return session.call("claim_list") or []
+    except Exception as exc:  # noqa: BLE001 - claims are an annotation, not the answer
+        logger.debug("Source %s did not report claims: %s", name, exc)
+        return []
+
+
+def _mark_claimed(source: dict[str, Any]) -> None:
+    """Tag each attribute a claim covers with who is holding it."""
+    from lab_wizard.lib.server.claims import overlaps
+
+    units = [
+        (unit, claim.get("holder") or "a run")
+        for claim in source.get("claims", [])
+        for unit in claim.get("units", [])
+    ]
+    if not units:
+        return
+    for attribute in source.get("attributes") or []:
+        path = attribute.get("path")
+        if not path:
+            continue
+        holder = next((h for unit, h in units if overlaps(unit, path)), None)
+        if holder:
+            attribute["claimed_by"] = holder
 
 
 def _machine_source(entry: dict[str, Any], name: str, url: str) -> dict[str, Any]:
@@ -135,6 +174,7 @@ def _machine_source(entry: dict[str, Any], name: str, url: str) -> dict[str, Any
         "tree": [],
         "metadata": {},
         "attributes": [],
+        "claims": [],
         "editable": True,
         "reachable": False,
         "error": None,
@@ -145,6 +185,7 @@ def _machine_source(entry: dict[str, Any], name: str, url: str) -> dict[str, Any
             tree = session.call("tree_get")
             schema = session.call("schema_get")
             source["attributes"] = session.call("list_descriptions")
+            source["claims"] = _claims_for(session, name)
         finally:
             session.close()
     except Exception as exc:  # noqa: BLE001 - a stopped daemon is normal
@@ -157,6 +198,7 @@ def _machine_source(entry: dict[str, Any], name: str, url: str) -> dict[str, Any
     source["held_roots"] = tree.get("held_roots", [])
     source["metadata"] = schema.get("instrument_metadata", {})
     source["reachable"] = True
+    _mark_claimed(source)
     return source
 
 
@@ -176,6 +218,7 @@ def _remote_source(name: str, url: str) -> dict[str, Any]:
         "tree": None,
         "metadata": {},
         "attributes": [],
+        "claims": [],
         "editable": False,
         "reachable": False,
         "error": None,
@@ -184,6 +227,7 @@ def _remote_source(name: str, url: str) -> dict[str, Any]:
         session = Session(url, timeout_ms=_TIMEOUT_MS)
         try:
             source["attributes"] = session.call("list_descriptions")
+            source["claims"] = _claims_for(session, name)
         finally:
             session.close()
     except Exception as exc:  # noqa: BLE001 - an unreachable rack is normal
@@ -192,6 +236,7 @@ def _remote_source(name: str, url: str) -> dict[str, Any]:
         return source
 
     source["reachable"] = True
+    _mark_claimed(source)
     return source
 
 
@@ -237,6 +282,10 @@ def list_instrument_sources(config_dir: str | Path) -> dict[str, Any]:
             own["label"] = "This workspace, through its server"
             own["is_own_server"] = True
             sources.append(own)
+            # The same hardware, under the same paths: an instrument a run holds
+            # is busy whichever of the two sources you pick it from.
+            sources[0]["claims"] = own.get("claims", [])
+            _mark_claimed(sources[0])
             continue
         name = _unique(_workspace_name(entry.get("workspace_path")), taken)
         sources.append(_machine_source(entry, name, url))

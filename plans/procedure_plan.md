@@ -1,7 +1,8 @@
 # Procedure composition plan
 
-> **Status: in progress.** Phases 0-4 and 7, and 6.1-6.4, are built; Phase 5 all
-> but its leftovers. Next: those leftovers, then 6.5-6.6.
+> **Status: in progress.** Phases 0-5 and 7, and 6.1-6.4, are built. Next:
+> 6.5 (`Laser` ABC) and 6.6 (porting `AgilentN7764A`), plus the deferred 5.6
+> provenance.
 
 How a measurement's *choreography* stops being hand-written Python buried in
 `lib/measurements/`, and becomes something composable, storable, and eventually
@@ -417,7 +418,7 @@ and params rows that wrapped in the narrow column.
 
 ---
 
-## Phase 5 — Measurement creation, rewired ✅ mostly done
+## Phase 5 — Measurement creation, rewired ✅ done
 
 ### As built
 
@@ -457,14 +458,34 @@ and params rows that wrapped in the narrow column.
 - **`attributes_under` only matched top-level instruments**, so removing any
   instrument inside a rack reported no affected permission rules. Fixed.
 
-### Not done
+### The leftovers, finished afterwards
+
+- **Custom resources follow the same rule ✅.** Production names every
+  instrument and resolves it with `resource_source_for` against the tree that
+  owns it — local or a server's — copying no params; the project YAML carries
+  `instrument_sources` instead. YAML-expanded is retired here too, which
+  deleted the last hash-traversal generator (`_compose_explicit` and
+  `_compose_pedagogical_yaml_expanded`). Embedded still carries its own copy.
+  A generated custom resource is run against the simulated rack in a test.
+- **The server's `project_yaml` mode is retired ✅**, refused at config load
+  with the reason. It was the only user of the eager `InstrumentRegistry`
+  constructor, so that and its walk are gone; the registry now has one way to
+  be built.
+- **Claimed instruments show as busy in the picker ✅** (server 9.10). Each
+  source carries the claims its server reports; a named leaf says who holds it,
+  and a tree node distinguishes *in use* (the claim covers it) from *part in
+  use* (a claim on one channel inside it). Binding one is still allowed — the
+  claim may end before the project runs — so it is a warning, not a filter.
+  This workspace's own claims annotate the local tree too, since it is the same
+  hardware.
+
+### Still not done
 
 - **5.6 provenance** (recording applied baselines) — deferred, as planned.
-- **5.7 leftovers:** the custom-resource flow still copies params and offers
-  YAML-expanded; the server's `project_yaml` hosting mode is not retired.
-- **Claimed instruments shown busy in the picker** (server 9.10) — not built.
-- **The UI has not been exercised in a browser.** It type-checks and builds;
-  the endpoints behind it are tested.
+- **The custom-resource picker does not show busy instruments**; only
+  measurement creation does.
+- **A channel is not marked individually in the tree**, because the tree draws
+  instruments and picks a channel separately. Its parent reads *part in use*.
 
 
 Largely additive — the existing two-page flow survives.
@@ -533,7 +554,7 @@ Largely additive — the existing two-page flow survives.
   | hash repair on project load | [model_tree.py:246](../lab_wizard/lib/utilities/model_tree.py#L246) |
   | subset copy in custom-resource generation | [custom_resource_generation.py:705](../lab_wizard/wizard/backend/custom_resource_generation.py#L705) |
   | Projects page "Bound to" column | `routes/measurements/projects/+page.svelte` |
-  | eager `InstrumentRegistry(resources)` / server `project_yaml` mode | hosts a project's instrument copy, which no longer exists — retire it |
+  | ✅ eager `InstrumentRegistry(resources)` / server `project_yaml` mode | retired: both hosted a project's instrument copy, which no longer exists |
 
 - **5.8** **Projects are no longer self-contained.** A local project needs its
   workspace's `config/` at run time. `find_workspace_config_dir` already exists
@@ -846,6 +867,7 @@ Everything that has to be created or changed, across this plan and
 | ✅ Procedure codegen (tree walk, role resolution, wizard blocks, refresh) | new | 3 |
 | ✅ `procedures_api.py`: catalog, check, save/delete, YAML, presets endpoints | new | 4 |
 | ✅ Generation switches local instruments to `from_attribute`; stops copying params into project YAML | change | 5.4, 5.5 |
+| ✅ Custom resources: same rule, retired YAML-expanded, no params copy | change | 5.7, 5.10 |
 | Seven readers of the project's instrument copy move to the config tree | change | 5.7 |
 | ✅ Attribute-reference scan across `projects/` + rename/remove guard | new | 5.5 |
 | ✅ Run-time workspace lookup with a clear failure outside a workspace | change | 5.8 |
@@ -859,7 +881,7 @@ Everything that has to be created or changed, across this plan and
 | ✅ Procedures section — seventh sidebar entry, composer, presets, YAML and Python tabs | new | 4 |
 | Procedure + preset selection in measurement creation | change | 5.1, 5.3 |
 | ✅ Live claims and force-release on Hardware ownership | new | server 9.10 |
-| Show a claimed instrument as busy in the measurement picker | new | server 9.10, deferred to 5 |
+| ✅ Show a claimed instrument as busy in the measurement picker | new | server 9.10, deferred to 5 |
 | Attribute rename/remove confirmation listing dependent projects | new | 5.5 |
 
 ### Deferred

@@ -59,7 +59,11 @@
 		path: string;
 		behavior_abc: string | null;
 		type_hint: string | null;
+		/** Set when a run holds this instrument right now. */
+		claimed_by?: string | null;
 	};
+	/** A run's exclusive hold on part of a server's tree. See server_plan Phase 9. */
+	type Claim = { holder: string; units: string[]; restoring: boolean };
 	type Source = {
 		name: string;
 		kind: 'local' | 'machine' | 'remote';
@@ -73,6 +77,7 @@
 		reachable: boolean;
 		error: string | null;
 		is_own_server?: boolean;
+		claims?: Claim[];
 	};
 	type SelectedChoice = {
 		source: string;
@@ -415,6 +420,46 @@
 		}
 		if (cur.channelIndex !== null) activeRequirement = nextIncompleteAfter(activeRequirement);
 	}
+	/** The `inst://` path of a tree node — the same address a claim names.
+	 *
+	 * A node's path is its chain of keys from the root, which is exactly how the
+	 * server builds the paths it reports claims against.
+	 */
+	function instPath(path: TreePathRef[]): string {
+		return `inst://${path.map((p) => p.key).join('/')}`;
+	}
+
+	/** Whether a claim on `unit` covers `target` — the server's rule, in
+	 * `lib/server/claims.py`: a claim covers its whole subtree. */
+	function claimCovers(unit: string, target: string): boolean {
+		return unit === target || target.startsWith(`${unit}/`);
+	}
+
+	/** How this node is busy right now, if it is.
+	 *
+	 * A claim on something *inside* the node (one channel of a counter) is
+	 * phrased differently from one on the node itself: the sibling channels may
+	 * still be free, and on a driver whose channels are claimable that matters.
+	 */
+	function busyHolderAt(source: Source, path: TreePathRef[]): string | null {
+		const target = instPath(path);
+		for (const claim of source.claims ?? []) {
+			const holder = claim.restoring ? `${claim.holder} (being reset)` : claim.holder;
+			if (claim.units.some((unit) => claimCovers(unit, target))) return `in use by ${holder}`;
+			if (claim.units.some((unit) => claimCovers(target, unit))) return `part in use by ${holder}`;
+		}
+		return null;
+	}
+
+	const busyCount = $derived.by(() => {
+		const counts = new Map<string, number>();
+		for (const source of sources) {
+			const units = (source.claims ?? []).reduce((n, c) => n + c.units.length, 0);
+			if (units) counts.set(source.name, units);
+		}
+		return counts;
+	});
+
 	function isCompatibleForCurrent(node: TreeItem, source: Source): boolean {
 		const req = reqByVar(activeRequirement);
 		if (!req) return false;
@@ -901,6 +946,14 @@
 												through server
 											</span>
 										{/if}
+										{#if busyCount.get(source.name)}
+											<span
+												class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
+												title="A measurement is running against these. Binding them is allowed; running at the same time is not."
+											>
+												{busyCount.get(source.name)} in use
+											</span>
+										{/if}
 									</div>
 									<!-- Both land on Configured instruments now; a same-machine
 									     server is a tab there rather than a separate page. -->
@@ -929,6 +982,7 @@
 												isCompatible={(n) => isCompatibleForCurrent(n, source)}
 												isSelected={(_n, p) => isNodeSelectedForCurrent(source, p)}
 												selectionLabel={(_n, p) => selectionLabelForAny(source, p)}
+												busyBadge={(_n, p) => busyHolderAt(source, p)}
 												onSelect={(n, p) => onSelectTreeNode(source, n, p)}
 											/>
 										{/each}
@@ -980,7 +1034,17 @@
 													onclick={() => onSelectAttribute(source, entry)}
 												>
 													<div class="flex-1">
-														<div class="font-mono text-xs font-medium">{entry.attribute_name}</div>
+														<div class="flex flex-wrap items-center gap-1.5">
+															<span class="font-mono text-xs font-medium">{entry.attribute_name}</span>
+															{#if entry.claimed_by}
+																<span
+																	class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
+																	title="A running measurement holds this. You can still bind it — the run may be over by the time this project runs — but the two cannot run at once."
+																>
+																	in use by {entry.claimed_by}
+																</span>
+															{/if}
+														</div>
 														<div class="text-[11px] text-muted">
 															{entry.type_hint ?? 'instrument'}
 															{#if entry.behavior_abc}

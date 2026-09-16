@@ -322,8 +322,8 @@ class WireServer:
         config_dir = self._config_dir
         if config_dir is None:
             raise ValueError(
-                "This server hosts a single project rather than a config tree, "
-                "so it has no editable instrument tree to serve."
+                "This server was started without a config directory, so it has "
+                "no instrument tree to serve."
             )
         return {
             "tree": get_configured_tree(config_dir),

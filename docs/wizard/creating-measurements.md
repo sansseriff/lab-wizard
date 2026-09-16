@@ -132,6 +132,19 @@ rack the server holds, the warning offers that switch.
 The former YAML-expanded teaching style is retired. Projects generated before
 this change carry their own instrument copy and keep running exactly as they did.
 
+**Custom resources** (Instruments → Custom resources) follow the same two
+styles, for the same reasons: a production file names its instruments and
+resolves them against the tree that owns them, and the embedded one carries its
+own copy.
+
+### Instruments a run is holding
+
+An instrument a running measurement has claimed is marked **in use** in the
+picker, with who holds it; a claim on part of an instrument — one input of a
+counter — reads *part in use*. Binding one is still allowed, because the run may
+well be over before this project is run; what cannot happen is the two holding
+it at once. See [run claims](../remote/operations.md).
+
 ### Procedures and presets
 
 Measurements under `lib/measurements` and [procedures](../concepts/procedures.md)

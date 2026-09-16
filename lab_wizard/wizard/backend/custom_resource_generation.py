@@ -20,7 +20,6 @@ from ruamel.yaml import YAML
 
 from lab_wizard.wizard.backend.python_formatting import format_python_code
 from lab_wizard.lib.utilities.config_io import (
-    instrument_hash,
     load_instruments,
     model_to_commented_map,
     save_instruments_to_config,
@@ -33,20 +32,17 @@ from lab_wizard.wizard.backend.instrument_sources import (
     ensure_source_registered,
     resolve_source_url,
 )
+from lab_wizard.wizard.backend.project_generation import _normalized_style
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
     _NodeRef,
     _build_subset_instruments_from_selected_nodes,
     _compose_pedagogical_embedded,
-    _compose_pedagogical_yaml_expanded,
     _create_unique_project_dir,
-    _node_lineage_leaf_to_root,
     _resolve_selection_node,
     _sanitize_identifier,
     _selected_runtime_imports,
     _selected_runtime_type,
-    _short_type_token,
-    _type_info,
     _walk_tree,
 )
 
@@ -121,85 +117,6 @@ def _validate_channel(leaf: _NodeRef, channel_index: int | None, var_name: str) 
             f"Invalid channel_index {channel_index} for {leaf.type}:{leaf.key} "
             f"(resource '{var_name}'); valid range is 0..{num_channels - 1}"
         )
-
-
-def _compose_explicit(
-    selections: list[CustomResourceSelection],
-    var_names: list[str],
-    leaves: list[_NodeRef],
-) -> tuple[list[str], list[tuple[str, str]], list[str], list[str]]:
-    """Build the instantiation lines, imports, and per-selection final exprs.
-
-    Mirrors the logic in :func:`project_generation._compose_setup` but is
-    decoupled from measurement requirements.
-    """
-
-    created_inst: dict[tuple[tuple[str, str], ...], str] = {}
-    instantiation_lines: list[str] = []
-    import_pairs: set[tuple[str, str]] = set()
-    used_inst_names: dict[str, int] = {}
-
-    def _alloc(base: str) -> str:
-        count = used_inst_names.get(base, 0) + 1
-        used_inst_names[base] = count
-        return base if count == 1 else f"{base}_{count}"
-
-    for leaf in leaves:
-        chain = list(reversed(_node_lineage_leaf_to_root(leaf)))  # root -> leaf
-        lineage_id: list[tuple[str, str]] = []
-        for idx, node in enumerate(chain):
-            lineage_id.append((node.type, node.key))
-            key_t = tuple(lineage_id)
-            if key_t in created_inst:
-                continue
-
-            module, params_cls = _type_info(node.type)
-            inst_cls = params_cls[:-6] if params_cls.endswith("Params") else params_cls
-            import_pairs.add((module, inst_cls))
-
-            token = _short_type_token(node.type)
-            var_inst = _alloc(f"{token}_i")
-            created_inst[key_t] = var_inst
-
-            node_key_fields = (
-                node.params.key_fields()
-                if hasattr(node.params, "key_fields")
-                else node.key
-            )
-            node_hash = (
-                instrument_hash(node.type, node_key_fields)
-                if node_key_fields
-                else node.key
-            )
-
-            if idx == 0:
-                instantiation_lines.append(
-                    f"{var_inst} = {inst_cls}.from_config(resource_config, key={node_hash!r})"
-                )
-            else:
-                parent_id = tuple(lineage_id[:-1])
-                parent_inst = created_inst[parent_id]
-                instantiation_lines.append(
-                    f"{var_inst} = {inst_cls}.from_config({parent_inst}, key={node_hash!r})"
-                )
-
-    final_exprs: list[str] = []
-    final_types: list[str] = []
-    for sel, var_name, leaf in zip(selections, var_names, leaves):
-        chain_key = tuple(
-            (n.type, n.key) for n in reversed(_node_lineage_leaf_to_root(leaf))
-        )
-        base_inst = created_inst[chain_key]
-        _validate_channel(leaf, sel.channel_index, var_name)
-        if sel.channel_index is not None:
-            final_exprs.append(f"{base_inst}.channels[{sel.channel_index}]")
-        else:
-            final_exprs.append(base_inst)
-        final_types.append(_selected_runtime_type(leaf, sel.channel_index))
-
-    import_pairs.update(_selected_runtime_imports(selections=selections, leaves=leaves))
-    sorted_imports = sorted(import_pairs)
-    return instantiation_lines, sorted_imports, final_exprs, final_types
 
 
 def _behavior_import(name: str | None) -> tuple[str, str] | None:
@@ -287,37 +204,40 @@ def _indent_block(lines: list[str], spaces: int) -> str:
     return "\n".join(f"{pad}{ln}" for ln in lines)
 
 
-def _needs_resource_config_alias(body_lines: list[str]) -> bool:
-    """Whether to prepend a ``resource_config = ...`` line.
+def _preamble(embedded: bool, import_pairs: list[tuple[str, str]]) -> list[str]:
+    """Imports shared by both file shapes.
 
-    Styles that reference ``resource_config`` but don't define it themselves
-    (production / from_attribute) need it prepended. The pedagogical
-    YAML-expanded style already emits its own ``resource_config = project.resources``
-    line, so we avoid inserting a duplicate.
+    The production file resolves its instruments the way a generated project
+    does — by name, against the workspace's ``config/instruments`` or the server
+    that owns them. The embedded file carries its own params and reads nothing.
     """
-    references = any("resource_config" in line for line in body_lines)
-    already_defined = any(
-        line.lstrip().startswith("resource_config =") for line in body_lines
-    )
-    return references and not already_defined
+    parts = [_HEADER]
+    if not embedded:
+        parts.extend(
+            [
+                "from pathlib import Path",
+                "",
+                "from lab_wizard.lib.client.project_resources import resource_source_for",
+                "from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config",
+            ]
+        )
+    imports_block = _render_imports(import_pairs)
+    if imports_block:
+        parts.append(imports_block)
+    return parts
 
 
-def _resource_config_line(routed: bool) -> str:
-    """How the generated file obtains its resource source.
-
-    A purely local file reads the project's own tree, exactly as before. Once an
-    instrument lives on a server, the same file needs a composite: instruments
-    route per attribute while savers and plotters stay local. Resolving the
-    server by *name* through the address book keeps the file readable and free
-    of hard-coded socket paths.
-    """
-    if not routed:
-        return "resource_config = project.resources"
-    return (
-        "resource_config = CompositeResources.from_project(\n"
-        "        project, server_urls=load_server_urls(Path(__file__).resolve().parent)\n"
-        "    )"
-    )
+def _main_block(call: str, name: str, embedded: bool) -> list[str]:
+    if embedded:
+        return ['if __name__ == "__main__":', f"    {name} = {call}()", f"    print({name})", ""]
+    return [
+        'if __name__ == "__main__":',
+        "    this_file = Path(__file__).resolve()",
+        '    project = load_project_config(this_file.with_suffix(".yaml"))',
+        f"    {name} = {call}(project, resource_source_for(project, this_file.parent))",
+        f"    print({name})",
+        "",
+    ]
 
 
 def _render_dataclass_file(
@@ -328,89 +248,37 @@ def _render_dataclass_file(
     final_exprs: list[str],
     final_types: list[str],
     import_pairs: list[tuple[str, str]],
-    uses_project_yaml: bool = True,
-    uses_cast: bool = False,
-    routed: bool = False,
+    embedded: bool = False,
 ) -> str:
-    imports_block = _render_imports(import_pairs)
     field_lines = [f"{name}: {typ}" for name, typ in zip(var_names, final_types)]
     assign_lines = [
         f"{name}: {typ} = {expr}"
         for name, typ, expr in zip(var_names, final_types, final_exprs)
     ]
-    return_kwargs = [f"{name}={name}," for name in var_names]
-
     body_lines = instantiation_lines + assign_lines
 
-    typing_names: list[str] = []
-    if uses_cast:
-        typing_names.append("cast")
-    parts = [_HEADER, "from dataclasses import dataclass"]
-    if typing_names:
-        parts.append(f"from typing import {', '.join(typing_names)}")
-    if uses_project_yaml:
-        parts.extend(
-            [
-                "from pathlib import Path",
-                "",
-                "from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config",
-            ]
-        )
-        if routed:
-            parts.extend(
-                [
-                    "from lab_wizard.lib.client.composite_resources import CompositeResources",
-                    "from lab_wizard.lib.client.server_discovery import load_server_urls",
-                ]
-            )
-    if imports_block:
-        parts.append(imports_block)
-    parts.extend(
-        ["", "", "@dataclass", f"class {class_name}:", _indent_block(field_lines, 4)]
-    )
-    if uses_project_yaml:
-        parts.extend(
-            [
-                "",
-                "",
-                f"def create_custom_resources(project: ProjectConfig) -> {class_name}:",
-            ]
-        )
-        if _needs_resource_config_alias(body_lines):
-            parts.append(f"    {_resource_config_line(routed)}")
-        parts.append(_indent_block(body_lines, 4))
+    parts = _preamble(embedded, import_pairs)
+    parts.append("from dataclasses import dataclass")
+    parts.extend(["", "", "@dataclass", f"class {class_name}:", _indent_block(field_lines, 4)])
+    if embedded:
+        parts.extend(["", "", f"def create_custom_resources() -> {class_name}:"])
     else:
         parts.extend(
             [
                 "",
                 "",
-                f"def create_custom_resources() -> {class_name}:",
-                _indent_block(body_lines, 4),
+                f"def create_custom_resources(",
+                "    project: ProjectConfig,",
+                "    resource_source: object | None = None,",
+                f") -> {class_name}:",
+                "    resource_config = resource_source or project.resources",
             ]
         )
+    parts.append(_indent_block(body_lines, 4))
     parts.extend(
-        [f"    return {class_name}(", _indent_block(return_kwargs, 8), "    )", "", ""]
+        [f"    return {class_name}(", _indent_block([f"{n}={n}," for n in var_names], 8), "    )", "", ""]
     )
-    if uses_project_yaml:
-        parts.extend(
-            [
-                'if __name__ == "__main__":',
-                "    this_file = Path(__file__).resolve()",
-                '    project = load_project_config(this_file.with_suffix(".yaml"))',
-                "    resources = create_custom_resources(project)",
-                "    print(resources)",
-                "",
-            ]
-        )
-    else:
-        parts.extend(
-            [
-                'if __name__ == "__main__":',
-                "    resources = create_custom_resources()",
-                "    print(resources)",
-                "",
-            ]
-        )
+    parts.extend(_main_block("create_custom_resources", "resources", embedded))
     return "\n".join(parts)
 
 
@@ -421,69 +289,28 @@ def _render_simple_file(
     final_expr: str,
     final_type: str,
     import_pairs: list[tuple[str, str]],
-    uses_project_yaml: bool = True,
-    uses_cast: bool = False,
-    routed: bool = False,
+    embedded: bool = False,
 ) -> str:
-    imports_block = _render_imports(import_pairs)
     body_lines = instantiation_lines + [f"{var_name}: {final_type} = {final_expr}"]
 
-    parts = [_HEADER]
-    if uses_cast:
-        parts.append("from typing import cast")
-    if uses_project_yaml:
-        parts.extend(
-            [
-                "from pathlib import Path",
-                "",
-                "from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config",
-            ]
-        )
-        if routed:
-            parts.extend(
-                [
-                    "from lab_wizard.lib.client.composite_resources import CompositeResources",
-                    "from lab_wizard.lib.client.server_discovery import load_server_urls",
-                ]
-            )
-    if imports_block:
-        parts.append(imports_block)
-    if uses_project_yaml:
-        parts.extend(
-            [
-                "",
-                "",
-                "def create_custom_resource(project: ProjectConfig):",
-            ]
-        )
-        if _needs_resource_config_alias(body_lines):
-            parts.append(f"    {_resource_config_line(routed)}")
-        parts.append(_indent_block(body_lines, 4))
+    parts = _preamble(embedded, import_pairs)
+    if embedded:
+        parts.extend(["", "", "def create_custom_resource():"])
     else:
         parts.extend(
-            ["", "", "def create_custom_resource():", _indent_block(body_lines, 4)]
+            [
+                "",
+                "",
+                "def create_custom_resource(",
+                "    project: ProjectConfig,",
+                "    resource_source: object | None = None,",
+                "):",
+                "    resource_config = resource_source or project.resources",
+            ]
         )
+    parts.append(_indent_block(body_lines, 4))
     parts.extend([f"    return {var_name}", "", ""])
-    if uses_project_yaml:
-        parts.extend(
-            [
-                'if __name__ == "__main__":',
-                "    this_file = Path(__file__).resolve()",
-                '    project = load_project_config(this_file.with_suffix(".yaml"))',
-                "    resource = create_custom_resource(project)",
-                "    print(resource)",
-                "",
-            ]
-        )
-    else:
-        parts.extend(
-            [
-                'if __name__ == "__main__":',
-                "    resource = create_custom_resource()",
-                "    print(resource)",
-                "",
-            ]
-        )
+    parts.extend(_main_block("create_custom_resource", "resource", embedded))
     return "\n".join(parts)
 
 
@@ -496,10 +323,12 @@ def _custom_resource_yaml(
     instruments: dict[str, Any],
     instrument_sources: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Minimal project YAML for a custom resource — only the instruments tree.
+    """Minimal project YAML for a custom resource: which instruments it uses.
 
-    ``ResourceConfig`` defaults ``savers``/``plotters`` to empty dicts, so we
-    emit empty saver/plotter sections alongside the instruments.
+    A production file names them — ``instrument_sources`` says which tree
+    answers for each — and copies no params. The embedded escape hatch is the
+    one that carries ``instruments``. ``ResourceConfig`` defaults
+    ``savers``/``plotters`` to empty dicts, so both emit empty ones.
     """
     return {
         "project": {
@@ -548,16 +377,9 @@ def generate_custom_resource_project(
 ) -> dict[str, Any]:
     if not req.selections:
         raise ValueError("At least one selection is required")
-    if req.generation_style == "explicit":
-        req.generation_style = "production"
-    allowed_styles = {
-        "production",
-        "from_attribute",
-        "pedagogical_yaml_expanded",
-        "pedagogical_embedded",
-    }
-    if req.generation_style not in allowed_styles:
-        raise ValueError(f"Unknown generation_style: {req.generation_style}")
+    # Same two styles the measurement flow offers, and the same retirement
+    # message for the third (procedure_plan.md 5.10).
+    style = _normalized_style(req.generation_style)
     if req.file_style not in ("dataclass", "simple"):
         raise ValueError(f"Unknown file_style: {req.file_style}")
     if req.file_style == "simple" and len(req.selections) != 1:
@@ -602,32 +424,39 @@ def generate_custom_resource_project(
         instrument_sources[sel.attribute] = registered[sel.source]
         leaves.append(None)
 
-    routed = bool(instrument_sources)
-    if routed and req.generation_style != "from_attribute":
-        # Every other style addresses a params tree that has no entry for a
-        # routed instrument.
+    if instrument_sources and style == "pedagogical_embedded":
+        # Embedding a routed instrument's params would build a local object for
+        # hardware a server owns; its attribute_name is the only handle that
+        # means the same thing on both sides of the wire.
         logger.info(
-            "Selection spans %d source(s); generating in from_attribute style "
-            "instead of %s",
+            "Selection spans %d server source(s); generating in production style",
             len(set(instrument_sources.values())),
-            req.generation_style,
         )
-        req.generation_style = "from_attribute"
+        style = "production"
+    embedded = style == "pedagogical_embedded"
 
     var_names = _unique_var_names([sel.variable_name for sel in req.selections])
 
     logger.info(
         "Generating custom resource project: %d selections, style=%s/%s",
         len(req.selections),
-        req.generation_style,
+        style,
         req.file_style,
     )
 
-    if req.generation_style == "production":
-        instantiation_lines, import_pairs, final_exprs, final_types = _compose_explicit(
-            req.selections, var_names, leaves
+    if embedded:
+        instantiation_lines, import_pairs, final_exprs = _compose_pedagogical_embedded(
+            selections=req.selections,
+            var_names=var_names,
+            leaves=leaves,
         )
-    elif req.generation_style == "from_attribute":
+        final_types = [
+            _selected_runtime_type(leaf, sel.channel_index)
+            for sel, leaf in zip(req.selections, leaves)
+        ]
+    else:
+        # Every instrument is named, local ones included: the file resolves them
+        # against the tree that owns them rather than a copy of its own.
         mutations = autogen_attribute_names(
             instruments,
             [
@@ -649,31 +478,9 @@ def generate_custom_resource_project(
         instantiation_lines, import_pairs, final_exprs, final_types = (
             _compose_from_attribute(req.selections, var_names, leaves)
         )
-    elif req.generation_style == "pedagogical_yaml_expanded":
-        instantiation_lines, import_pairs, final_exprs = (
-            _compose_pedagogical_yaml_expanded(
-                selections=req.selections,
-                var_names=var_names,
-                leaves=leaves,
-            )
-        )
-        final_types = [
-            _selected_runtime_type(leaf, sel.channel_index)
-            for sel, leaf in zip(req.selections, leaves)
-        ]
-    else:
-        instantiation_lines, import_pairs, final_exprs = _compose_pedagogical_embedded(
-            selections=req.selections,
-            var_names=var_names,
-            leaves=leaves,
-        )
-        final_types = [
-            _selected_runtime_type(leaf, sel.channel_index)
-            for sel, leaf in zip(req.selections, leaves)
-        ]
-
-    uses_project_yaml = req.generation_style != "pedagogical_embedded"
-    uses_cast = False
+        for sel, leaf in zip(req.selections, leaves):
+            if leaf is not None:
+                instrument_sources[_channel_attribute_name(leaf, sel.channel_index)] = LOCAL
 
     if req.file_style == "dataclass":
         class_name = _sanitize_identifier(req.resource_class_name) or "CustomResources"
@@ -684,9 +491,7 @@ def generate_custom_resource_project(
             final_exprs=final_exprs,
             final_types=final_types,
             import_pairs=import_pairs,
-            uses_project_yaml=uses_project_yaml,
-            uses_cast=uses_cast,
-            routed=routed,
+            embedded=embedded,
         )
     else:
         setup_code = _render_simple_file(
@@ -695,19 +500,22 @@ def generate_custom_resource_project(
             final_expr=final_exprs[0],
             final_type=final_types[0],
             import_pairs=import_pairs,
-            uses_project_yaml=uses_project_yaml,
-            uses_cast=uses_cast,
-            routed=routed,
+            embedded=embedded,
         )
 
-    # Only local selections contribute params; a routed instrument's config is
-    # owned by its server, and a copy here would be a second copy to drift.
-    subset = _build_subset_instruments_from_selected_nodes(
-        [
-            (leaf, sel.channel_index)
-            for sel, leaf in zip(req.selections, leaves)
-            if leaf is not None
-        ]
+    # A production file names its instruments and reads their params from the
+    # tree that owns them, so it copies none. Only the embedded escape hatch
+    # carries a copy, which is the reason to choose it.
+    subset = (
+        _build_subset_instruments_from_selected_nodes(
+            [
+                (leaf, sel.channel_index)
+                for sel, leaf in zip(req.selections, leaves)
+                if leaf is not None
+            ]
+        )
+        if embedded
+        else {}
     )
     prefix = (
         _sanitize_identifier(req.project_prefix or "custom_resource")

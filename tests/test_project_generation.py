@@ -289,40 +289,36 @@ def test_generate_pcr_project_references_the_selected_channel_by_name(tmp_path: 
     assert "cast(" not in setup_text
 
 
-def test_generate_custom_resource_pedagogical_yaml_expanded(tmp_path: Path) -> None:
+def test_custom_resources_refuse_the_retired_yaml_expanded_style(tmp_path: Path) -> None:
+    """Retired here too, and for the same reason as in measurement creation.
+
+    It taught hash traversal into a project's own instrument copy — which a
+    custom resource no longer carries.
+    """
     config_dir = tmp_path / "config"
     projects_dir = tmp_path / "projects"
     _write_test_config(config_dir)
 
-    out = generate_custom_resource_project(
-        config_dir=config_dir,
-        projects_dir=projects_dir,
-        req=GenerateCustomResourceRequest(
-            generation_style="pedagogical_yaml_expanded",
-            selections=[
-                CustomResourceSelection(
-                    variable_name="bias_source",
-                    type="sim928",
-                    key=_SIM928_KEY,
-                    path=[
-                        SelectedNodeRef(type="sim928", key=_SIM928_KEY),
-                        SelectedNodeRef(type="sim900", key=_SIM900_KEY),
-                        SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
-                    ],
-                )
-            ],
-        ),
-    )
-
-    setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
-    ast.parse(setup_text)
-    assert "resource_config = project.resources" in setup_text
-    assert ".from_config(" not in setup_text
-    assert ".create_inst()" in setup_text
-    assert ".from_parent(" in setup_text
-    assert _PROLOGIX_KEY in setup_text
-    assert _SIM900_KEY in setup_text
-    assert _SIM928_KEY in setup_text
+    with pytest.raises(ValueError, match="has been retired"):
+        generate_custom_resource_project(
+            config_dir=config_dir,
+            projects_dir=projects_dir,
+            req=GenerateCustomResourceRequest(
+                generation_style="pedagogical_yaml_expanded",
+                selections=[
+                    CustomResourceSelection(
+                        variable_name="bias_source",
+                        type="sim928",
+                        key=_SIM928_KEY,
+                        path=[
+                            SelectedNodeRef(type="sim928", key=_SIM928_KEY),
+                            SelectedNodeRef(type="sim900", key=_SIM900_KEY),
+                            SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
+                        ],
+                    )
+                ],
+            ),
+        )
 
 
 def test_generate_custom_resource_pedagogical_embedded(tmp_path: Path) -> None:

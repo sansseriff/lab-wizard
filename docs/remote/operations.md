@@ -44,11 +44,14 @@ lab_wizard_server --config config/server/server.yaml
 server:
   bind: tcp://0.0.0.0:12300     # required: ZMQ bind address
   # config_dir: ..              # optional; defaults to the parent of server/
-  # exp_yaml: ../../projects/foo/foo.yaml   # optional single-project override
 permissions:                    # optional; authored by the GUI
   state_defaults: { ... }
   rules: [ ... ]
 ```
+
+A server hosts a workspace's `config/instruments` tree. The old `project_yaml`
+override, which hosted one project's copy of its instruments' params, is retired
+and refused with that reason: a project no longer carries such a copy.
 
 On boot the server logs every registered `inst://` path (using static metadata —
 no hardware opened), every named attribute, and every loaded permission rule.
@@ -117,7 +120,9 @@ nothing to configure — and releases it when the run ends.
 
 **Hardware ownership** in the wizard lists every claim on the machine's servers,
 with a **Force release** for a run that is stuck. Force release is only
-accepted from this machine.
+accepted from this machine. The instrument picker marks a claimed instrument
+**in use**, with who holds it, while you are choosing — binding one is allowed,
+since the run may end before the new project is run.
 
 !!! note "Still basic"
     Requests are handled in parallel — calls on different instruments no longer

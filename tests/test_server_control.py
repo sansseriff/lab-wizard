@@ -150,3 +150,23 @@ def test_stop_managed_children_terminates(config_dir: Path):
     while time.time() < deadline and server_status(config_dir)["running"]:
         time.sleep(0.1)
     assert server_status(config_dir)["running"] is False
+
+
+def test_the_project_yaml_hosting_mode_is_retired_with_its_reason(tmp_path: Path):
+    """A server config that hosts one project's instrument copy no longer loads.
+
+    Projects stopped carrying that copy (procedure_plan.md 5.4), so the mode has
+    nothing to host; refusing at load says so rather than serving an empty tree.
+    """
+    from lab_wizard.lib.server.server import _load_server_config
+
+    path = tmp_path / "server.yaml"
+    YAML(typ="rt").dump(
+        {"server": {"bind": "tcp://127.0.0.1:12300", "project_yaml": "../projects/foo/foo.yaml"}},
+        path,
+    )
+    with pytest.raises(ValueError, match="has been retired"):
+        _load_server_config(path)
+
+    YAML(typ="rt").dump({"server": {"bind": "tcp://127.0.0.1:12300"}}, path)
+    assert _load_server_config(path)["server"]["bind"] == "tcp://127.0.0.1:12300"

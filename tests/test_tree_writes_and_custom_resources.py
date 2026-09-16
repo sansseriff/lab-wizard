@@ -236,11 +236,13 @@ def test_a_routed_custom_resource_records_a_source_and_no_params(tmp_path, fake_
     assert dict(data["resources"]["instrument_sources"]) == {"rack_vsource": "rack"}
 
 
-def test_the_generated_file_builds_a_composite_and_resolves_by_attribute(
-    tmp_path, fake_source
-):
-    """Savers and plotters stay local while instruments route — which is exactly
-    what CompositeResources is for, and why a bare RemoteResources is wrong."""
+def test_the_generated_file_resolves_every_instrument_by_name(tmp_path, fake_source):
+    """One pattern for local and routed alike (procedure_plan.md 5.4).
+
+    The file names its instruments and hands the project to
+    ``resource_source_for``, which answers from this workspace's tree or from
+    the server that owns the instrument. Savers and plotters stay local.
+    """
     config_dir = tmp_path / "config"
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
@@ -260,9 +262,9 @@ def test_the_generated_file_builds_a_composite_and_resolves_by_attribute(
     )
 
     code = Path(out["setup_file"]).read_text(encoding="utf-8")
-    assert "CompositeResources.from_project(" in code
-    assert "load_server_urls(" in code
+    assert "resource_source_for(project, this_file.parent)" in code
     assert "resource_config.from_attribute('rack_vsource')" in code
+    assert "CompositeResources" not in code
     # Typed as the behavior ABC the source reported, not the driver class — the
     # runtime object is a proxy.
     assert "VSource" in code
@@ -315,8 +317,8 @@ def test_a_stale_routed_attribute_is_refused(tmp_path, fake_source):
         )
 
 
-def test_a_purely_local_custom_resource_is_unchanged(tmp_path):
-    """No sources block, no composite — existing behaviour bit for bit."""
+def test_a_local_custom_resource_names_its_instrument_too(tmp_path):
+    """No params copy for a local instrument either: it is named and resolved."""
     from lab_wizard.wizard.backend._generation_common import SelectedNodeRef
 
     config_dir = tmp_path / "config"
@@ -345,7 +347,78 @@ def test_a_purely_local_custom_resource_is_unchanged(tmp_path):
     )
 
     data = _read_yaml(Path(out["yaml_file"]))
-    assert "instrument_sources" not in data["resources"]
+    assert data["resources"]["instruments"] == {}
+    sources = dict(data["resources"]["instrument_sources"])
+    # The name is auto-generated when the instrument has none yet.
+    (name, owner), = sources.items()
+    assert name.startswith("sim928-") and owner == "local"
     code = Path(out["setup_file"]).read_text(encoding="utf-8")
-    assert "CompositeResources" not in code
-    assert "resource_config = project.resources" in code
+    assert f"resource_config.from_attribute({name!r})" in code
+    assert ".from_config(" not in code
+
+
+def test_a_generated_custom_resource_runs_against_the_simulated_rack(tmp_path):
+    """The file is meant to be run, and now resolves through the workspace.
+
+    A custom resource used to read its own copy of the params; it now names its
+    instruments and asks ``resource_source_for`` for them, exactly as a
+    generated project does. Running it is what proves that path is wired.
+    """
+    import subprocess
+    import sys
+
+    from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
+    from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
+    from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
+    from lab_wizard.wizard.backend._generation_common import SelectedNodeRef
+
+    config_dir = tmp_path / "config"
+    projects_dir = tmp_path / "projects"
+    projects_dir.mkdir()
+    rack_key = instrument_hash("fakegpib", "sim://custom-rack")
+    mainframe_key = instrument_hash("fake900", "5")
+    source_key = instrument_hash("fake928", "1")
+    instruments: dict[str, Any] = {
+        rack_key: FakeGpibParams(
+            port="sim://custom-rack",
+            children={
+                mainframe_key: Fake900Params(
+                    gpib_address="5", children={source_key: Fake928Params(slot="1")}
+                )
+            },
+        )
+    }
+    assign_missing_leaf_attribute_names(instruments)
+    save_instruments_to_config(instruments, config_dir)
+    attribute = load_instruments(config_dir)[rack_key].children[mainframe_key].children[source_key].attribute_name
+
+    out = generate_custom_resource_project(
+        config_dir=config_dir,
+        projects_dir=projects_dir,
+        req=GenerateCustomResourceRequest(
+            selections=[
+                CustomResourceSelection(
+                    variable_name="bias",
+                    type="fake928",
+                    key=source_key,
+                    path=[
+                        SelectedNodeRef(type="fake928", key=source_key),
+                        SelectedNodeRef(type="fake900", key=mainframe_key),
+                        SelectedNodeRef(type="fakegpib", key=rack_key),
+                    ],
+                )
+            ],
+        ),
+    )
+    assert f"resource_config.from_attribute({attribute!r})" in Path(out["setup_file"]).read_text()
+
+    setup_path = Path(out["setup_file"])
+    result = subprocess.run(
+        [sys.executable, str(setup_path)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=str(setup_path.parent),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Fake928" in result.stdout, result.stdout

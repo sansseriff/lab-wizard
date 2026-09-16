@@ -10,10 +10,12 @@ lifecycle claiming routed instruments on its own.
 from __future__ import annotations
 
 import socket
+import tempfile
 import threading
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterator
 
 import pytest
@@ -27,6 +29,7 @@ from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
 from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
 from lab_wizard.lib.server.registry import InstrumentRegistry
+from lab_wizard.lib.utilities.config_io import save_instruments_to_config
 from lab_wizard.lib.server.wire import WireServer
 from lab_wizard.lib.task_adapters.lifecycle import RunLifecycle
 
@@ -58,14 +61,25 @@ class LiveServer:
         params = FakeCounterParams(
             ip_address="sim://wire-claims-counter",
             detector_name="wire-claims",
-            channels={0: Keysight53220AChannelParams(), 1: Keysight53220AChannelParams()},
+            channels={
+                # Named, so the server lists them as attributes — which is how
+                # the wizard's picker sees them.
+                0: Keysight53220AChannelParams(attribute_name="counter_a"),
+                1: Keysight53220AChannelParams(attribute_name="counter_b"),
+            },
         )
+        # Written to a config dir as well, so the server serves the same tree the
+        # wizard's picker reads.
+        self.config_dir = Path(tempfile.mkdtemp()) / "config"
+        save_instruments_to_config({"counter": params}, self.config_dir)
         self.registry = InstrumentRegistry.from_instruments({"counter": params})
         self.registry._index["inst://slow"] = Slow()
         self.url = f"tcp://127.0.0.1:{_free_port()}"
         # Short on purpose: an ipc path must fit in a sockaddr (~104 bytes on macOS).
         self.ipc_url = f"ipc:///tmp/lw-claims-{uuid.uuid4().hex[:8]}"
-        self.server = WireServer(bind=[self.url, self.ipc_url], registry=self.registry)
+        self.server = WireServer(
+            bind=[self.url, self.ipc_url], registry=self.registry, config_dir=str(self.config_dir)
+        )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.sessions: list[Session] = []
@@ -244,3 +258,46 @@ def test_the_wizard_lists_claims_and_force_releases_only_from_this_machine(live:
     )
     assert released.status_code == 200
     assert released.json()["released"] == [CH0]
+
+
+def test_the_picker_is_told_which_instruments_a_run_is_holding(live: LiveServer, tmp_path, monkeypatch):
+    """A claimed instrument shows as busy where it is chosen (server_plan 9.10).
+
+    The picker still offers it — a claim may well be over before the new project
+    runs — so this is an annotation, not a filter. The claim is on one input, so
+    only that input and the box above it are marked; the other input is free.
+    """
+    from lab_wizard.wizard.backend import instrument_sources as sources_mod
+    from lab_wizard.wizard.backend.instrument_sources import list_instrument_sources
+
+    config_dir = tmp_path / "config"
+    (config_dir / "instruments").mkdir(parents=True)
+    entry = {
+        "pid": 4242,
+        "workspace_path": str(tmp_path),
+        "config_dir": str(config_dir),
+        "bind": live.url,
+        "ipc": live.ipc_url,
+    }
+    # Over ipc, as the wizard actually reaches a server on this machine: reading
+    # the tree is refused to clients that could be on another machine.
+    monkeypatch.setattr(sources_mod, "list_local_servers", lambda: [entry])
+    monkeypatch.setattr(sources_mod, "local_server_endpoints", lambda _e: [live.ipc_url])
+
+    free = list_instrument_sources(str(config_dir))
+    own = next(s for s in free["sources"] if s.get("is_own_server"))
+    assert own["claims"] == []
+    assert all(a.get("claimed_by") is None for a in own["attributes"])
+
+    live.session().call("claim_acquire", {"paths": [CH0], "holder": "pcr_run"})
+
+    held = list_instrument_sources(str(config_dir))
+    own = next(s for s in held["sources"] if s.get("is_own_server"))
+    assert [c["holder"] for c in own["claims"]] == ["pcr_run"]
+    by_path = {a["path"]: a.get("claimed_by") for a in own["attributes"]}
+    assert by_path[CH0] == "pcr_run"
+    assert by_path[CH1] is None
+
+    # The local tree is the same hardware, so it carries the same answer.
+    local = next(s for s in held["sources"] if s["kind"] == "local")
+    assert [c["holder"] for c in local["claims"]] == ["pcr_run"]

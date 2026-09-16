@@ -42,6 +42,9 @@
 		selectionLabel?: (node: TreeItem, path: TreePathRef[]) => string | null;
 		// Optional, so every existing caller renders unchanged.
 		transportBadge?: (node: TreeItem, path: TreePathRef[]) => TransportBadge | null;
+		/** How this node is busy right now, if it is — a run's claim, phrased by
+		 *  the caller ("in use by pcr_run"). */
+		busyBadge?: (node: TreeItem, path: TreePathRef[]) => string | null;
 		path?: TreePathRef[];
 	};
 
@@ -56,6 +59,7 @@
 		isSelected,
 		selectionLabel,
 		transportBadge,
+		busyBadge,
 		path = []
 	}: Props = $props();
 
@@ -70,6 +74,8 @@
 		isSelectable ? (isSelected ? isSelected(node, currentPath) : false) : false
 	);
 	const selectBadge = $derived(selectionLabel ? selectionLabel(node, currentPath) : null);
+	// Any node can be claimed, not only a root: a run may hold one channel.
+	const busy = $derived(busyBadge ? busyBadge(node, currentPath) : null);
 	// Depth 0 is a root — the only node that owns a transport.
 	const transport = $derived(
 		depth === 0 && transportBadge ? transportBadge(node, currentPath) : null
@@ -123,6 +129,15 @@
 				class="rounded px-1.5 py-0.5 text-[10px] bg-accent-wash text-accent-strong"
 			>
 				{selectBadge}
+			</span>
+		{/if}
+
+		{#if busy}
+			<span
+				class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
+				title="A running measurement holds this, or part of it. You can still bind it — the run may be over by the time this project runs — but the two cannot hold the same instrument at once."
+			>
+				{busy}
 			</span>
 		{/if}
 
@@ -192,6 +207,7 @@
 					{isSelected}
 					{selectionLabel}
 					{transportBadge}
+					{busyBadge}
 					path={currentPath}
 				/>
 			{/each}

@@ -65,7 +65,7 @@
 	let projectPrefix = $state('custom_resource');
 	let resourceClassName = $state('CustomResources');
 	let generationStyle = $state<
-		'production' | 'from_attribute' | 'pedagogical_yaml_expanded' | 'pedagogical_embedded'
+		'production' | 'pedagogical_embedded'
 	>('production');
 	let fileStyle = $state<'dataclass' | 'simple'>('dataclass');
 	let persistAttributeNames = $state(false);
@@ -262,7 +262,7 @@
 				generation_style: generationStyle,
 				file_style: fileStyle,
 				resource_class_name: resourceClassName.trim() || 'CustomResources',
-				persist_attribute_names: generationStyle === 'from_attribute' && persistAttributeNames
+				persist_attribute_names: generationStyle === 'production' && persistAttributeNames
 			};
 			const res = await fetchWithConfig('/api/create-custom-resource-project', 'POST', body);
 			createResult = {
@@ -315,34 +315,27 @@
 					<input type="radio" bind:group={generationStyle} value="production" />
 					<span>
 						<span class="block font-medium">Production</span>
-						<span class="block text-xs text-muted">Short setup file using the project YAML.</span>
-					</span>
-				</label>
-				<label class="flex items-start gap-2">
-					<input type="radio" bind:group={generationStyle} value="from_attribute" />
-					<span>
-						<span class="block font-medium">Remote attribute</span>
-						<span class="block text-xs text-muted">Look up named resources, useful with remote servers.</span>
-					</span>
-				</label>
-				<label class="flex items-start gap-2">
-					<input type="radio" bind:group={generationStyle} value="pedagogical_yaml_expanded" />
-					<span>
-						<span class="block font-medium">Teaching: YAML expanded</span>
-						<span class="block text-xs text-muted">Show hash-key traversal and parent/child creation.</span>
+						<span class="block text-xs text-muted">
+							Names each instrument; its settings come from the config tree that owns it — this
+							workspace's, or a server's — when the file runs.
+						</span>
 					</span>
 				</label>
 				<label class="flex items-start gap-2">
 					<input type="radio" bind:group={generationStyle} value="pedagogical_embedded" />
 					<span>
-						<span class="block font-medium">Teaching: embedded params</span>
-						<span class="block text-xs text-muted">Generate a standalone Python example with params embedded.</span>
+						<span class="block font-medium">Escape hatch: embedded params</span>
+						<span class="block text-xs text-muted">
+							Every setting written into the Python file, to run outside this workspace or to learn
+							from. Breaks when an instrument is readdressed; cannot use instruments through a
+							server.
+						</span>
 					</span>
 				</label>
 			</div>
 		</div>
 
-		{#if generationStyle === 'from_attribute'}
+		{#if generationStyle === 'production'}
 			<label class="flex items-start gap-2 sm:col-span-2">
 				<input type="checkbox" class="mt-0.5" bind:checked={persistAttributeNames} />
 				<span class="text-xs text-ink-2">
