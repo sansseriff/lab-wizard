@@ -15,6 +15,8 @@ may read and call their instruments but never reconfigure them, so they appear
 as a flat list of named leaves where you bind instruments, not here. Register
 those under [Servers → Remote servers](servers.md#remote-servers).
 
+![The configured instrument tree: a simulated GPIB rack with a mainframe, a source and a voltmeter](../assets/screenshots/instruments.png)
+
 ## What the page shows
 
 `GET /api/manage-instruments` returns:
@@ -95,6 +97,8 @@ rack by hand.
 Pick any instruments or channels — from this workspace or through a server —
 give each a variable name, and the generator writes either a dataclass holding
 all of them or a single returned object.
+
+![The custom resources page: codegen style, file style, and the trees to pick from](../assets/screenshots/custom-resources.png)
 
 The two styles are the same two [measurement generation](measurements.md#generation-styles)
 offers, for the same reasons:

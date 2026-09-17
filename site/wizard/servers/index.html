@@ -1315,6 +1315,7 @@ is the four sub-pages and what each is for.</p>
 <h2 id="this-workspace">This workspace<a class="headerlink" href="#this-workspace" title="Permanent link">&para;</a></h2>
 <p>Start, stop and address the server that hosts <strong>this</strong> workspace's
 <code>config/instruments</code> tree.</p>
+<p><img alt="The server page for this workspace, running and owning its hardware" src="../../assets/screenshots/servers.png" /></p>
 <ul>
 <li>A server with no <code>bind</code> address serves only this machine, over an <code>ipc://</code>
   socket derived from the config directory — no port, no address to type, and
@@ -1334,8 +1335,10 @@ setting a bias while the shutter is open". Rules are evaluated against recorded
 instrument state, so they hold whichever client made the call.</p>
 <p>Rules load at server start; changing them requires a restart, which this page
 does for you. The full model is <a href="../../remote/permissions/">Permissions &amp; safety</a>.</p>
+<p><img alt="The permissions rule builder, with a rule denying bias while a shutter is open" src="../../assets/screenshots/permissions.png" /></p>
 <h2 id="hardware-ownership">Hardware ownership<a class="headerlink" href="#hardware-ownership" title="Permanent link">&para;</a></h2>
 <p>Who is using what, right now.</p>
+<p><img alt="Hardware ownership: the transports a server holds and the run claims on them" src="../../assets/screenshots/hardware-ownership.png" /></p>
 <ul>
 <li><strong>Transports</strong> — which racks this machine's servers have open, so a rack
   showing as in use explains a refused local run.</li>

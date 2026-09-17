@@ -1438,6 +1438,7 @@ Python under <code>lib/measurements/</code>, and <a href="../procedures/">proced
 workspace's own and the ones built into lab_wizard. To the person binding
 instruments they are the same thing: roles to fill and parameters to set.</p>
 <p>This page explains how the matching and code generation work.</p>
+<p><img alt="Choosing what to run: hand-written measurements and procedures side by side" src="../../assets/screenshots/measurements-choose.png" /></p>
 <h2 id="how-a-measurement-declares-what-it-needs">How a measurement declares what it needs<a class="headerlink" href="#how-a-measurement-declares-what-it-needs" title="Permanent link">&para;</a></h2>
 <p>A measurement lives in <code>lib/measurements/&lt;name&gt;/</code> and has two files:</p>
 <ul>
@@ -1467,6 +1468,7 @@ reads these annotations and classifies each field:</p>
 <p><code>list[T]</code> annotations are recognized (e.g. <code>savers: list[GenericSaver]</code>), and
 <code>params</code> is skipped.</p>
 <h2 id="matching-resources-to-requirements">Matching resources to requirements<a class="headerlink" href="#matching-resources-to-requirements" title="Permanent link">&para;</a></h2>
+<p><img alt="Binding roles to instruments, with one counter marked as in use by a running measurement" src="../../assets/screenshots/measurements-bind.png" /></p>
 <p><code>GET /api/get-resources/{name}</code> returns, for each requirement, the candidates the
 user can pick from:</p>
 <pre class="mermaid"><code>graph LR
@@ -1607,6 +1609,7 @@ plotter adapters.</p>
 <h2 id="the-projects-list">The projects list<a class="headerlink" href="#the-projects-list" title="Permanent link">&para;</a></h2>
 <p><code>/measurements/projects</code> lists every project this workspace has generated,
 newest first: what it measures, what it is bound to, and when it was made.</p>
+<p><img alt="The projects list, with two generated projects and what each is bound to" src="../../assets/screenshots/projects.png" /></p>
 <p>The wizard does not run them — there is no launch button yet (see the
 <a href="../../roadmap/#running-measurements">Roadmap</a>). A project is a folder you run
 from a terminal, which is also what makes it inspectable and editable.</p>

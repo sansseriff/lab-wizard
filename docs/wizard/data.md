@@ -24,6 +24,8 @@ There is **no file (CSV/HDF5/Parquet) saver** yet. Dropping a
 `FileSaverParams`/`FileSaver` pair into `lib/savers/` would be
 [discovered](../concepts/config-and-discovery.md#type-discovery) automatically.
 
+![The savers page with a configured SQLite saver](../assets/screenshots/savers.png)
+
 ### What a saver receives
 
 A run publishes three kinds of message on its data bus, and
@@ -43,8 +45,11 @@ lets the dataset be sliced arbitrarily afterwards.
 
 ## Database
 
-The Database page browses the SQLite file a `database_saver` writes: runs,
-their parameters, and the measurements under them.
+The Database page lists the database savers this workspace has configured and
+where each one writes.
 
-The schema, what each table means, and how to query it by hand are in
-[Measurement database](../data/database.md).
+!!! warning "Browsing runs is not built yet"
+    The schema exists and runs are being written to it, but nothing in the
+    wizard reads them back. The section exists so the navigation does not need
+    rearranging when it does. Until then, query the file directly — see
+    [Measurement database](../data/database.md).

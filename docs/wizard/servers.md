@@ -16,6 +16,8 @@ is the four sub-pages and what each is for.
 Start, stop and address the server that hosts **this** workspace's
 `config/instruments` tree.
 
+![The server page for this workspace, running and owning its hardware](../assets/screenshots/servers.png)
+
 - A server with no `bind` address serves only this machine, over an `ipc://`
   socket derived from the config directory — no port, no address to type, and
   nothing exposed off the machine. That is the right setting for a workstation
@@ -39,9 +41,13 @@ instrument state, so they hold whichever client made the call.
 Rules load at server start; changing them requires a restart, which this page
 does for you. The full model is [Permissions & safety](../remote/permissions.md).
 
+![The permissions rule builder, with a rule denying bias while a shutter is open](../assets/screenshots/permissions.png)
+
 ## Hardware ownership
 
 Who is using what, right now.
+
+![Hardware ownership: the transports a server holds and the run claims on them](../assets/screenshots/hardware-ownership.png)
 
 - **Transports** — which racks this machine's servers have open, so a rack
   showing as in use explains a refused local run.

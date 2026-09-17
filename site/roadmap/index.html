@@ -1411,6 +1411,8 @@ the current source. Look here before assuming a feature works end to end.</p>
   stores any composed procedure as <code>OTHER</code>, and <code>runs.device_id</code> is always NULL
   because no measurement passes a device. Designed in
   <code>plans/semantic_data_plan.md</code>; not built.</li>
+<li>❌ <strong>No database browser in the GUI.</strong> <code>/data/database</code> lists the configured
+  savers and says so; reading runs back means querying the file.</li>
 <li>❌ <strong>No query layer or migrations.</strong> <code>lib/savers/query.py</code> has pandas helpers
   but pandas is not a dependency; the <code>measurements_full</code> view does not exist,
   and there is no migration framework — new nullable columns are added in place

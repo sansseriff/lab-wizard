@@ -23,6 +23,8 @@ no hardware addressing, no hierarchy, one YAML file per configured instance in
 | `bokeh_plotter` | [`BokehPlotter`](../../lab_wizard/lib/plotters/bokeh_plotter.py) | placeholder — same |
 | — | `StandInPlotter` | deliberate no-op, for tests and scaffolding |
 
+![The plotters page with two configured plotters](../assets/screenshots/plotters.png)
+
 ## How a plotter receives data
 
 A run publishes every observation on its data bus.
