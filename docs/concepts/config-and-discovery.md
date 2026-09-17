@@ -145,6 +145,27 @@ behaviors, and discovery-action specs.
     plotters are flat. Adding a new saver type is literally "drop a
     `SaverParams` subclass with a `type` Literal into `lib/savers/`."
 
+## Flat resources { #flat-resources }
+
+Savers and plotters are configured the same way instruments are, minus the parts
+that only hardware needs. They have no address, no parent and no channels, so
+they are stored **flat**: one YAML file per configured instance under
+`config/savers/` or `config/plotters/`, named by a key you choose, handled by
+[`flat_resource_io.py`](../../lab_wizard/lib/utilities/flat_resource_io.py).
+
+Everything else is shared with instruments:
+
+- a `Params`/runtime pair — `SaverParams`/`GenericSaver`,
+  `PlotterParams`/`GenericPlotter` — with `enabled`, `attribute_name` and
+  `create_inst()`;
+- the same [type discovery](#type-discovery): a subclass with a
+  `type: Literal[...]` dropped into `lib/savers/` or `lib/plotters/` appears in
+  the GUI with nothing to register;
+- the same requirement matching when a measurement asks for one.
+
+The GUI surfaces them in two places, because they are used at different moments:
+[Data](../wizard/data.md) for savers and [Plotters](../wizard/plotters.md).
+
 ## Hardware discovery (probing) { #hardware-discovery }
 
 Distinct from *type* discovery, **hardware discovery** is the GUI's "scan for what's

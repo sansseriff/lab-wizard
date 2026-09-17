@@ -2,12 +2,19 @@
 icon: lucide/flask-conical
 ---
 
-# Creating measurements
+# Measurements
 
-**Create Measurement** (`/get_measurements`) is the core wizard workflow: pick a
-measurement template, assign each resource it needs a configured instrument /
-saver / plotter, and generate a runnable project folder. This page explains how
-the matching and code generation work.
+The **Measurements** section is the core wizard workflow: pick something to run
+(`/measurements/new`), bind each resource it needs to a configured instrument,
+saver and plotter (`/measurements/resources`), and generate a runnable project
+folder. `/measurements/projects` lists what has been generated.
+
+What you pick from is both kinds of measurement side by side: hand-written
+Python under `lib/measurements/`, and [procedures](procedures.md) — this
+workspace's own and the ones built into lab_wizard. To the person binding
+instruments they are the same thing: roles to fill and parameters to set.
+
+This page explains how the matching and code generation work.
 
 ## How a measurement declares what it needs
 
@@ -172,10 +179,13 @@ Every run goes through the same steps, in this order:
 1. **Claim.** Every exclusive transport this process will open is leased for
    the length of the run, and every instrument server on the machine is asked
    whether it already holds one. Either refusal stops the run with the holder's
-   name, before any instrument is opened. Instruments routed to a server are not
-   claimed yet — see `plans/server_plan.md` Phase 9.
-2. **Resolve.** The instruments are constructed — only now, because opening a
-   serial-backed rack before claiming it is the race claims exist to close.
+   name, before any instrument is opened.
+2. **Resolve, then claim what is routed.** The instruments are constructed —
+   only now, because opening a serial-backed rack before claiming it is the race
+   claims exist to close. Instruments that live on a server are then claimed
+   *there*, so two runs cannot drive the same remote instrument at once. Those
+   claims are renewed for the length of the run and released at the end; see
+   [run claims](../remote/operations.md#several-runs-on-one-server-claims).
 3. **Baseline.** `apply_baseline()` writes each bound instrument's configured
    bench settings (coupling, impedance, wavelength, …), so a setting an earlier
    experiment changed cannot carry into this one.
@@ -188,3 +198,12 @@ Every run goes through the same steps, in this order:
 6. **Release** the claims, always.
 
 The script exits non-zero when the run does not succeed.
+
+## The projects list
+
+`/measurements/projects` lists every project this workspace has generated,
+newest first: what it measures, what it is bound to, and when it was made.
+
+The wizard does not run them — there is no launch button yet (see the
+[Roadmap](../roadmap.md#running-measurements)). A project is a folder you run
+from a terminal, which is also what makes it inspectable and editable.

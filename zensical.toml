@@ -47,28 +47,32 @@ Copyright &copy; 2026 The authors
 nav = [
   { "Home" = "index.md" },
   { "Getting started" = "getting-started.md" },
+  { "Using the wizard" = [
+    { "Overview" = "wizard/index.md" },
+    { "Measurements" = "wizard/measurements.md" },
+    { "Procedures" = "wizard/procedures.md" },
+    { "Instruments" = "wizard/instruments.md" },
+    { "Servers" = "wizard/servers.md" },
+    { "Plotters" = "wizard/plotters.md" },
+    { "Data" = "wizard/data.md" },
+  ] },
   { "Concepts" = [
     { "Architecture" = "concepts/architecture.md" },
     { "Instrument model" = "concepts/instrument-model.md" },
+    { "Procedures" = "concepts/procedures.md" },
     { "Config & discovery" = "concepts/config-and-discovery.md" },
     { "Simulated instruments" = "concepts/simulated-instruments.md" },
-    { "Procedures" = "concepts/procedures.md" },
-  ] },
-  { "The wizard GUI" = [
-    { "Overview" = "wizard/index.md" },
-    { "Managing instruments" = "wizard/managing-instruments.md" },
-    { "Creating measurements" = "wizard/creating-measurements.md" },
-    { "Savers & plotters" = "wizard/savers-and-plotters.md" },
   ] },
   { "Remote control" = [
     { "Architecture" = "remote/architecture.md" },
     { "Permissions & safety" = "remote/permissions.md" },
     { "Running & consuming servers" = "remote/operations.md" },
   ] },
-  { "Data" = [
+  { "Reference" = [
     { "Measurement database" = "data/database.md" },
+    { "Roadmap" = "roadmap.md" },
+    { "Releasing" = "releasing.md" },
   ] },
-  { "Roadmap" = "roadmap.md" },
 ]
 
 # With the "extra_css" option you can add your own CSS styling to customize

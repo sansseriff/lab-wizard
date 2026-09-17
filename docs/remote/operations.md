@@ -11,7 +11,7 @@ server, and how to register and consume *other* machines' servers.
 
 ### From the GUI
 
-`/manage_permissions` ("Server & Permissions") starts and stops the server via
+**Servers → This workspace** (`/servers`) starts and stops the server via
 [`server_control.py`](../../lab_wizard/wizard/backend/server_control.py). Two
 lifecycle modes:
 
@@ -58,7 +58,7 @@ no hardware opened), every named attribute, and every loaded permission rule.
 
 ## Consuming remote servers (client side)
 
-`/manage_remote_servers` maintains this machine's **address book** of servers it
+**Servers → Remote servers** (`/servers/remote`) maintains this machine's **address book** of servers it
 wants to *use*, in `config/remote/servers.yaml`, via
 [`remote_servers.py`](../../lab_wizard/wizard/backend/remote_servers.py):
 
@@ -80,7 +80,7 @@ permission gate.
 
 ### How remote instruments reach a measurement
 
-During [measurement creation](../wizard/creating-measurements.md), the wizard
+During [measurement creation](../wizard/measurements.md), the wizard
 calls `list_remote_attributes` to enumerate the named attributes on every
 reachable registered server, each tagged with its `behavior_abc`. Those are
 offered as candidates for any matching requirement, alongside local instruments.

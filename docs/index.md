@@ -11,7 +11,8 @@ It is two things in one repository:
 
 - **A typed instrument library** (`lab_wizard/lib`) — Pydantic-modelled
   instruments with a parent/child/channel hierarchy, a YAML-backed configuration
-  tree, savers, plotters, and a remote-control server/client.
+  tree, composable measurement procedures, savers, plotters, and a
+  remote-control server/client.
 - **A wizard GUI** (`lab_wizard/wizard`) — a local desktop app (FastAPI backend +
   SvelteKit frontend in a `pywebview` window) that guides the lab workflow:
   configure instruments, set safety permissions, and generate runnable
@@ -32,7 +33,7 @@ graph TD
     GUI[Wizard GUI<br/>FastAPI + Svelte] -->|reads/writes| CFG[config/ YAML tree]
     GUI -->|generates| PROJ[projects/ folders<br/>setup.py + project.yaml]
     CFG -->|load_instruments| LIB[Instrument library<br/>Params → Instrument]
-    PROJ -->|load_exp_from_yaml| LIB
+    PROJ -->|resolves instruments by name| CFG
     LIB --> MEAS[Measurement run]
     MEAS --> SAV[Savers<br/>SQLite DB]
     MEAS --> PLOT[Plotters]
@@ -45,13 +46,15 @@ graph TD
 
 | If you want to… | Read |
 |---|---|
-| Install and launch the wizard | [Getting started](getting-started.md) |
+| Install it and run something today | [Getting started](getting-started.md) |
+| Run a measurement with no hardware attached | [Simulated instruments](concepts/simulated-instruments.md) |
+| Bind instruments to a measurement and generate a project | [Measurements](wizard/measurements.md) |
+| Write a measurement without writing Python | [Procedures](wizard/procedures.md) |
+| Configure the hardware this machine drives | [Instruments](wizard/instruments.md) |
+| Share this machine's instruments, or use another's | [Servers](wizard/servers.md), then [Remote control](remote/architecture.md) |
+| Set up safety interlocks | [Permissions](remote/permissions.md) |
+| Store and query measurement data | [Data](wizard/data.md), [Measurement database](data/database.md) |
 | Understand the overall design | [Architecture](concepts/architecture.md) |
 | Understand how an instrument is modelled | [Instrument model](concepts/instrument-model.md) |
 | Understand the on-disk config tree | [Config & discovery](concepts/config-and-discovery.md) |
-| Run a measurement with no hardware attached | [Simulated instruments](concepts/simulated-instruments.md) |
-| Learn the GUI pages and workflows | [The wizard GUI](wizard/index.md) |
-| Run measurements on a remote machine's instruments | [Remote control](remote/architecture.md) |
-| Set up safety interlocks | [Permissions](remote/permissions.md) |
-| Store and query measurement data | [Database](data/database.md) |
 | See what's unfinished | [Roadmap](roadmap.md) |

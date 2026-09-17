@@ -80,38 +80,67 @@ On a headless/SSH host the backend prints all reachable `http://host:8884/`
 URLs and an `ssh -L` tunnel hint, so you can drive the GUI from a browser on your
 laptop.
 
-## The workflow at a glance
+## A first measurement, with no hardware
 
-The GUI home page ([`+page.svelte`](../lab_wizard/wizard/frontend/src/routes/+page.svelte))
-groups tasks by the three roles a workstation plays:
+The fastest way to see the whole loop is to run it against the
+[simulated rack](concepts/simulated-instruments.md) — real drivers, real
+generated code, a simulated detector at the end of the wire. Nothing needs to be
+plugged in.
 
-1. **Build & run measurements** — pick a measurement, assign it compatible
-   instruments/savers/plotters, and generate a project folder.
-2. **This workstation (host)** — configure the instruments this machine drives,
-   and (optionally) run a server exposing them with safety rules.
-3. **Remote** — register other machines whose instruments your measurements can use.
+1. **Instruments** → add a `fakegpib` controller, a `fake900` mainframe under it,
+   and a `fake928` source and `fake970` voltmeter in its slots. Give the
+   mainframe a `detector_name` so a `fake_counter` and a `fake_attenuator` can
+   see the same simulated device. See [Instruments](wizard/instruments.md).
+2. **Measurements → Create** → pick `iv_curve`, bind each role to one of those
+   instruments, and generate the project.
+3. Run it:
 
-A typical first session:
+    ```bash
+    cd projects/<your_project_folder>
+    uv run iv_curve_setup.py
+    ```
 
-1. **Manage Instruments** → add the instruments physically attached to this
-   machine and edit their parameters (ports, slots, GPIB addresses) to match the
-   hardware. See [Managing instruments](wizard/managing-instruments.md).
-2. **Create Measurement** → choose a measurement template (e.g. `iv_curve`),
-   assign each required resource a configured instrument, saver, and plotter, and
-   generate the project. See [Creating measurements](wizard/creating-measurements.md).
-3. Run the generated project:
-   ```bash
-   cd projects/<your_project_folder>
-   python <measurement>_setup.py
-   ```
+You should get a curve that is flat until the detector switches and rises after
+— because the simulation solves the detector's actual IV relation, not a
+lookup table.
 
-Each generated project is a timestamped folder under `projects/` containing:
+Then try the same with `mcr_curve`, which is a [procedure](wizard/procedures.md)
+rather than hand-written Python: same binding flow, but you can open it in the
+composer afterwards and see the step tree it ran.
 
-- a `*.yaml` file with the selected subset of instrument/saver/plotter config, and
-- a generated `*_setup.py` that initializes and wires those resources for the
-  measurement, and
-- a copied `<measurement>.py` containing the editable procedure that the setup
-  runs.
+## The sections, briefly
+
+Everything in the GUI lives under seven sections. What each is for:
+
+| Section | Use it to | Page |
+|---|---|---|
+| **Overview** | see what this workstation is doing: is a server running, who owns the hardware | — |
+| **Measurements** | pick something to run, bind instruments to it, generate a project; list what you have generated | [Measurements](wizard/measurements.md) |
+| **Procedures** | write a measurement as roles, parameters and a step tree instead of Python | [Procedures](wizard/procedures.md) |
+| **Instruments** | configure the hardware this workspace drives; build standalone resource files | [Instruments](wizard/instruments.md) |
+| **Servers** | share this machine's instruments, set safety rules, see who holds what, reach other machines | [Servers](wizard/servers.md) |
+| **Plotters** | configure plotters (scaffolding today) | [Plotters](wizard/plotters.md) |
+| **Data** | configure savers and browse what runs wrote | [Data](wizard/data.md) |
+
+A first session with real hardware is steps 1 and 2 above with your own
+instruments: add them, match their ports, slots and GPIB addresses to the
+bench, then create a measurement against them.
+
+## What a generated project contains
+
+A timestamped folder under `projects/`:
+
+| File | Is |
+|---|---|
+| `<project>.yaml` | the measurement's parameters, which savers and plotters it uses, and **which instruments by name** — not a copy of their settings |
+| `<measurement>_setup.py` | the generated file you run: it resolves those names against the config tree, claims what it needs, and hands the run its resources |
+| `<measurement>.py` | the procedure itself — editable Python |
+
+Instrument settings deliberately stay in `config/instruments`, so readdressing a
+rack or fixing a bench setting reaches every project without regenerating
+anything. A project that must be self-contained — to run on a machine with no
+workspace — is generated in the
+[embedded style](wizard/measurements.md#generation-styles) instead.
 
 ## Repository and generated workspace layout
 
@@ -127,7 +156,9 @@ lab_wizard_repo/
 ├── lab_wizard/
 │   ├── lib/                 # the instrument library (importable, no GUI)
 │   │   ├── instruments/     #   instrument models (general/ + per-vendor dirs)
-│   │   ├── measurements/    #   measurement classes + setup templates
+│   │   ├── measurements/    #   hand-written measurements + setup templates
+│   │   ├── procedures/      #   procedure definitions, step schemas, codegen
+│   │   ├── task_adapters/   #   steps, run lifecycle, saver/plotter sinks
 │   │   ├── savers/          #   data persistence (DatabaseSaver, schema)
 │   │   ├── plotters/        #   plotting (scaffolding — see Roadmap)
 │   │   ├── server/          #   remote-control server (ZMQ + JSON-RPC)

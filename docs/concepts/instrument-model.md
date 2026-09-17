@@ -99,7 +99,7 @@ Each behavior also ships a **stand-in** (`StandInVSource`, `StandInVSense`,
 templates and in tests. Stand-ins set `ignore_in_cli = True` so discovery skips
 them.
 
-Behavior ABCs are also the matching currency for both [instrument selection](../wizard/creating-measurements.md)
+Behavior ABCs are also the matching currency for both [instrument selection](../wizard/measurements.md)
 and the [permission gate](../remote/permissions.md): the server reports each
 exposed instrument's `behavior_abc`, and that's matched against a measurement's
 required resource types.
@@ -175,8 +175,8 @@ Two consequences for procedures:
   `WithSettings`, which reads each setting back, applies the override, and
   restores it on exit — including on failure and abort.
 
-See [`plans/procedure_plan.md`](../../plans/procedure_plan.md) for the full
-rationale.
+The repository's `plans/procedure_plan.md` carries the full rationale; it is a
+working document rather than part of this site.
 
 ## A worked example: DBay → Dac4D → channels
 

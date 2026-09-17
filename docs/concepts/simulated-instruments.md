@@ -102,9 +102,11 @@ against the model at each attenuation.
 
 ## Using them
 
-Add a `fakegpib` in Manage Instruments — its "scan" action offers a simulated
-controller rather than probing USB — then add a `fake900` under it and
-`fake928`/`fake970` modules in slots, exactly as for a real rack. Generate a
+Add a `fakegpib` under [Instruments](../wizard/instruments.md) — its "scan"
+action offers a simulated controller rather than probing USB — then add a
+`fake900` under it and `fake928`/`fake970` modules in slots, exactly as for a
+real rack. A `fake_counter` and a `fake_attenuator` are top-level instruments
+that join the same simulated detector by sharing its `detector_name`. Generate a
 measurement against them and the project runs on any machine.
 
 The model's fixed resistor matches

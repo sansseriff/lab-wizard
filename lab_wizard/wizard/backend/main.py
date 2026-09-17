@@ -1489,8 +1489,8 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
         "Lab Wizard",
         url=url_to_load,
         resizable=True,
-        width=1200,
-        height=700,
+        width=1300,
+        height=900,
         frameless=FRAMELESS,
         easy_drag=False,
     )

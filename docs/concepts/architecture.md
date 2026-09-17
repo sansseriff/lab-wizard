@@ -87,19 +87,38 @@ sequenceDiagram
     U->>W: Create measurement (pick resources)
     W->>C: load_instruments + load_resources
     W->>P: write project.yaml + <m>_setup.py + <m>.py
-    U->>R: python <m>_setup.py
-    R->>P: load_exp_from_yaml(project.yaml)
-    R->>R: build instruments, run, save/plot
+    U->>R: uv run <m>_setup.py
+    R->>P: read project.yaml (params + instrument names)
+    R->>C: resolve those names against config/instruments
+    R->>R: claim, apply baseline, run, save/plot
 ```
 
-There are two ways the same instrument config reaches a running measurement:
+**A project names its instruments; it never copies their settings.** The YAML
+records each instrument's `attribute_name` and where it lives, and the generated
+setup file asks for it by that name:
 
-- **Local / explicit:** the generated `*_setup.py` calls
-  `load_exp_from_yaml(project.yaml)` and constructs each instrument directly
-  (`Sim928.from_config(resources, key=...)`).
-- **Remote / `from_attribute`:** the same setup file connects to an instrument
-  **server** with `RemoteResources.connect(url)` and asks for instruments by name
-  (`resources.from_attribute("bias_source")`). See [Remote control](../remote/architecture.md).
+```python
+voltage_source = resources.from_attribute("sim928-brave-otter")
+```
+
+Which tree answers is the only difference between local and remote:
+
+- **local** — this workspace's `config/instruments`, opened by the project's own
+  process;
+- **through a server** — the workspace that owns the instrument answers, and the
+  project gets a [remote proxy](../remote/architecture.md). Chosen per
+  instrument, including this workspace's own server.
+
+So readdressing a rack or fixing a bench setting reaches every project without
+regenerating anything, and one project can hold a local voltmeter while routing
+a counter that a server already shares. The measurement code is identical in
+every case because it consumes instruments through **behavior ABCs**
+(`VSource`, `VSense`, `Counter`, `Attenuator`, `Laser`) that real instruments
+and proxies both satisfy.
+
+The exception is the [embedded generation style](../wizard/measurements.md#generation-styles),
+which writes every setting into the Python so the project can run with no
+workspace at all.
 
 The measurement code is identical in both cases because it consumes instruments
 through **behavior ABCs** (`VSource`, `VSense`, `Counter`) that both real

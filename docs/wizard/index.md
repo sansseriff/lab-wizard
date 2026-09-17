@@ -30,38 +30,48 @@ graph LR
 - On startup the backend pre-warms the instrument-metadata cache in a thread so
   the first page load is instant.
 
-The frontend never touches the filesystem. Every action is an `/api/*` call that
-delegates to a backend function in `wizard/backend` or `lib/utilities`.
+## The sections
 
-## Page map
+The left rail has seven sections, each a noun rather than a task. These docs
+mirror them.
 
-The home page ([`+page.svelte`](../../lab_wizard/wizard/frontend/src/routes/+page.svelte))
-groups pages by [workstation role](../concepts/architecture.md#the-three-workstation-roles):
-
-| Page | Route | Purpose | Docs |
+| Section | Route | What it is for | Page |
 |---|---|---|---|
-| Create Measurement | `/get_measurements` | Pick a measurement, assign resources, generate a project | [Creating measurements](creating-measurements.md) |
-| Create Custom Resource | `/create_custom_resource` | Build a reusable instrument/component project programmatically | — |
-| Manage Savers | `/manage_savers` | Configure savers (DB) used by measurements | [Savers & plotters](savers-and-plotters.md) |
-| Manage Plotters | `/manage_plotters` | Configure plotters | [Savers & plotters](savers-and-plotters.md) |
-| Manage Instruments | `/manage_instruments` | Add/reset/remove/discover local hardware | [Managing instruments](managing-instruments.md) |
-| Server & Permissions | `/manage_permissions` | Start/stop the server, author safety rules | [Permissions](../remote/permissions.md), [Operations](../remote/operations.md) |
-| Remote Servers | `/manage_remote_servers` | Register remote servers to consume | [Operations](../remote/operations.md) |
+| Overview | `/` | what this workstation is doing right now: server state, hardware owner, recent projects | — |
+| Measurements | `/measurements/new`, `/measurements/projects` | pick something to run, bind instruments to it, generate a project; then list what has been generated | [Measurements](measurements.md) |
+| Procedures | `/procedures` | write and edit procedures — roles, parameters, step tree | [Procedures](procedures.md) |
+| Instruments | `/instruments`, `/instruments/custom` | configure the hardware this workspace owns; build standalone resource files | [Instruments](instruments.md) |
+| Servers | `/servers`, `/servers/permissions`, `/servers/hardware`, `/servers/remote` | run a server, author safety rules, see who holds what, register servers elsewhere | [Servers](servers.md) |
+| Plotters | `/plotters` | configure plotters | [Plotters](plotters.md) |
+| Data | `/data/savers`, `/data/database` | configure savers; browse what runs wrote | [Data](data.md) |
 
 ## API surface
 
-All endpoints are declared in [`backend/main.py`](../../lab_wizard/wizard/backend/main.py).
-The most important:
+Every endpoint is declared in
+[`backend/main.py`](../../lab_wizard/wizard/backend/main.py). The ones worth
+knowing:
 
-| Endpoint | Backend function | Notes |
-|---|---|---|
-| `GET /api/manage-instruments` | `get_configured_tree` + `get_instrument_metadata` | tree + per-type metadata |
-| `POST /api/manage-instruments/add` | `add_instrument_chain` | leaf-first parent chain |
-| `POST /api/manage-instruments/discover` | `DiscoveryAction.run` | [hardware probing](../concepts/config-and-discovery.md#hardware-discovery) |
-| `GET /api/get-measurements` | `get_measurements` | available measurement templates |
-| `GET /api/get-resources/{name}` | `reqs_from_measurement` + matching | required resources + candidates |
-| `POST /api/create-measurement-project` | `generate_measurement_project` | writes the project folder |
-| `GET/PUT /api/permissions` | `permissions_api` | rule vocabulary + the `permissions:` block |
-| `*/api/server/*` | `server_control` | server lifecycle (start/stop/restart/bind) |
-| `*/api/remote-servers*` | `remote_servers` | the remote address book |
-| `GET/POST/... /api/manage-{savers,plotters}` | `flat_resource_io` | generated CRUD endpoints |
+| Endpoint | Does |
+|---|---|
+| `GET /api/manage-instruments` | the configured tree plus per-type metadata |
+| `POST /api/manage-instruments/add` | add an instrument, parent chain and all |
+| `POST /api/manage-instruments/discover` | [probe hardware](../concepts/config-and-discovery.md#hardware-discovery) |
+| `GET /api/instrument-sources` | every place an instrument can come from — this workspace, its own server, other machines, remote servers — with the claims each holds |
+| `GET /api/measurement-choices` | hand-written measurements and procedures, side by side |
+| `GET /api/get-resources/{name}?kind=` | what a measurement or procedure requires, and what could fill it |
+| `POST /api/create-measurement-project` | write the project folder |
+| `GET /api/procedures`, `GET/PUT/DELETE /api/procedures/{name}` | the procedure library |
+| `GET /api/procedures/catalog` | step types, behaviors, and which instruments could fill each |
+| `POST /api/procedures/check` | every problem with a definition being edited, each with the step it is about, plus the Python it generates |
+| `GET/PUT/DELETE /api/procedures/{name}/presets/...` | parameter presets |
+| `GET/PUT /api/permissions` | the rule vocabulary and the `permissions:` block |
+| `/api/server/*` | server lifecycle (start, stop, restart, bind) |
+| `GET /api/local-servers/claims`, `POST .../force-release` | run claims on this machine's servers |
+| `/api/remote-servers*` | the address book |
+| `/api/manage-{savers,plotters}*` | flat-resource CRUD |
+
+## What the frontend may and may not do
+
+The frontend never touches the filesystem. Every action is an `/api/*` call that
+delegates to `wizard/backend` or `lib/`. That is what keeps the GUI and a
+hand-driven workflow honest about editing the same YAML.

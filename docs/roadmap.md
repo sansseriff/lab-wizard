@@ -4,80 +4,94 @@ icon: lucide/map
 
 # Roadmap / what still needs work
 
-An honest inventory of what is **scaffolded but not finished**, derived from the
-current source. This is the place to look before assuming a feature works
-end-to-end.
-
-## Savers
-
-- ✅ **`DatabaseSaver`** (SQLite) is complete and working — full schema, one row
-  per integration. See [Database](data/database.md).
-- ❌ **No file saver.** There is no CSV / HDF5 / Parquet saver. The
-  [`saver.py`](../lab_wizard/lib/savers/saver.py) docstring and the
-  [`flat_resource_io`](../lab_wizard/lib/utilities/flat_resource_io.py) examples
-  both reference a file/CSV saver, but none exists. A `FileSaverParams(SaverParams)`
-  + `FileSaver(GenericSaver)` dropped into `lib/savers/` would be auto-discovered.
-- ❌ **No query/analysis layer.** `plans/database_plan.md` describes a `query.py` of
-  pandas helpers and a `measurements_full` SQL view; neither is implemented. No
-  Alembic migrations are set up either.
+An honest inventory of what is **scaffolded but not finished**, checked against
+the current source. Look here before assuming a feature works end to end.
 
 ## Plotters
 
-- ❌ **No working plotter.** Both [`MplPlotter`](../lab_wizard/lib/plotters/mpl_plotter.py)
-  and [`BokehPlotter`](../lab_wizard/lib/plotters/bokeh_plotter.py) are
-  **placeholders** — they store the last payload and print; they do not render
-  anything. `StandInPlotter` is a deliberate no-op. The `GenericPlotter` ABC
-  (`plot`, `save_plot`) is in place, so a real implementation is a matter of
-  filling in the bodies.
+- ❌ **No working plotter.** Both
+  [`MplPlotter`](../lab_wizard/lib/plotters/mpl_plotter.py) and
+  [`BokehPlotter`](../lab_wizard/lib/plotters/bokeh_plotter.py) store the last
+  payload and print; nothing renders. `StandInPlotter` is a deliberate no-op.
+  The wiring around them is real — a run publishes observations and
+  `PlotterSink` forwards each one — so a working plotter is two method bodies.
 
-## Measurement run-logic wiring
+## Savers and data
 
-- ⚠️ **Measurements don't yet use the savers/plotters they're given.** The wizard
-  correctly plumbs `savers`/`plotters` into the generated `Resources` dataclass,
-  but the measurement classes don't call `saver.start_run` / `write_measurement`
-  / `end_run` or `plotter.plot`. [`iv_curve.py`](../lab_wizard/lib/measurements/iv_curve/iv_curve.py)
-  also references legacy attributes that no longer exist on its `Resources`
-  (`self.voltage_plotter`, `self.data_handler`, `self.params.enable_plotting`,
-  `voltage_sequence()`, `set_output()`). The measurement classes need to be
-  rewritten against the current `Resources` contract.
-- ⚠️ **Only `iv_curve` and `pcr_curve` use the new template format.** They have
-  the `# wizard:<block>:start/end` markers the generator expects. `mcr_curve`
-  still uses the old `{{jinja}}`-style template and is **not** wizard-compatible.
+- ✅ **`DatabaseSaver`** (SQLite) works: a `runs` row per run, a `measurements`
+  row per observation, the measurement's parameters and the instruments'
+  configured params both recorded. See [Measurement database](data/database.md).
+- ❌ **No file saver.** No CSV / HDF5 / Parquet. A
+  `FileSaverParams`/`FileSaver` pair dropped into `lib/savers/` would be
+  discovered automatically.
+- ⚠️ **The stored data does not say what it means.** Nothing records which
+  columns are axes and which are readings, so every consumer guesses from
+  names. Related: one point of a curve can span two rows (a count and a voltage
+  read are separate observations), `runs.run_type` is a five-value enum that
+  stores any composed procedure as `OTHER`, and `runs.device_id` is always NULL
+  because no measurement passes a device. Designed in
+  `plans/semantic_data_plan.md`; not built.
+- ❌ **No query layer or migrations.** `lib/savers/query.py` has pandas helpers
+  but pandas is not a dependency; the `measurements_full` view does not exist,
+  and there is no migration framework — new nullable columns are added in place
+  by `schema.add_missing_columns`.
 
-## Server robustness (remote control)
+## Procedures
 
-The server works for the happy path but is missing production hardening
-(see [`lib/server/`](../lab_wizard/lib/server/)):
+- ✅ Definitions, the step catalog, code generation, presets, and the composer
+  all work; a saved procedure always generates.
+- ❌ **No wavelength sweep.** `Laser` reports its wavelength but tuning is not
+  in the behavior contract, because nothing sweeps it yet.
+- ❌ **No undo in the composer**, and reordering is move-up/move-down rather
+  than drag and drop.
 
-- ❌ **Concurrency.** It's a single-threaded poll loop — one slow `set_voltage`
-  blocks all RPCs. The intended contract is *same shared connection → serialized
-  in arrival order; different connections → parallel*, keyed on the **root path
-  segment** (the shared transport), since channels under one root share one
-  serial/HTTP connection.
-- ❌ **Graceful shutdown.** Stopping the server closes the socket but does not
-  disconnect instruments in dependency order.
-- ❌ **Client reconnect.** `Session` is a one-shot connect; no reconnect/backoff.
-- ❌ **Hot-reload of permissions.** Editing rules requires a server **restart**
-  (the GUI does this); there's no live `reload-permissions`.
-- ❌ **Binary bulk-data path.** Returns are JSON only; large arrays (e.g. a future
-  `get_counts()`) should ride pyleco's binary payload frames.
+## Running measurements
 
-## Misc / known rough edges
+- ❌ **The wizard cannot run a project.** It generates the folder; you run the
+  setup file yourself from a terminal. There is no launch endpoint, no run view,
+  and no live progress — see `plans/runner_plan.md`.
+
+## Server (remote control)
+
+The server handles concurrent runs, but a few things remain:
+
+- ✅ **Parallel dispatch** — requests are handled on worker pools, so a slow
+  `set_voltage` no longer blocks unrelated calls, and two runs can interleave on
+  different channels of one instrument under [run claims](remote/operations.md).
+- ✅ **Graceful shutdown** releases instruments; ✅ the client reconnects.
+- ❌ **No hot-reload of permissions.** Editing rules needs a server restart,
+  which the GUI does for you.
+- ❌ **No push notifications.** A client polls; it is not told when state it
+  cares about changed.
+- ❌ **No binary bulk-data path.** Returns are JSON only; large arrays should
+  ride pyleco's binary payload frames.
+- ⚠️ **A client without a claim can still write** to an unclaimed instrument.
+  Claims keep runs off each other, they do not lock out an interactive session.
+
+## Instruments
+
+- ⚠️ **`AgilentN7764A` is invisible to the wizard.** Its legacy
+  `AgilentN7764AConfig` has no `type` literal, no `resource_class()` and no
+  `create_inst()`, so discovery cannot see it. Porting it to a
+  `ChannelProvider` with `Attenuator` channels is `plans/procedure_plan.md` 6.6.
+- ⚠️ **Prologix GPIB scanning** can be slow and, on some setups, report
+  instruments at the wrong address due to response desync.
+
+## Misc
 
 - The legacy CLI [`wizard/wizard.py`](../lab_wizard/wizard/wizard.py) is an old
-  interactive setup tool, superseded by the GUI; it imports modules that no
+  interactive setup tool superseded by the GUI; it imports modules that no
   longer exist and is effectively dead.
-- Prologix GPIB bus scanning can be slow and (on some setups) report instruments
-  at the wrong address due to response desync — see `.claude/prologix_scan_slowness.md`.
 
 ## How to extend cleanly
 
-The architecture makes most additions drop-in, thanks to
+Most additions are drop-in, thanks to
 [source-scanning discovery](concepts/config-and-discovery.md#type-discovery):
 
 | To add… | Do this |
 |---|---|
-| A new saver/plotter | Add a `SaverParams`/`PlotterParams` subclass with a `type: Literal[...]` to `lib/savers/` or `lib/plotters/` |
-| A new instrument | Add a `Params`/`Instrument` pair under `lib/instruments/<vendor>/`; inherit the right KeyLike + behavior ABC |
-| A new behavior ABC | Add it under `lib/instruments/general/`, then register a proxy class in `lib/client/proxies/registry.py` for remote use |
-| A new measurement | Add `lib/measurements/<name>/<name>.py` + a `_setup_template.py` with `# wizard:*` blocks and a `*Resources` dataclass |
+| A saver or plotter | A `SaverParams`/`PlotterParams` subclass with a `type: Literal[...]` in `lib/savers/` or `lib/plotters/` |
+| An instrument | A `Params`/`Instrument` pair under `lib/instruments/<vendor>/`, inheriting the right KeyLike and behavior ABC |
+| A behavior ABC | Add it under `lib/instruments/general/`, register a proxy in `lib/client/proxies/registry.py`, and add the steps that drive it |
+| A procedure step | A `*StepParams` schema in `lib/procedures/steps/` whose field names match the runtime step's constructor — the generator and the composer both pick it up with no further change |
+| A measurement | Compose it in [Procedures](wizard/procedures.md), or add `lib/measurements/<name>/` with a setup template for hand-written Python |

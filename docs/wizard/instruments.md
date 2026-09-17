@@ -2,12 +2,18 @@
 icon: lucide/settings-2
 ---
 
-# Managing instruments
+# Instruments
 
-**Manage Instruments** (`/manage_instruments`) is the editor for the local
-hardware this workstation drives — the **host** role. It reads and writes
-`config/instruments/`. It is intentionally **local-only**: remote instruments
-never appear here (you register those under [Remote Servers](../remote/operations.md)).
+**Instruments → Configured** (`/instruments`) is the editor for the hardware
+this workstation drives — the **host** role. It reads and writes
+`config/instruments/`.
+
+A tab row across the top selects whose tree you are editing: this workspace, or
+another workspace's server **on this machine**, whose config it can edit through
+that server. Servers on *other* machines deliberately get no tab — a remote peer
+may read and call their instruments but never reconfigure them, so they appear
+as a flat list of named leaves where you bind instruments, not here. Register
+those under [Servers → Remote servers](servers.md#remote-servers).
 
 ## What the page shows
 
@@ -78,3 +84,29 @@ used by:
 Unlike the hash key, `attribute_name` is stored and never derived, so it survives
 edits to slot/port. Set semantically meaningful names for anything you intend to
 reference remotely or in a safety rule.
+
+## Custom resources
+
+**Instruments → Custom resources** (`/instruments/custom`) generates a
+standalone Python file that opens instruments you pick — no measurement, no
+procedure, no run. It is for a notebook, a calibration script, or poking at a
+rack by hand.
+
+Pick any instruments or channels — from this workspace or through a server —
+give each a variable name, and the generator writes either a dataclass holding
+all of them or a single returned object.
+
+The two styles are the same two [measurement generation](measurements.md#generation-styles)
+offers, for the same reasons:
+
+| Style | What it writes |
+|---|---|
+| **Production** | names each instrument and resolves it against the config tree that owns it — this workspace's, or a server's — when the file runs |
+| **Escape hatch: embedded params** | every setting written into the Python, so the file runs outside any workspace. Breaks when an instrument is readdressed, and cannot use instruments through a server |
+
+Instruments a run is currently holding are marked **in use** here as well, so a
+resource file for a busy rack is a visible choice rather than a surprise.
+
+An instrument with no `attribute_name` gets one generated. Tick **save
+auto-generated attribute names** to write those back into the config tree,
+making them permanent handles any future project can use.

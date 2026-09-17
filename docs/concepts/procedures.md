@@ -93,50 +93,13 @@ around a `count` recovers from a timeout.
 Every recorded row is flat: it carries the swept values in force as well as the
 reading, so a nested sweep produces more rows, never a nested structure.
 
-## The Procedures section
+## Writing one
 
-The wizard's **Procedures** section is the composer for all of this: no YAML
-needs to be written by hand. It lists every procedure — built into lab_wizard or
-saved in this workspace — and opens one for editing.
-
-The editor opens on **Workflow**, with a readable outline and an inspector for
-the selected step. Selecting a row edits its settings; the arrow beside a group
-expands or collapses its children independently. Ordinary sequences are shown
-as ordered rows, while loops, phases, branches, and guard scopes remain explicit.
-Guard exit actions appear at the end of their scope, including when collapsed.
-
-* **Instrument roles** — a name and a behavior each, which is the procedure's signature.
-  Beside each is how many of this workspace's instruments can fill it, so a role
-  that narrows where the procedure can run is visible as you declare it.
-* **Parameters** — groups and typed leaves, with a default, a unit, and what the
-  param means; the description becomes a comment in every project's YAML.
-* **Workflow** — *Add first step* or *Add step* offers operations grouped by role, so
-  picking one under `counter` binds it to `counter`; a step whose behavior no
-  role has yet is offered too, and choosing it declares the role. The selected
-  step's **Step actions** menu offers insertion, reordering, replacement, and
-  removal. **Wrap** puts a step inside a new one (a sweep, a guard, a retry).
-
-The outline shows parameter defaults, explicitly marked as defaults, and the
-inspector links to their definitions. It also shows inherited row labels, such
-as `phase = signal` and the current attenuation in a sweep. Selecting a parameter
-or role link opens its editing tab; **Back to workflow** retains the selected
-step and collapsed groups. **Details** holds the procedure's name and description.
-
-A value is a literal until you press **Make parameter** on it, which declares a
-param with what you typed as its default and points the step at it. That is the
-whole difference between something frozen into the procedure and something every
-project and preset can set.
-
-Everything is checked after each edit, against the same rules used at save and
-generation time. Problems appear beside the affected steps and in a list above
-the workflow. Clicking a problem opens its editing section and expands any
-collapsed ancestors. Saving waits for a successful check of the current edits.
-The **Python** tab shows the module the definition generates, the
-**YAML** tab the file it is saved as — editable, if hand-editing is quicker —
-and the **Presets** tab manages a saved procedure's presets.
-
-Saving a built-in under its own name writes this workspace's copy, which takes
-precedence; deleting that copy brings the built-in back.
+Procedures are written in the wizard's **Procedures** section — roles,
+parameters and the step tree, with every edit checked and the generated Python
+visible in a tab. See [Procedures](../wizard/procedures.md) for the composer
+itself. Nothing stops you writing the YAML by hand; the composer writes exactly
+the same file.
 
 ## Checking
 

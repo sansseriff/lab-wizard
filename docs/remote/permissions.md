@@ -94,7 +94,7 @@ changes the hash — so attribute references are the safer, recommended form. (R
 
 ## The Manage Permissions page
 
-`/manage_permissions` builds rules without hand-editing YAML.
+**Servers → Permissions** (`/servers/permissions`) builds rules without hand-editing YAML.
 [`permissions_api.py`](../../lab_wizard/wizard/backend/permissions_api.py)
 introspects the **same `config/instruments` tree the server hosts** (in lazy mode,
 no hardware opened) and offers, per instrument:

@@ -13,10 +13,10 @@
       
       
       
-        <link rel="prev" href="../permissions/">
+        <link rel="prev" href="../">
       
       
-        <link rel="next" href="../../data/database/">
+        <link rel="next" href="../procedures/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>Running & consuming servers - Lab Wizard Documentation</title>
+        <title>Measurements - Lab Wizard Documentation</title>
       
     
     
@@ -83,7 +83,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#running-consuming-servers" class="md-skip">
+        <a href="#measurements" class="md-skip">
           Skip to content
         </a>
       
@@ -119,7 +119,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Running &amp; consuming servers
+              Measurements
             
           </span>
         </div>
@@ -269,6 +269,8 @@
       
   
   
+    
+  
   
   
     
@@ -299,15 +301,15 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <div class="md-nav__link md-nav__container">
-            <a href="../../wizard/" class="md-nav__link ">
+            <a href="../" class="md-nav__link ">
               
   
   
@@ -332,7 +334,7 @@
             
           </div>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -348,10 +350,38 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../wizard/measurements/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-flask-conical" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2M6.453 15h11.094M8.5 2h7"/></svg>
+  
+  <span class="md-ellipsis">
+    
+  
+  Measurements
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
         
   
   
@@ -368,6 +398,132 @@
   
 
       </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-a-measurement-declares-what-it-needs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How a measurement declares what it needs
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#matching-resources-to-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Matching resources to requirements
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generating-the-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Generating the project
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generating the project">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-project-contains" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What a project contains
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generation-styles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Generation styles
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#instruments-a-run-is-holding" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Instruments a run is holding
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#procedures-and-presets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Procedures and presets
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#running-the-generated-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Running the generated project
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-projects-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The projects list
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -380,7 +536,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../wizard/procedures/" class="md-nav__link">
+      <a href="../procedures/" class="md-nav__link">
         
   
   
@@ -409,7 +565,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../wizard/instruments/" class="md-nav__link">
+      <a href="../instruments/" class="md-nav__link">
         
   
   
@@ -438,7 +594,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../wizard/servers/" class="md-nav__link">
+      <a href="../servers/" class="md-nav__link">
         
   
   
@@ -467,7 +623,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../wizard/plotters/" class="md-nav__link">
+      <a href="../plotters/" class="md-nav__link">
         
   
   
@@ -496,7 +652,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../wizard/data/" class="md-nav__link">
+      <a href="../data/" class="md-nav__link">
         
   
   
@@ -743,10 +899,8 @@
       
   
   
-    
   
   
-  
     
     
       
@@ -765,11 +919,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
@@ -789,7 +943,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -806,7 +960,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../architecture/" class="md-nav__link">
+      <a href="../../remote/architecture/" class="md-nav__link">
         
   
   
@@ -835,7 +989,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../permissions/" class="md-nav__link">
+      <a href="../../remote/permissions/" class="md-nav__link">
         
   
   
@@ -861,38 +1015,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-server-cog" viewBox="0 0 24 24"><path d="m10.852 14.772-.383.923M13.148 14.772a3 3 0 1 0-2.296-5.544l-.383-.923M13.148 9.228l.383-.923"/><path d="m13.53 15.696-.382-.924a3 3 0 1 1-2.296-5.544M14.772 10.852l.923-.383M14.772 13.148l.923.383"/><path d="M4.5 10H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-.5M4.5 14H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-.5M6 18h.01M6 6h.01M9.228 10.852l-.923-.383M9.228 13.148l-.923.383"/></svg>
-  
-  <span class="md-ellipsis">
-    
-  
-  Running & consuming servers
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="././" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../remote/operations/" class="md-nav__link">
         
   
   
@@ -909,116 +1035,6 @@
   
 
       </a>
-      
-        
-
-
-<nav class="md-nav md-nav--secondary" aria-label="On this page">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      On this page
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#running-the-server-host-side" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Running the server (host side)
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Running the server (host side)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#from-the-gui" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        From the GUI
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#from-the-command-line" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        From the command line
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#serveryaml" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        <code>server.yaml</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#consuming-remote-servers-client-side" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Consuming remote servers (client side)
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Consuming remote servers (client side)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#how-remote-instruments-reach-a-measurement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        How remote instruments reach a measurement
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#several-runs-on-one-server-claims" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Several runs on one server: claims
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1222,22 +1238,44 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#running-the-server-host-side" class="md-nav__link">
+  <a href="#how-a-measurement-declares-what-it-needs" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Running the server (host side)
+        How a measurement declares what it needs
       </span>
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Running the server (host side)">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#matching-resources-to-requirements" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Matching resources to requirements
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generating-the-project" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Generating the project
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Generating the project">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#from-the-gui" class="md-nav__link">
+  <a href="#what-a-project-contains" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        From the GUI
+        What a project contains
       </span>
     </span>
   </a>
@@ -1245,10 +1283,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#from-the-command-line" class="md-nav__link">
+  <a href="#generation-styles" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        From the command line
+        Generation styles
       </span>
     </span>
   </a>
@@ -1256,10 +1294,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#serveryaml" class="md-nav__link">
+  <a href="#instruments-a-run-is-holding" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        <code>server.yaml</code>
+        Instruments a run is holding
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#procedures-and-presets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Procedures and presets
       </span>
     </span>
   </a>
@@ -1272,41 +1321,24 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#consuming-remote-servers-client-side" class="md-nav__link">
+  <a href="#running-the-generated-project" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Consuming remote servers (client side)
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Consuming remote servers (client side)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#how-remote-instruments-reach-a-measurement" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        How remote instruments reach a measurement
+        Running the generated project
       </span>
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
-  <a href="#several-runs-on-one-server-claims" class="md-nav__link">
+      
+        <li class="md-nav__item">
+  <a href="#the-projects-list" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        Several runs on one server: claims
+        The projects list
       </span>
     </span>
   </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1355,6 +1387,16 @@
     
       
         
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
       
         
       
@@ -1365,11 +1407,11 @@
     
     
       <li class="md-path__item">
-        <a href="../architecture/" class="md-path__link">
+        <a href="../" class="md-path__link">
           
   
   <span class="md-ellipsis">
-    Remote control
+    Using the wizard
   </span>
 
         </a>
@@ -1386,139 +1428,188 @@
                 
                   
 
-<h1 id="running-consuming-servers">Running &amp; consuming servers<a class="headerlink" href="#running-consuming-servers" title="Permanent link">&para;</a></h1>
-<p>This page is the operational guide: how to run this workstation's instrument
-server, and how to register and consume <em>other</em> machines' servers.</p>
-<h2 id="running-the-server-host-side">Running the server (host side)<a class="headerlink" href="#running-the-server-host-side" title="Permanent link">&para;</a></h2>
-<h3 id="from-the-gui">From the GUI<a class="headerlink" href="#from-the-gui" title="Permanent link">&para;</a></h3>
-<p><strong>Servers → This workspace</strong> (<code>/servers</code>) starts and stops the server via
-<a href="../../../lab_wizard/wizard/backend/server_control.py"><code>server_control.py</code></a>. Two
-lifecycle modes:</p>
-<table>
-<thead>
-<tr>
-<th>Mode</th>
-<th>Behavior</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>managed</strong> (default)</td>
-<td>runs as a child of the wizard; closing the wizard stops it</td>
-</tr>
-<tr>
-<td><strong>detached</strong></td>
-<td>runs in its own session (<code>start_new_session</code>) and survives wizard exit, like a daemon</td>
-</tr>
-</tbody>
-</table>
-<p>A pid file (<code>config/server/.server.pid</code>) records the running server's pid, bind,
-and mode, so status survives a wizard restart. <code>server_status</code> reconciles the pid
-file with reality (a dead pid is cleaned up). Only one server per workstation
-(one bind address) is expected; starting refuses if the port is already taken by
-something else.</p>
-<p>Relevant endpoints: <code>GET /api/server/status</code>, <code>POST /api/server/{start,stop,restart}</code>,
-<code>GET /api/server/suggest-port</code>, <code>PUT /api/server/bind</code>. <strong>Restart</strong> is how you
-apply edited <a href="../permissions/">permission rules</a> — the server reads them at boot.</p>
-<h3 id="from-the-command-line">From the command line<a class="headerlink" href="#from-the-command-line" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>python<span class="w"> </span>-m<span class="w"> </span>lab_wizard.lib.server.server<span class="w"> </span>--config<span class="w"> </span>config/server/server.yaml
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># or the installed console script:</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>lab_wizard_server<span class="w"> </span>--config<span class="w"> </span>config/server/server.yaml
-</span></code></pre></div>
-<h3 id="serveryaml"><code>server.yaml</code><a class="headerlink" href="#serveryaml" title="Permanent link">&para;</a></h3>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">server</span><span class="p">:</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">bind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tcp://0.0.0.0:12300</span><span class="w">     </span><span class="c1"># required: ZMQ bind address</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="c1"># config_dir: ..              # optional; defaults to the parent of server/</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nt">permissions</span><span class="p">:</span><span class="w">                    </span><span class="c1"># optional; authored by the GUI</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">state_defaults</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="w"> </span><span class="nv">...</span><span class="w"> </span><span class="p p-Indicator">}</span>
-</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">rules</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="w"> </span><span class="nv">...</span><span class="w"> </span><span class="p p-Indicator">]</span>
-</span></code></pre></div>
-<p>A server hosts a workspace's <code>config/instruments</code> tree. The old <code>project_yaml</code>
-override, which hosted one project's copy of its instruments' params, is retired
-and refused with that reason: a project no longer carries such a copy.</p>
-<p>On boot the server logs every registered <code>inst://</code> path (using static metadata —
-no hardware opened), every named attribute, and every loaded permission rule.</p>
-<h2 id="consuming-remote-servers-client-side">Consuming remote servers (client side)<a class="headerlink" href="#consuming-remote-servers-client-side" title="Permanent link">&para;</a></h2>
-<p><strong>Servers → Remote servers</strong> (<code>/servers/remote</code>) maintains this machine's <strong>address book</strong> of servers it
-wants to <em>use</em>, in <code>config/remote/servers.yaml</code>, via
-<a href="../../../lab_wizard/wizard/backend/remote_servers.py"><code>remote_servers.py</code></a>:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">servers</span><span class="p">:</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cryo-rack</span>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tcp://10.0.0.5:12300</span>
-</span></code></pre></div>
-<table>
-<thead>
-<tr>
-<th>Endpoint</th>
-<th>Effect</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>GET /api/remote-servers</code></td>
-<td>list registered servers</td>
-</tr>
-<tr>
-<td><code>POST /api/remote-servers</code></td>
-<td>add (or update by name)</td>
-</tr>
-<tr>
-<td><code>DELETE /api/remote-servers/{name}</code></td>
-<td>remove</td>
-</tr>
-<tr>
-<td><code>POST /api/remote-servers/test</code></td>
-<td>live-test a URL: connects and lists its attributes (never raises)</td>
-</tr>
-</tbody>
-</table>
-<p>This address book is purely a client concern — it never feeds the server-side
-permission gate.</p>
-<h3 id="how-remote-instruments-reach-a-measurement">How remote instruments reach a measurement<a class="headerlink" href="#how-remote-instruments-reach-a-measurement" title="Permanent link">&para;</a></h3>
-<p>During <a href="../../wizard/measurements/">measurement creation</a>, the wizard
-calls <code>list_remote_attributes</code> to enumerate the named attributes on every
-reachable registered server, each tagged with its <code>behavior_abc</code>. Those are
-offered as candidates for any matching requirement, alongside local instruments.
-Selecting a remote attribute generates <code>from_attribute</code>-style setup code, and you
-run the project with:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>python<span class="w"> </span>&lt;measurement&gt;_setup.py<span class="w"> </span>--remote<span class="w"> </span>tcp://10.0.0.5:12300
-</span></code></pre></div>
-<p>The generated <code>RemoteResources.connect(url)</code> + <code>resources.from_attribute(name)</code> produces typed
-proxies that satisfy the measurement's behavior ABCs — see
-<a href="../architecture/">Remote control</a>.</p>
-<h3 id="several-runs-on-one-server-claims">Several runs on one server: claims<a class="headerlink" href="#several-runs-on-one-server-claims" title="Permanent link">&para;</a></h3>
-<p>The point of a server is that several measurements can share its instruments.
-A <strong>run claim</strong> keeps them from stepping on each other. A generated project
-claims every instrument it drives through a server for the length of its run —
-nothing to configure — and releases it when the run ends.</p>
+<h1 id="measurements">Measurements<a class="headerlink" href="#measurements" title="Permanent link">&para;</a></h1>
+<p>The <strong>Measurements</strong> section is the core wizard workflow: pick something to run
+(<code>/measurements/new</code>), bind each resource it needs to a configured instrument,
+saver and plotter (<code>/measurements/resources</code>), and generate a runnable project
+folder. <code>/measurements/projects</code> lists what has been generated.</p>
+<p>What you pick from is both kinds of measurement side by side: hand-written
+Python under <code>lib/measurements/</code>, and <a href="../procedures/">procedures</a> — this
+workspace's own and the ones built into lab_wizard. To the person binding
+instruments they are the same thing: roles to fill and parameters to set.</p>
+<p>This page explains how the matching and code generation work.</p>
+<h2 id="how-a-measurement-declares-what-it-needs">How a measurement declares what it needs<a class="headerlink" href="#how-a-measurement-declares-what-it-needs" title="Permanent link">&para;</a></h2>
+<p>A measurement lives in <code>lib/measurements/&lt;name&gt;/</code> and has two files:</p>
 <ul>
-<li><strong>Writes need a claim; reads don't.</strong> While a run holds an instrument, a
-  write from any other run is refused with the holder's name. Declared pure
-  queries (<code>get_threshold</code>, <code>get_voltage</code>, …) stay open to anyone, so you can
-  watch a running measurement.</li>
-<li><strong>Claims are as fine-grained as the hardware allows.</strong> Two runs may hold the
-  two inputs of one 53220A counter and interleave their counts, because each
-  count re-establishes its own settings. An instrument that has not declared its
-  parts independently claimable is claimed whole.</li>
-<li><strong>Shared settings need the whole instrument.</strong> A run holding one input cannot
-  change the counter's trigger or gate, even if no one else holds anything —
-  that change would carry into whoever claims the other input next.</li>
-<li><strong>Claims expire</strong> about 30 seconds after their client stops renewing them, so
-  a crashed run does not hold hardware forever. A released or expired
-  instrument is reset to its configured baseline before anyone can claim it
-  again.</li>
+<li><code>&lt;name&gt;.py</code> — the measurement class (the run logic), and</li>
+<li><code>&lt;name&gt;_setup_template.py</code> — a template the wizard fills in.</li>
 </ul>
-<p><strong>Hardware ownership</strong> in the wizard lists every claim on the machine's servers,
-with a <strong>Force release</strong> for a run that is stuck. Force release is only
-accepted from this machine. The instrument picker marks a claimed instrument
-<strong>in use</strong>, with who holds it, while you are choosing — binding one is allowed,
-since the run may end before the new project is run.</p>
-<div class="admonition note">
-<p class="admonition-title">Still basic</p>
-<p>Requests are handled in parallel — calls on different instruments no longer
-wait for each other — but there is no hot-reload of permissions. Tracked in
-the <a href="../../roadmap/">Roadmap</a>.</p>
-</div>
+<p>The template defines a <code>@dataclass</code> ending in <code>Resources</code> whose <strong>annotations</strong>
+declare the required resources. From
+<a href="../../../lab_wizard/lib/measurements/iv_curve/iv_curve_setup_template.py"><code>iv_curve_setup_template.py</code></a>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nd">@dataclass</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">IVCurveResources</span><span class="p">:</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    <span class="c1"># wizard:resource_fields:start</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="n">savers</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">GenericSaver</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>    <span class="n">plotters</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">GenericPlotter</span><span class="p">]</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    <span class="n">voltage_source</span><span class="p">:</span> <span class="n">VSource</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="n">StandInVSource</span><span class="p">)</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    <span class="n">voltage_sense</span><span class="p">:</span> <span class="n">VSense</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="n">StandInVSense</span><span class="p">)</span>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="c1"># wizard:resource_fields:end</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="n">params</span><span class="p">:</span> <span class="n">IVCurveParams</span> <span class="o">=</span> <span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="n">IVCurveParams</span><span class="p">)</span>
+</span></code></pre></div>
+<p><a href="../../../lab_wizard/wizard/backend/get_measurements.py"><code>get_measurements.py</code></a>
+reads these annotations and classifies each field:</p>
+<ul>
+<li>a field typed as a subclass of <code>GenericSaver</code> → a <strong>saver</strong> requirement,</li>
+<li>a subclass of <code>GenericPlotter</code> → a <strong>plotter</strong> requirement,</li>
+<li>anything else (a behavior ABC like <code>VSource</code>) → an <strong>instrument</strong> requirement.</li>
+</ul>
+<p><code>list[T]</code> annotations are recognized (e.g. <code>savers: list[GenericSaver]</code>), and
+<code>params</code> is skipped.</p>
+<h2 id="matching-resources-to-requirements">Matching resources to requirements<a class="headerlink" href="#matching-resources-to-requirements" title="Permanent link">&para;</a></h2>
+<p><code>GET /api/get-resources/{name}</code> returns, for each requirement, the candidates the
+user can pick from:</p>
+<pre class="mermaid"><code>graph LR
+    REQ["Requirement&lt;br/&gt;e.g. voltage_source: VSource"] --&gt; LOCAL["Local matches&lt;br/&gt;discover_matching_instruments"]
+    REQ --&gt; REMOTE["Remote matches&lt;br/&gt;list_remote_attributes"]
+    REQ2["Requirement&lt;br/&gt;saver / plotter"] --&gt; REG["Configured registry&lt;br/&gt;get_configured_resources_tree"]</code></pre>
+<ul>
+<li><strong>Instruments</strong> are matched by <strong>class hierarchy</strong>:
+  <a href="../../../lab_wizard/wizard/backend/get_measurements.py"><code>discover_matching_instruments</code></a>
+  imports every class under <code>lib/instruments</code> and keeps the ones that are a
+  subclass of the required behavior ABC. So a <code>VSource</code> requirement offers
+  <code>Sim928</code>, <code>Dac4DChannel</code>, etc. — and crucially, it offers the <strong>configured
+  instances</strong> of those from your tree.</li>
+<li><strong>Remote instruments</strong> matching the requirement's behavior ABC are pulled from
+  registered <a href="../../remote/operations/">remote servers</a> and offered alongside
+  local ones (matched by <code>behavior_abc</code> name).</li>
+<li><strong>Savers/plotters</strong> are offered from their flat config registries — you pick a
+  configured instance by name.</li>
+</ul>
+<p>This is the answer to <em>"how are instruments chosen for measurements based on
+generic instruments?"</em>: the measurement asks for a <strong>behavior</strong> (the generic ABC),
+and the wizard offers every configured instrument that <strong>is-a</strong> that behavior.</p>
+<h2 id="generating-the-project">Generating the project<a class="headerlink" href="#generating-the-project" title="Permanent link">&para;</a></h2>
+<p><code>POST /api/create-measurement-project</code> (→
+<a href="../../../lab_wizard/wizard/backend/project_generation.py"><code>generate_measurement_project</code></a>)
+does three things:</p>
+<ol>
+<li><strong>Writes a project YAML</strong> containing only the <em>subset</em> of config you selected
+   — the chosen instrument lineages (leaf back to root), savers, and plotters —
+   plus a <code>device</code> block and measurement defaults. This is a self-contained
+   snapshot, so the project keeps working even if the central config changes.</li>
+<li><strong>Fills in the setup template</strong> by replacing the <code># wizard:&lt;block&gt;:start/end</code>
+   regions:</li>
+<li><code>imports</code> — concrete instrument/saver/plotter imports,</li>
+<li><code>resource_fields</code> — the dataclass field declarations,</li>
+<li><code>instantiation</code> — the construction lines,</li>
+<li><code>return_fields</code> — wiring the constructed objects into the <code>Resources</code>.</li>
+<li><strong>Copies the measurement source</strong> (<code>&lt;name&gt;.py</code>) into the project. The
+   generated setup imports this sibling module, so edits made inside the project
+   are the code that runs.</li>
+</ol>
+<p>The project folder is timestamped, e.g. <code>projects/iv_curve_20260528_143012/</code>,
+containing <code>&lt;folder&gt;.yaml</code>, <code>&lt;name&gt;_setup.py</code>, and <code>&lt;name&gt;.py</code>.</p>
+<h3 id="what-a-project-contains">What a project contains<a class="headerlink" href="#what-a-project-contains" title="Permanent link">&para;</a></h3>
+<p>A project names its instruments and copies none of their settings. Its YAML
+records each instrument's <code>attribute_name</code> and where it lives:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">resources</span><span class="p">:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">  </span><span class="nt">instrument_sources</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nt">sim928-brave-otter</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">local</span><span class="w">          </span><span class="c1"># this workspace&#39;s config/instruments</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">counter-quiet-lynx</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cryo-rack</span><span class="w">      </span><span class="c1"># a server in config/remote/servers.yaml</span>
+</span></code></pre></div>
+<p>and the setup file resolves each one when the project runs:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">voltage_source_1</span> <span class="o">=</span> <span class="n">resources</span><span class="o">.</span><span class="n">from_attribute</span><span class="p">(</span><span class="s2">&quot;sim928-brave-otter&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<p>So a rack readdressed, or a bench setting changed, in Manage Instruments reaches
+every project that uses it without regenerating. The measurement's own params
+(<code>measurement.params</code>) stay frozen in the project. A project must run from inside
+its workspace, and says so if it is not. Removing an instrument in Manage
+Instruments lists the projects that use it first.</p>
+<p>Each instrument can come from this workspace directly, or <strong>through this
+workspace's server</strong> — the same instruments, used through the process that owns
+them instead of opened by the project. When a local selection conflicts with a
+rack the server holds, the warning offers that switch.</p>
+<h3 id="generation-styles">Generation styles<a class="headerlink" href="#generation-styles" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Style</th>
+<th>What it writes</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>production</code> (default)</td>
+<td>instruments by name, as above</td>
+<td>always, unless you need the escape hatch</td>
+</tr>
+<tr>
+<td><code>pedagogical_embedded</code></td>
+<td>every instrument's params written into the Python, plus a full copy in the project YAML</td>
+<td>running a project outside any workspace, or reading how instruments are built. Breaks when an instrument is readdressed; cannot use an instrument through a server</td>
+</tr>
+</tbody>
+</table>
+<p>The former YAML-expanded teaching style is retired. Projects generated before
+this change carry their own instrument copy and keep running exactly as they did.</p>
+<p><strong>Custom resources</strong> (Instruments → Custom resources) follow the same two
+styles, for the same reasons: a production file names its instruments and
+resolves them against the tree that owns them, and the embedded one carries its
+own copy.</p>
+<h3 id="instruments-a-run-is-holding">Instruments a run is holding<a class="headerlink" href="#instruments-a-run-is-holding" title="Permanent link">&para;</a></h3>
+<p>An instrument a running measurement has claimed is marked <strong>in use</strong> in the
+picker, with who holds it; a claim on part of an instrument — one input of a
+counter — reads <em>part in use</em>. Binding one is still allowed, because the run may
+well be over before this project is run; what cannot happen is the two holding
+it at once. See <a href="../../remote/operations/">run claims</a>.</p>
+<h3 id="procedures-and-presets">Procedures and presets<a class="headerlink" href="#procedures-and-presets" title="Permanent link">&para;</a></h3>
+<p>Measurements under <code>lib/measurements</code> and <a href="../../concepts/procedures/">procedures</a>
+are offered side by side, and either can start from a named <strong>params preset</strong>
+from <code>config/measurements/&lt;name&gt;/</code>, copied into the project when it is generated.</p>
+<h2 id="running-the-generated-project">Running the generated project<a class="headerlink" href="#running-the-generated-project" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">cd</span><span class="w"> </span>projects/iv_curve_20260528_143012
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>uv<span class="w"> </span>run<span class="w"> </span>iv_curve_setup.py<span class="w">             </span><span class="c1"># local: loads the project YAML</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>uv<span class="w"> </span>run<span class="w"> </span>iv_curve_setup.py<span class="w"> </span>--remote<span class="w"> </span>tcp://lab-server:12300<span class="w">   </span><span class="c1"># remote</span>
+</span></code></pre></div>
+<p>The template's <code>__main__</code> block picks local resources, a per-attribute
+<code>CompositeResources</code>, or the all-remote override, then hands the run to
+<a href="../../../lab_wizard/lib/task_adapters/lifecycle.py"><code>RunLifecycle</code></a>. The same
+procedure works in each mode because measurements consume behavior ABCs, which
+both local instruments and <a href="../../remote/architecture/">remote proxies</a> satisfy.
+Observations flow through the procedure data bus to the configured saver and
+plotter adapters.</p>
+<p>Every run goes through the same steps, in this order:</p>
+<ol>
+<li><strong>Claim.</strong> Every exclusive transport this process will open is leased for
+   the length of the run, and every instrument server on the machine is asked
+   whether it already holds one. Either refusal stops the run with the holder's
+   name, before any instrument is opened.</li>
+<li><strong>Resolve, then claim what is routed.</strong> The instruments are constructed —
+   only now, because opening a serial-backed rack before claiming it is the race
+   claims exist to close. Instruments that live on a server are then claimed
+   <em>there</em>, so two runs cannot drive the same remote instrument at once. Those
+   claims are renewed for the length of the run and released at the end; see
+   <a href="../../remote/operations/#several-runs-on-one-server-claims">run claims</a>.</li>
+<li><strong>Baseline.</strong> <code>apply_baseline()</code> writes each bound instrument's configured
+   bench settings (coupling, impedance, wavelength, …), so a setting an earlier
+   experiment changed cannot carry into this one.</li>
+<li><strong>Run</strong> the measurement.</li>
+<li><strong>Safe state, if the run failed.</strong> On a failure, an abort, an exception or
+   Ctrl-C, each instrument that declares a safe state is put in it — a source to
+   0 V and off, an attenuator shutter-closed at maximum attenuation. A run that
+   completes is left where its own procedure ended it, so a choice like the IV
+   curve's <code>turn_off_at_end: false</code> is honoured.</li>
+<li><strong>Release</strong> the claims, always.</li>
+</ol>
+<p>The script exits non-zero when the run does not succeed.</p>
+<h2 id="the-projects-list">The projects list<a class="headerlink" href="#the-projects-list" title="Permanent link">&para;</a></h2>
+<p><code>/measurements/projects</code> lists every project this workspace has generated,
+newest first: what it measures, what it is bound to, and when it was made.</p>
+<p>The wizard does not run them — there is no launch button yet (see the
+<a href="../../roadmap/#running-measurements">Roadmap</a>). A project is a folder you run
+from a terminal, which is also what makes it inspectable and editable.</p>
 
 
 
@@ -1561,7 +1652,7 @@ the <a href="../../roadmap/">Roadmap</a>.</p>
       <nav class="md-footer__inner md-grid" aria-label="Footer" >
         
           
-          <a href="../permissions/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Permissions &amp; safety">
+          <a href="../" class="md-footer__link md-footer__link--prev" aria-label="Previous: Overview">
             <div class="md-footer__button md-icon">
               
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5"/></svg>
@@ -1571,20 +1662,20 @@ the <a href="../../roadmap/">Roadmap</a>.</p>
                 Previous
               </span>
               <div class="md-ellipsis">
-                Permissions & safety
+                Overview
               </div>
             </div>
           </a>
         
         
           
-          <a href="../../data/database/" class="md-footer__link md-footer__link--next" aria-label="Next: Measurement database">
+          <a href="../procedures/" class="md-footer__link md-footer__link--next" aria-label="Next: Procedures">
             <div class="md-footer__title">
               <span class="md-footer__direction">
                 Next
               </span>
               <div class="md-ellipsis">
-                Measurement database
+                Procedures
               </div>
             </div>
             <div class="md-footer__button md-icon">

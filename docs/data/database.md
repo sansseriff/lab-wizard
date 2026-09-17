@@ -40,8 +40,8 @@ graph TD
 | `wafers` | a fabricated wafer | `name`, `material` |
 | `devices` | a device on a wafer | `wafer_id`, `name`, `pixel_geometry`, `width_nm` |
 | `cryostats` | a cryostat | `name`, `location` |
-| `runs` | one measurement program invocation | `cryostat_id`, `device_id`, `run_type`, `started_at`, `config` (JSON) |
-| `measurements` | **one integration** | `run_id`, `timestamp`, `counts`, `int_time`, `temperature`, `metadata` (JSON) |
+| `runs` | one measurement program invocation | `cryostat_id`, `device_id`, `run_type`, `started_at`, `config` (JSON), `instruments` (JSON) |
+| `measurements` | one observation | `run_id`, `timestamp`, `counts`, `int_time`, `temperature`, `data` (JSON), `metadata` (JSON) |
 | `measurement_details` | sub-structure of one integration (histogram bins, time windows) | `measurement_id`, `detail_type`, `bin_index`, `value` |
 
 Design principles baked into the schema:
@@ -52,15 +52,44 @@ Design principles baked into the schema:
   `int_time`); **JSON `metadata`** for the varying parameters that differ per
   run type (`bias_current`, `trigger_level`, `thermal_power`). A JSON field can be
   promoted to a real indexed column later if you query it constantly.
+- **`config` is the measurement's own parameters** — the sweep, the gate time —
+  and **`instruments` is what each instrument was configured with** when the run
+  started, by name. The second exists because a project carries no copy of
+  instrument settings: it names them and reads a config tree that is edited
+  between runs, so without the snapshot nothing says which calibration a curve
+  was taken at.
 - **`run_type` is an Enum** (`pcr_curve`, `iv_curve`, `mcr_curve`,
-  `extended_pcr`, `other`) — a soft constraint that catches typos.
+  `extended_pcr`, `other`), which catches typos but also *loses information*:
+  any composed procedure is stored as `other`. See the
+  [Roadmap](../roadmap.md#savers-and-data).
 
 Indexes exist on `runs(cryostat, started_at)`, `runs(run_type)`, and
 `measurements(timestamp)`.
 
+## What a procedure writes
+
+**A procedure adds no columns.** The schema is fixed; a run's observations land
+in `measurements.data` as JSON keys. An `mcr_curve` run over three attenuations
+writes seven rows that look like this (abbreviated):
+
+```json
+{"phase": "background", "counts": 1,     "int_time": 0.05, "count_rate": 20.0}
+{"phase": "signal", "attenuation_db": 20.0, "counts": 387, "count_rate": 7740.0}
+{"phase": "signal", "attenuation_db": 20.0, "device_voltage": 0.0}
+{"phase": "signal", "attenuation_db": 10.0, "counts": 4004, "count_rate": 80080.0}
+...
+```
+
+Two things to notice. The swept value is copied onto every row, so the loop
+nesting is invisible in the data — which is the whole point. But a `count` and a
+`read_voltage` at the same attenuation are **two rows**, because each
+`observe()` writes one; reassembling a point means matching on `attenuation_db`.
+That is a known divergence from *one row per integration*, designed in
+`plans/semantic_data_plan.md`.
+
 ## Using it
 
-Configure a `database_saver` instance on the [Manage Savers](../wizard/savers-and-plotters.md)
+Configure a `database_saver` instance on the [Data → Savers](../wizard/data.md)
 page (`db_path`, `cryostat_name`), then select it when creating a measurement.
 The runtime API:
 
@@ -92,8 +121,17 @@ and incremental durable writes during long measurements. SQLAlchemy abstracts th
 backend, so moving to Postgres later (if many machines need concurrent writes)
 is mostly a connection-string change.
 
+## Schema changes
+
+There is no migration framework. New **nullable** columns are added to an
+existing database in place, by `add_missing_columns` when the saver opens it —
+which is how a database written last month keeps working when a column like
+`instruments` appears. Anything else (a type change, a non-null column) needs a
+real migration and is deliberately not attempted.
+
 !!! note "Reading the data"
-    `plans/database_plan.md` sketches a thin `query.py` of pandas helpers
-    (`get_measurements`, `get_runs`, `get_histogram`) and a `measurements_full`
-    SQL view that joins run/device/wafer/cryostat metadata. The query helpers and
-    Alembic migrations are **not yet implemented** — see the [Roadmap](../roadmap.md).
+    [`query.py`](../../lab_wizard/lib/savers/query.py) has pandas helpers
+    (`get_measurements`, `get_runs`), but pandas is not a dependency of this
+    package, and the `measurements_full` view described in
+    `plans/database_plan.md` does not exist. Querying with `sqlite3` and
+    `json_extract` works today — see the [Roadmap](../roadmap.md).
