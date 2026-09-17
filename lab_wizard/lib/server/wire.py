@@ -131,6 +131,7 @@ class WireServer:
         self._rpc.method()(self.events_recent)
         self._rpc.method()(self.list_attributes)
         self._rpc.method()(self.describe_path)
+        self._rpc.method()(self.params_get)
         self._rpc.method()(self.describe_attribute)
         self._rpc.method()(self.list_descriptions)
         self._rpc.method()(self.claim_acquire)
@@ -295,6 +296,20 @@ class WireServer:
             return registry.release(path)
 
     # ------------------------- tree (read-only) -------------------------
+
+    def params_get(self, path: str) -> Optional[dict[str, Any]]:
+        """The configured params of the instrument at ``path``.
+
+        Provenance, not control: a run records what its instruments were
+        configured with (``plans/procedure_plan.md`` 5.6), and through a server
+        the client has no other way to see it — the params live in the server's
+        workspace. Read-only and static, so nothing is opened and no claim is
+        needed. ``children`` is excluded: each instrument answers for itself.
+        """
+        params = self._registry.params_for(path)
+        if params is None or not hasattr(params, "model_dump"):
+            return None
+        return params.model_dump(mode="json", exclude={"children"})
 
     def tree_get(self) -> dict[str, Any]:
         """The instrument tree this server hosts, shaped for the wizard's UI.

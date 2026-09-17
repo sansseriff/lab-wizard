@@ -15,6 +15,9 @@ class RunStarted:
     operator: str | None = None
     description: str | None = None
     config: dict[str, Any] = field(default_factory=dict)
+    # How the instruments themselves were configured when the run started —
+    # {name: params}. The measurement's own params are `config`.
+    instruments: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

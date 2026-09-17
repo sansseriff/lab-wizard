@@ -21,6 +21,7 @@ class SaverSink:
                     operator=message.operator,
                     description=message.description,
                     config=message.config,
+                    instruments=message.instruments,
                 )
             return
 

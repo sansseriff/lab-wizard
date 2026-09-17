@@ -31,6 +31,7 @@ from lab_procedure import (
 
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.task_adapters import PlotterSink, SaverSink
+from lab_wizard.lib.task_adapters.provenance import baseline_snapshot
 from lab_wizard.lib.task_adapters.instrument_steps import (
     SetThreshold,
     SetVoltage,
@@ -128,5 +129,6 @@ class PCRCurveMeasurement:
         run_started = RunStarted(
             run_type="pcr_curve",
             config=self.resources.params.model_dump(mode="json"),
+            instruments=baseline_snapshot(self.resources),
         )
         return runner.run(self.build_procedure(), run_started)

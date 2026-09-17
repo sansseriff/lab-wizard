@@ -21,6 +21,36 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 
+def add_missing_columns(engine) -> list[str]:
+    """Add columns this schema has and an existing database does not.
+
+    There is no migration framework here (see ``plans/database_plan.md``), and
+    a database written by an older lab_wizard is a normal thing to open: a run
+    recorded last month must still be readable, and a new run must still be
+    writable beside it. Only nullable columns can be added this way, which is
+    what every column added so far has been; anything else needs a real
+    migration and is left alone deliberately.
+    """
+    from sqlalchemy import inspect
+
+    added: list[str] = []
+    inspector = inspect(engine)
+    with engine.begin() as connection:
+        for table in Base.metadata.sorted_tables:
+            if not inspector.has_table(table.name):
+                continue  # create_all makes it, with every column
+            existing = {column["name"] for column in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing or not column.nullable:
+                    continue
+                type_sql = column.type.compile(engine.dialect)
+                connection.exec_driver_sql(
+                    f"ALTER TABLE {table.name} ADD COLUMN {column.name} {type_sql}"
+                )
+                added.append(f"{table.name}.{column.name}")
+    return added
+
+
 class RunType(str, enum.Enum):
     PCR_CURVE = "pcr_curve"
     IV_CURVE = "iv_curve"
@@ -73,7 +103,12 @@ class Run(Base):
     ended_at = Column(DateTime)
     operator = Column(String)
     description = Column(String)
+    # The measurement's own params: the sweep, the gate time, the choreography.
     config = Column(JSON)
+    # How each instrument was configured when the run started, by name. The
+    # config tree those values came from is edited between runs, so without
+    # this nothing says which calibration a curve was taken at.
+    instruments = Column(JSON)
 
     cryostat = relationship("Cryostat")
     device = relationship("Device")

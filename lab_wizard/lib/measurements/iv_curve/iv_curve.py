@@ -31,6 +31,7 @@ from lab_procedure import (
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
 from lab_wizard.lib.task_adapters import PlotterSink, SaverSink
+from lab_wizard.lib.task_adapters.provenance import baseline_snapshot
 from lab_wizard.lib.task_adapters.instrument_steps import (
     SetVoltage,
     SourceGuard,
@@ -140,5 +141,6 @@ class IVCurveMeasurement:
         run_started = RunStarted(
             run_type="iv_curve",
             config=self.resources.params.model_dump(mode="json"),
+            instruments=baseline_snapshot(self.resources),
         )
         return runner.run(self.build_procedure(), run_started)

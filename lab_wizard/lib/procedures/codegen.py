@@ -116,6 +116,7 @@ def measurement_module_source(definition: ProcedureDefinition) -> str:
         ("lab_procedure", "Step"),
         ("lab_wizard.lib.task_adapters", "PlotterSink"),
         ("lab_wizard.lib.task_adapters", "SaverSink"),
+        ("lab_wizard.lib.task_adapters.provenance", "baseline_snapshot"),
     }
     roles = "\n".join(f"    {python_identifier(r)} = resources.{r}" for r in definition.roles)
     description = definition.description or f"The {definition.name} procedure."
@@ -160,6 +161,7 @@ class {prefix}Measurement:
         run_started = RunStarted(
             run_type={definition.name!r},
             config=self.resources.params.model_dump(mode="json"),
+            instruments=baseline_snapshot(self.resources),
         )
         return runner.run(self.build_procedure(), run_started)
 '''

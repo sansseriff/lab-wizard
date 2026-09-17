@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import TreeNode from '$lib/components/TreeNode.svelte';
+	import { type Claim, busyCounts, busyLabel } from '$lib/claims';
 	import type { TreeItem, TreePathRef } from '$lib/components/TreeNode.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Callout from '$lib/components/Callout.svelte';
@@ -62,8 +63,6 @@
 		/** Set when a run holds this instrument right now. */
 		claimed_by?: string | null;
 	};
-	/** A run's exclusive hold on part of a server's tree. See server_plan Phase 9. */
-	type Claim = { holder: string; units: string[]; restoring: boolean };
 	type Source = {
 		name: string;
 		kind: 'local' | 'machine' | 'remote';
@@ -420,45 +419,7 @@
 		}
 		if (cur.channelIndex !== null) activeRequirement = nextIncompleteAfter(activeRequirement);
 	}
-	/** The `inst://` path of a tree node — the same address a claim names.
-	 *
-	 * A node's path is its chain of keys from the root, which is exactly how the
-	 * server builds the paths it reports claims against.
-	 */
-	function instPath(path: TreePathRef[]): string {
-		return `inst://${path.map((p) => p.key).join('/')}`;
-	}
-
-	/** Whether a claim on `unit` covers `target` — the server's rule, in
-	 * `lib/server/claims.py`: a claim covers its whole subtree. */
-	function claimCovers(unit: string, target: string): boolean {
-		return unit === target || target.startsWith(`${unit}/`);
-	}
-
-	/** How this node is busy right now, if it is.
-	 *
-	 * A claim on something *inside* the node (one channel of a counter) is
-	 * phrased differently from one on the node itself: the sibling channels may
-	 * still be free, and on a driver whose channels are claimable that matters.
-	 */
-	function busyHolderAt(source: Source, path: TreePathRef[]): string | null {
-		const target = instPath(path);
-		for (const claim of source.claims ?? []) {
-			const holder = claim.restoring ? `${claim.holder} (being reset)` : claim.holder;
-			if (claim.units.some((unit) => claimCovers(unit, target))) return `in use by ${holder}`;
-			if (claim.units.some((unit) => claimCovers(target, unit))) return `part in use by ${holder}`;
-		}
-		return null;
-	}
-
-	const busyCount = $derived.by(() => {
-		const counts = new Map<string, number>();
-		for (const source of sources) {
-			const units = (source.claims ?? []).reduce((n, c) => n + c.units.length, 0);
-			if (units) counts.set(source.name, units);
-		}
-		return counts;
-	});
+	const busyCount = $derived(busyCounts(sources));
 
 	function isCompatibleForCurrent(node: TreeItem, source: Source): boolean {
 		const req = reqByVar(activeRequirement);
@@ -982,7 +943,7 @@
 												isCompatible={(n) => isCompatibleForCurrent(n, source)}
 												isSelected={(_n, p) => isNodeSelectedForCurrent(source, p)}
 												selectionLabel={(_n, p) => selectionLabelForAny(source, p)}
-												busyBadge={(_n, p) => busyHolderAt(source, p)}
+												busyBadge={(_n, p) => busyLabel(source.claims, p)}
 												onSelect={(n, p) => onSelectTreeNode(source, n, p)}
 											/>
 										{/each}

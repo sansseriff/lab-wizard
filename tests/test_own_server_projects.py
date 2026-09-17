@@ -161,6 +161,14 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
     # and one voltage per attenuation.
     with sqlite3.connect(setup_path.parent / "measurements.db") as db:
         rows = [json.loads(data) for (data,) in db.execute("select data from measurements order by id")]
+        (recorded,) = db.execute("select instruments from runs").fetchone()
+
+    # Provenance (procedure plan 5.6): what the instruments were configured
+    # with, read back through the server that owns them, since this workspace's
+    # project carries no copy of it.
+    configured = json.loads(recorded)
+    assert set(configured) == set(payload["resources"]["instrument_sources"])
+    assert configured[selections[3]["attribute"]]["type"] == "fake_attenuator"
     background = [r for r in rows if r["phase"] == "background"]
     counts = [r for r in rows if r["phase"] == "signal" and "counts" in r]
     voltages = [r for r in rows if r["phase"] == "signal" and "device_voltage" in r]

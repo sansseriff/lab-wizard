@@ -8,6 +8,7 @@ Each run produces one row in ``runs``; each integration produces one row in
 devices are looked up by name and auto-created on first reference.
 """
 
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, TYPE_CHECKING
@@ -19,11 +20,13 @@ from sqlalchemy.orm import Session
 from lab_wizard.lib.savers.base import SaverParams
 from lab_wizard.lib.savers.saver import GenericSaver
 from lab_wizard.lib.savers.schema import (
-    Base, Cryostat, Device, Measurement, MeasurementDetail, Run, RunType,
+    Base, Cryostat, Device, Measurement, MeasurementDetail, Run, RunType, add_missing_columns,
 )
 
 if TYPE_CHECKING:
     pass
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseSaverParams(SaverParams):
@@ -60,6 +63,9 @@ class DatabaseSaver(GenericSaver):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(f"sqlite:///{db_path}")
         Base.metadata.create_all(self.engine)
+        added = add_missing_columns(self.engine)
+        if added:
+            logger.info("Added %s to %s", ", ".join(added), db_path)
         self.session: Session = Session(self.engine)
         self._cryostat_id: int | None = None
         self._current_run: Run | None = None
@@ -108,6 +114,7 @@ class DatabaseSaver(GenericSaver):
         operator: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
+        instruments: dict[str, Any] | None = None,
     ) -> None:
         if cryostat:
             self.cryostat_name = cryostat
@@ -122,6 +129,7 @@ class DatabaseSaver(GenericSaver):
             operator=operator,
             description=description,
             config=config,
+            instruments=instruments,
         )
         self.session.add(self._current_run)
         self.session.commit()

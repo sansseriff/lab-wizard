@@ -37,8 +37,13 @@ class GenericSaver(ABC):
         operator: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
+        instruments: dict[str, Any] | None = None,
     ) -> None:
-        """Open a new run.  Called once per measurement program invocation."""
+        """Open a new run.  Called once per measurement program invocation.
+
+        ``config`` is the measurement's params; ``instruments`` is what each
+        instrument was configured with when the run started.
+        """
         ...
 
     @abstractmethod
@@ -100,6 +105,7 @@ class StandInSaver(GenericSaver):
         operator: str | None = None,
         description: str | None = None,
         config: dict[str, Any] | None = None,
+        instruments: dict[str, Any] | None = None,
     ) -> None:
         self.started = True
         self.run_info = {

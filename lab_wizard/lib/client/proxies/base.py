@@ -80,6 +80,24 @@ class RemoteProxy:
         # a proxy find its instrument again instead of failing forever.
         object.__setattr__(self, "_attribute_name", attribute_name)
 
+    @property
+    def attribute_name(self) -> "str | None":
+        """The name this instrument is known by, as a value.
+
+        Declared rather than left to ``__getattr__``, which would turn it into
+        a remote *call* — anything reading a proxy's name reflectively would
+        get a function back, and quietly use it as one.
+        """
+        return self._attribute_name
+
+    def configured_params(self) -> "dict | None":
+        """What this instrument is configured with, on the server that owns it.
+
+        Used to record a run's starting baseline. Static config, not live
+        state — reading it neither opens hardware nor needs a claim.
+        """
+        return self._session.call("params_get", {"path": self._inst_path})
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         # Union of every abstract method visible on this class's MRO, plus the

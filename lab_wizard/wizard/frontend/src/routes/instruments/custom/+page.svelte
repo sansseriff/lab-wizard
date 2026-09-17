@@ -1,6 +1,7 @@
 <script lang="ts">
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import TreeNode from '$lib/components/TreeNode.svelte';
+	import { type Claim, busyCounts, busyLabel } from '$lib/claims';
 	import type { TreeItem, TreePathRef } from '$lib/components/TreeNode.svelte';
 	import Trash from 'phosphor-svelte/lib/Trash';
 	import Plus from 'phosphor-svelte/lib/Plus';
@@ -11,6 +12,8 @@
 		path: string;
 		behavior_abc: string | null;
 		type_hint: string | null;
+		/** Set when a run holds this instrument right now. */
+		claimed_by?: string | null;
 	};
 	type InstrumentMeta = { type: string; class_name: string };
 	type Source = {
@@ -23,6 +26,7 @@
 		attributes: AttributeEntry[];
 		reachable: boolean;
 		error: string | null;
+		claims?: Claim[];
 	};
 	type Selection = {
 		id: string;
@@ -57,6 +61,7 @@
 	// daemons on this machine. A remote machine is flat by design.
 	const treeSources = $derived(sources.filter((s) => s.tree !== null));
 	const flatSources = $derived(sources.filter((s) => s.tree === null));
+	const busyCount = $derived(busyCounts(sources));
 
 	let selections = $state<Selection[]>([]);
 	let pickingMode = $state(false);
@@ -508,14 +513,24 @@
 			<div class="rounded border border-line bg-surface shadow-sm">
 				<div class="flex items-center justify-between border-b border-line px-3 py-2">
 					<span class="text-sm font-medium">{source.label}</span>
-					{#if source.kind === 'machine'}
-						<span
-							class="rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium text-accent-strong"
-							title="Used through that workspace's server, so it never contends with local hardware."
-						>
-							through server
-						</span>
-					{/if}
+					<div class="flex items-center gap-2">
+						{#if source.kind === 'machine'}
+							<span
+								class="rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium text-accent-strong"
+								title="Used through that workspace's server, so it never contends with local hardware."
+							>
+								through server
+							</span>
+						{/if}
+						{#if busyCount.get(source.name)}
+							<span
+								class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
+								title="A measurement is running against these. Building a resource for them is allowed; using them at the same time is not."
+							>
+								{busyCount.get(source.name)} in use
+							</span>
+						{/if}
+					</div>
 				</div>
 				<ScrollArea
 					class="relative overflow-hidden p-3"
@@ -537,6 +552,7 @@
 								isSelectable={pickingMode && pending === null}
 								isCompatible={() => true}
 								selectionLabel={(_n, p) => selectionLabelForAny(source, p)}
+								busyBadge={(_n, p) => busyLabel(source.claims, p)}
 								onSelect={(n, p) => onSelectTreeNode(source, n, p)}
 							/>
 						{/each}
@@ -570,7 +586,17 @@
 									disabled={!pickingMode || pending !== null}
 									onclick={() => onSelectAttribute(source, entry)}
 								>
-									<div class="font-mono text-xs font-medium">{entry.attribute_name}</div>
+									<div class="flex flex-wrap items-center gap-1.5">
+										<span class="font-mono text-xs font-medium">{entry.attribute_name}</span>
+										{#if entry.claimed_by}
+											<span
+												class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
+												title="A running measurement holds this. Building a resource for it is allowed; using it at the same time is not."
+											>
+												in use by {entry.claimed_by}
+											</span>
+										{/if}
+									</div>
 									<div class="text-[11px] text-muted">
 										{entry.type_hint ?? 'instrument'}
 										{#if entry.behavior_abc}· {entry.behavior_abc}{/if}
