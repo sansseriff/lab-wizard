@@ -4,6 +4,13 @@
 > [`lib/savers/schema.py`](../lab_wizard/lib/savers/schema.py) and
 > `DatabaseSaver` writes one row per observation. Not built: the `query.py`
 > pandas helpers, the `measurements_full` SQL view, and Alembic migrations.
+>
+> **Where practice has drifted from this plan**, and what to do about it, is in
+> [`semantic_data_plan.md`](semantic_data_plan.md): a row is written per
+> *observation* rather than per integration, so one point of a curve can span
+> two rows; nothing records which columns are axes and which are readings;
+> `runs.run_type` is a five-value enum that stores any procedure as `OTHER`;
+> and `runs.device_id` is always NULL because no measurement passes a device.
 
 ## Background and Motivation
 

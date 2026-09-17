@@ -481,7 +481,16 @@ and params rows that wrapped in the narrow column.
 
 ### Still not done
 
-- **5.6 provenance** (recording applied baselines) — deferred, as planned.
+- **5.6 provenance ✅ built afterwards.** A run records what each of its
+  instruments was configured with, beside the measurement's own params, in a
+  new `runs.instruments` column (added in place on older databases). Through a
+  server it needs the params the client cannot see, so the server gained a
+  `params_get` read: static config, no hardware touched, no claim needed.
+  *Found while building:* a proxy answers any unknown attribute with a remote
+  call, so reading `attribute_name` reflectively returned a function — it
+  became a dict key and failed at the database, and the safe-state log line had
+  been printing a function repr for routed instruments. Proxies now declare
+  `attribute_name`.
 - **The custom-resource picker does not show busy instruments**; only
   measurement creation does.
 - **A channel is not marked individually in the tree**, because the tree draws
