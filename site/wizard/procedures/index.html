@@ -1437,7 +1437,7 @@ is <a href="../../concepts/procedures/">Procedures</a>; this page is the section
 <p><code>/procedures</code> lists every procedure available here: the ones built into
 lab_wizard and the ones saved in this workspace's <code>config/procedures/</code>. Each row
 shows the roles it needs, the data columns it records, and its presets.</p>
-<p><img alt="The Procedures library, listing a workspace procedure and a built-in one, each with its roles and recorded columns" src="../../assets/screenshots/procedures-library.png" /></p>
+<p><img alt="The Procedures library, listing a workspace procedure and a built-in one, each with its roles and recorded columns" src="../../assets/screenshots/procedures-library.webp" /></p>
 <ul>
 <li><strong>New procedure</strong> starts from an empty sequence.</li>
 <li><strong>Duplicate</strong> opens a copy under a new name — the usual way to adapt a
@@ -1460,7 +1460,7 @@ the default it resolves to, a <code>with_parameter</code> shows the label it app
 Nested steps indent under their parent and collapse independently. A guard's
 exit action is shown at the end of its scope, so "the attenuator ends in its
 declared safe state" is visible rather than implied.</p>
-<p><img alt="The Workflow tab: the mcr_curve step tree on the left, the selected step's settings on the right" src="../../assets/screenshots/procedures-composer.png" /></p>
+<p><img alt="The Workflow tab: the mcr_curve step tree on the left, the selected step's settings on the right" src="../../assets/screenshots/procedures-composer.webp" /></p>
 <p>Selecting a row opens it in the inspector on the right. <strong>Add step</strong> offers the
 operations grouped by role: under <code>counter</code> you see what a counter can do, and
 choosing one binds it to that role. A step whose behavior no role has yet is
@@ -1499,7 +1499,7 @@ project and preset can change.</p>
 selected one: its name, type (<code>float</code>, <code>int</code>, <code>bool</code>, <code>str</code>, <code>sweep</code>), default,
 unit, and what it means. The description becomes a comment in every project's
 YAML, so it is worth writing.</p>
-<p><img alt="The Parameters tab: the parameter tree on the left, the selected parameter's settings on the right" src="../../assets/screenshots/procedures-parameters.png" /></p>
+<p><img alt="The Parameters tab: the parameter tree on the left, the selected parameter's settings on the right" src="../../assets/screenshots/procedures-parameters.webp" /></p>
 <p>The inspector counts how many steps reference the parameter, and renaming
 updates all of them. A parameter with no references is a parameter nothing
 reads — usually a leftover.</p>
@@ -1507,7 +1507,7 @@ reads — usually a leftover.</p>
 <p>A role is a name and a behavior — <code>counter: Counter</code> — and together they are the
 procedure's signature. A role names <em>a kind of instrument</em>, never a particular
 one, which is what lets the same procedure run on any rack.</p>
-<p><img alt="The Instrument roles tab: four roles with their behaviors and reference counts" src="../../assets/screenshots/procedures-roles.png" /></p>
+<p><img alt="The Instrument roles tab: four roles with their behaviors and reference counts" src="../../assets/screenshots/procedures-roles.webp" /></p>
 <p>The inspector shows the behavior's own description and <strong>how many of this
 workspace's instruments could fill it</strong>. A role nothing here can fill is legal —
 a server elsewhere may have one — but it is worth seeing as you declare it,
@@ -1522,7 +1522,7 @@ because that is exactly the portability cost of asking for something specific.</
   <code># wizard:procedure:start</code> and <code># wizard:procedure:end</code>; regenerating a
   project replaces only that block, so edits you make around it survive.</li>
 </ul>
-<p><img alt="The Python tab, showing the generated module for a procedure" src="../../assets/screenshots/procedures-python.png" /></p>
+<p><img alt="The Python tab, showing the generated module for a procedure" src="../../assets/screenshots/procedures-python.webp" /></p>
 <p>Nothing interprets the YAML at run time — a project runs the generated Python.
 The Python tab is there so that is never a mystery.</p>
 <h2 id="checking">Checking<a class="headerlink" href="#checking" title="Permanent link">&para;</a></h2>
@@ -1538,7 +1538,7 @@ stored in <code>config/measurements/&lt;procedure&gt;/&lt;preset&gt;.yml</code>.
 project; editing the preset afterwards changes no existing project.</p>
 <p>Presets are validated against the procedure's <strong>saved</strong> parameters, so the
 Presets tab waits for unsaved parameter changes to be saved.</p>
-<p><img alt="The Presets tab, with one saved preset for the procedure" src="../../assets/screenshots/procedures-presets.png" /></p>
+<p><img alt="The Presets tab, with one saved preset for the procedure" src="../../assets/screenshots/procedures-presets.webp" /></p>
 <h2 id="where-a-procedure-goes-next">Where a procedure goes next<a class="headerlink" href="#where-a-procedure-goes-next" title="Permanent link">&para;</a></h2>
 <p>A saved procedure appears in <a href="../measurements/">Create measurement</a> beside the
 hand-written measurements, with its roles to bind and its presets to choose

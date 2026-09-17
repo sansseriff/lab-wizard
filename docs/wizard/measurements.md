@@ -16,7 +16,7 @@ instruments they are the same thing: roles to fill and parameters to set.
 
 This page explains how the matching and code generation work.
 
-![Choosing what to run: hand-written measurements and procedures side by side](../assets/screenshots/measurements-choose.png)
+![Choosing what to run: hand-written measurements and procedures side by side](../assets/screenshots/measurements-choose.webp)
 
 ## How a measurement declares what it needs
 
@@ -53,7 +53,7 @@ reads these annotations and classifies each field:
 
 ## Matching resources to requirements
 
-![Binding roles to instruments, with one counter marked as in use by a running measurement](../assets/screenshots/measurements-bind.png)
+![Binding roles to instruments, with one counter marked as in use by a running measurement](../assets/screenshots/measurements-bind.webp)
 
 `GET /api/get-resources/{name}` returns, for each requirement, the candidates the
 user can pick from:
@@ -208,7 +208,7 @@ The script exits non-zero when the run does not succeed.
 `/measurements/projects` lists every project this workspace has generated,
 newest first: what it measures, what it is bound to, and when it was made.
 
-![The projects list, with two generated projects and what each is bound to](../assets/screenshots/projects.png)
+![The projects list, with two generated projects and what each is bound to](../assets/screenshots/projects.webp)
 
 The wizard does not run them — there is no launch button yet (see the
 [Roadmap](../roadmap.md#running-measurements)). A project is a folder you run

@@ -24,7 +24,7 @@ There is **no file (CSV/HDF5/Parquet) saver** yet. Dropping a
 `FileSaverParams`/`FileSaver` pair into `lib/savers/` would be
 [discovered](../concepts/config-and-discovery.md#type-discovery) automatically.
 
-![The savers page with a configured SQLite saver](../assets/screenshots/savers.png)
+![The savers page with a configured SQLite saver](../assets/screenshots/savers.webp)
 
 ### What a saver receives
 

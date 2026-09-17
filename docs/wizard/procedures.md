@@ -15,7 +15,7 @@ is [Procedures](../concepts/procedures.md); this page is the section itself.
 lab_wizard and the ones saved in this workspace's `config/procedures/`. Each row
 shows the roles it needs, the data columns it records, and its presets.
 
-![The Procedures library, listing a workspace procedure and a built-in one, each with its roles and recorded columns](../assets/screenshots/procedures-library.png)
+![The Procedures library, listing a workspace procedure and a built-in one, each with its roles and recorded columns](../assets/screenshots/procedures-library.webp)
 
 - **New procedure** starts from an empty sequence.
 - **Duplicate** opens a copy under a new name — the usual way to adapt a
@@ -43,7 +43,7 @@ Nested steps indent under their parent and collapse independently. A guard's
 exit action is shown at the end of its scope, so "the attenuator ends in its
 declared safe state" is visible rather than implied.
 
-![The Workflow tab: the mcr_curve step tree on the left, the selected step's settings on the right](../assets/screenshots/procedures-composer.png)
+![The Workflow tab: the mcr_curve step tree on the left, the selected step's settings on the right](../assets/screenshots/procedures-composer.webp)
 
 Selecting a row opens it in the inspector on the right. **Add step** offers the
 operations grouped by role: under `counter` you see what a counter can do, and
@@ -72,7 +72,7 @@ selected one: its name, type (`float`, `int`, `bool`, `str`, `sweep`), default,
 unit, and what it means. The description becomes a comment in every project's
 YAML, so it is worth writing.
 
-![The Parameters tab: the parameter tree on the left, the selected parameter's settings on the right](../assets/screenshots/procedures-parameters.png)
+![The Parameters tab: the parameter tree on the left, the selected parameter's settings on the right](../assets/screenshots/procedures-parameters.webp)
 
 The inspector counts how many steps reference the parameter, and renaming
 updates all of them. A parameter with no references is a parameter nothing
@@ -84,7 +84,7 @@ A role is a name and a behavior — `counter: Counter` — and together they are
 procedure's signature. A role names *a kind of instrument*, never a particular
 one, which is what lets the same procedure run on any rack.
 
-![The Instrument roles tab: four roles with their behaviors and reference counts](../assets/screenshots/procedures-roles.png)
+![The Instrument roles tab: four roles with their behaviors and reference counts](../assets/screenshots/procedures-roles.webp)
 
 The inspector shows the behavior's own description and **how many of this
 workspace's instruments could fill it**. A role nothing here can fill is legal —
@@ -101,7 +101,7 @@ because that is exactly the portability cost of asking for something specific.
   `# wizard:procedure:start` and `# wizard:procedure:end`; regenerating a
   project replaces only that block, so edits you make around it survive.
 
-![The Python tab, showing the generated module for a procedure](../assets/screenshots/procedures-python.png)
+![The Python tab, showing the generated module for a procedure](../assets/screenshots/procedures-python.webp)
 
 Nothing interprets the YAML at run time — a project runs the generated Python.
 The Python tab is there so that is never a mystery.
@@ -124,7 +124,7 @@ project; editing the preset afterwards changes no existing project.
 Presets are validated against the procedure's **saved** parameters, so the
 Presets tab waits for unsaved parameter changes to be saved.
 
-![The Presets tab, with one saved preset for the procedure](../assets/screenshots/procedures-presets.png)
+![The Presets tab, with one saved preset for the procedure](../assets/screenshots/procedures-presets.webp)
 
 ## Where a procedure goes next
 

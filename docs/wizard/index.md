@@ -35,7 +35,7 @@ graph LR
 The left rail has seven sections, each a noun rather than a task. These docs
 mirror them.
 
-![The wizard's Overview page, showing this workstation's server state and hardware owner](../assets/screenshots/overview.png)
+![The wizard's Overview page, showing this workstation's server state and hardware owner](../assets/screenshots/overview.webp)
 
 | Section | Route | What it is for | Page |
 |---|---|---|---|
