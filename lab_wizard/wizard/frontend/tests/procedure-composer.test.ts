@@ -237,10 +237,18 @@ test('saving an in-flight snapshot leaves later edits unsaved', () => {
 
 test('nested parameter groups remain selectable and renaming updates nested workflow references', async () => {
 	const { paramNodes, validIdentifier } = await import('../src/lib/procedures/model');
-	const editor = editorFor({ type: 'count', gate_time: { param: 'readout.gate_s' }, counter: { role: 'counter' } });
+	const editor = editorFor({
+		type: 'count',
+		gate_time: { param: 'readout.gate_s' },
+		counter: { role: 'counter' }
+	});
 	editor.definition.params = { readout: { gate_s: { type: 'float', default: 1 } }, empty: {} };
 	editor.definition.roles = { counter: { behavior: 'Counter' }, spare: { behavior: 'Counter' } };
-	expect(paramNodes(editor.definition.params).map(n => n.path.join('.'))).toEqual(['readout', 'readout.gate_s', 'empty']);
+	expect(paramNodes(editor.definition.params).map((n) => n.path.join('.'))).toEqual([
+		'readout',
+		'readout.gate_s',
+		'empty'
+	]);
 	expect(editor.renameParam([], 'readout', 'timing')).toBe(true);
 	expect(editor.definition.body.gate_time).toEqual({ param: 'timing.gate_s' });
 	expect(editor.renameParam(['timing'], 'gate_s', 'duration')).toBe(true);

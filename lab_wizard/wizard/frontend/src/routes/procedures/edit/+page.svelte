@@ -65,6 +65,7 @@
 	$effect(() => {
 		if (!editor) return;
 		void editor.json;
+		saveMessage = null;
 		editor.scheduleCheck();
 	});
 
@@ -114,9 +115,14 @@
 			if (previous !== savedName) {
 				hasBuiltin = false;
 				try {
-					const detail = await fetchWithConfig<{ has_builtin: boolean }>(`/api/procedures/${encodeURIComponent(savedName)}`, 'GET');
+					const detail = await fetchWithConfig<{ has_builtin: boolean }>(
+						`/api/procedures/${encodeURIComponent(savedName)}`,
+						'GET'
+					);
 					hasBuiltin = detail.has_builtin;
-				} catch { /* Keep the revert action hidden if metadata could not be refreshed. */ }
+				} catch {
+					/* Keep the revert action hidden if metadata could not be refreshed. */
+				}
 			}
 			replaceState(`/procedures/edit?name=${encodeURIComponent(savedName)}`, {});
 			saveMessage = { tone: 'ok', text };
@@ -151,6 +157,7 @@
 
 	async function applyYaml() {
 		if (!editor || yamlBusy || !yamlDirty) return;
+		const source = editor.json;
 		if (
 			yamlConflict &&
 			!confirm(
@@ -170,6 +177,10 @@
 				definition: out.definition
 			});
 			if (!checked.ok) throw new Error(checked.problems.map(problemLabel).join('\n'));
+			if (editor.json !== source)
+				throw new Error(
+					'The workflow changed while this draft was being checked. Review the changes before applying again.'
+				);
 			editor.definition = {
 				name: '',
 				description: '',

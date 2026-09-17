@@ -88,6 +88,7 @@ interchangeable. The behaviors live in `lib/instruments/general`:
 | [`VSense`](../../lab_wizard/lib/instruments/general/vsense.py) | `get_voltage` (+ `measure` alias) | `Sim970Channel` |
 | [`Counter`](../../lab_wizard/lib/instruments/general/counter.py) | `count`, `set_gate_time` / `get_gate_time`, `set_threshold` / `get_threshold` | `Keysight53220AChannel` |
 | [`Attenuator`](../../lab_wizard/lib/instruments/general/attenuator.py) | `set_attenuation` / `get_attenuation`, `open_shutter` / `close_shutter`, `get_max_attenuation`, `enter_safe_state` | `YokoAttenuator`, `Attenuator31` |
+| [`Laser`](../../lab_wizard/lib/instruments/general/laser.py) | `turn_on` / `turn_off` / `is_output_on`, `set_power_dbm` / `get_power_dbm`, `get_wavelength_nm`, `enter_safe_state` | `YokoLaser` |
 
 Getters sit beside setters wherever the hardware quantizes or clamps: the value
 asked for is not necessarily the value applied, and data is only interpretable

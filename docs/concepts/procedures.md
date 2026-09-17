@@ -83,6 +83,7 @@ generated setup file.
 | `set_threshold`, `count` | drive a `Counter`; `count` records `counts`, `int_time`, `count_rate` |
 | `read_voltage` | read a `VSense`; records the reading under `field` |
 | `set_attenuation`, `open_shutter`, `close_shutter` | drive an `Attenuator` |
+| `laser_on`, `laser_off`, `set_laser_power` | drive a `Laser` |
 
 Branching needs no expression language: every step succeeds, fails, or is
 aborted, and a condition is just a step that fails. `sequence` with a

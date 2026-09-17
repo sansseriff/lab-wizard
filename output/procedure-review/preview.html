@@ -1,0 +1,1528 @@
+<!doctype html>
+<html lang="en" data-visualize-standalone>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Mcr Composer</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit;max-width:1024px}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Mcr Composer" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot; data-visualize-standalone&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Mcr Composer&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --blue: light-dark(rgb(51 156 255), rgb(51 156 255));
+  --orange: light-dark(rgb(226 85 7), rgb(251 106 34));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --red: light-dark(rgb(224 46 42), rgb(255 103 100));
+  --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
+  --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --icon-size: 16px;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --corner-shape: round;
+  --radius: var(--border-radius-lg, 10px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: var(--visualize-paint-gutter, 0px);
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans) !important;
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: var(--corner-shape);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card, .progress) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+hr {
+  width: 100%;
+  height: 1px;
+  margin-block: 6px;
+  border: 0;
+  background: var(--border);
+}
+
+.nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.progress {
+  display: flex;
+  height: 8px;
+  margin-block: calc((var(--line-height-normal, 1.5em) - 8px) / 2);
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.progress-bar:only-child {
+  border-radius: var(--radius-full);
+}
+
+.progress-bar {
+  height: 100%;
+  flex-shrink: 0;
+  border: 0;
+  background: var(--viz-series-1);
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.nav-link,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn,
+.nav-link {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover,
+.nav-link:not(:disabled):not([aria-disabled=&quot;true&quot;]):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.nav-pills .nav-link {
+  min-width: 0;
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.nav-justified .nav-link {
+  flex: 1 1 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.nav-pills .nav-link.active {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.btn:disabled,
+.nav-link:disabled,
+.nav-link[aria-disabled=&quot;true&quot;] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: var(--corner-shape);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: var(--corner-shape);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: var(--corner-shape);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+  [aria-pressed=&quot;true&quot;],
+  [aria-selected=&quot;true&quot;],
+  .is-selected
+) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible,
+.nav-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .btn,
+  .nav-link,
+  .form-control,
+  .form-select {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Keep small-screen WebKit from zooming when a text field receives focus. */
+  .form-control,
+  .form-select {
+    font-size: max(16px, var(--font-size-normal));
+  }
+
+  .form-control[type=&quot;file&quot;]::file-selector-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .form-control-color[type=&quot;color&quot;] {
+    width: 44px;
+    height: 44px;
+  }
+
+  .form-control:is(
+    [type=&quot;date&quot;],
+    [type=&quot;datetime-local&quot;],
+    [type=&quot;month&quot;],
+    [type=&quot;time&quot;],
+    [type=&quot;week&quot;]
+  ) {
+    min-width: 0;
+    max-width: 100%;
+    padding-block: 8px;
+  }
+
+  .form-check {
+    min-height: 44px;
+    padding-inline: 15px;
+  }
+
+  .form-check-input {
+    position: relative;
+  }
+
+  .form-check-input::after {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    content: &quot;&quot;;
+    transform: translate(-50%, -50%);
+  }
+
+  .form-check-label {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .form-range {
+    height: 44px;
+    touch-action: pan-y;
+  }
+
+  .form-range::-webkit-slider-runnable-track {
+    height: 44px;
+  }
+
+  .form-range::-moz-range-track {
+    height: 44px;
+  }
+
+  .form-range::-webkit-slider-thumb {
+    margin-top: 12px;
+  }
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: var(--icon-size) !important;
+  height: var(--icon-size) !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;mcr-composer&quot; aria-label=&quot;Procedure composer concept&quot;&gt;
+  &lt;style&gt;
+    #mcr-composer{--mc-bg:light-dark(#f7f7fb,#0c0c16);--mc-panel:light-dark(#fff,#13131f);--mc-text:light-dark(#16162b,#e8e8f2);--mc-muted:light-dark(#60607c,#aaaac1);--mc-line:light-dark(#e2e2ec,#33334d);--mc-accent:light-dark(#4536d9,#b3acfa);--mc-wash:light-dark(#ecebfd,#242043);--mc-ok:light-dark(#17794a,#65cb96);font-family:Arial,sans-serif;color:var(--mc-text);background:var(--mc-bg);color-scheme:light dark}
+    #mcr-composer *{box-sizing:border-box}
+    #mcr-composer button,#mcr-composer input,#mcr-composer select{font:inherit;color:inherit}
+    #mcr-composer button{cursor:pointer}
+    #mcr-composer .mc-chrome{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 20px;background:var(--mc-panel);border-bottom:1px solid var(--mc-line)}
+    #mcr-composer .mc-brand{font-weight:500;letter-spacing:.06em}
+    #mcr-composer .mc-muted{color:var(--mc-muted)}
+    #mcr-composer .mc-main{padding:20px}
+    #mcr-composer .mc-head{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+    #mcr-composer h2,#mcr-composer h3,#mcr-composer p{margin:0}
+    #mcr-composer h2,#mcr-composer h3{font-weight:500}
+    #mcr-composer .mc-sub{margin-top:6px;color:var(--mc-muted)}
+    #mcr-composer .mc-status{color:var(--mc-ok)}
+    #mcr-composer .mc-tabs{display:flex;gap:20px;flex-wrap:wrap;border-bottom:1px solid var(--mc-line);margin-bottom:16px}
+    #mcr-composer .mc-tabs button{padding:10px 0;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--mc-muted)}
+    #mcr-composer .mc-tabs button[aria-selected=true]{color:var(--mc-accent);border-bottom-color:var(--mc-accent)}
+    #mcr-composer .mc-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:16px;align-items:start}
+    #mcr-composer .mc-flow,#mcr-composer .mc-inspector,#mcr-composer .mc-settings{background:var(--mc-panel);border:1px solid var(--mc-line);border-radius:6px;min-width:0}
+    #mcr-composer .mc-flow-head{padding:14px 16px;border-bottom:1px solid var(--mc-line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+    #mcr-composer .mc-tree{padding:10px}
+    #mcr-composer .mc-item{display:flex;align-items:center;gap:4px;min-width:0}
+    #mcr-composer .mc-row{display:flex;flex:1;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;text-align:left;padding:var(--mc-row-pad,9px) 10px;border:0;border-radius:4px;background:transparent}
+    #mcr-composer .mc-row:hover{background:var(--mc-bg)}
+    #mcr-composer .mc-row[aria-pressed=true]{background:var(--mc-wash);color:var(--mc-accent)}
+    #mcr-composer .mc-row span{overflow-wrap:anywhere}
+    #mcr-composer .mc-value{color:var(--mc-muted);text-align:right}
+    #mcr-composer .mc-toggle{width:24px;flex:none;padding:5px 0;border:0;background:transparent;color:var(--mc-muted)}
+    #mcr-composer .mc-spacer{width:24px;flex:none}
+    #mcr-composer .mc-children{margin-left:16px;padding-left:6px;border-left:1px solid var(--mc-line)}
+    #mcr-composer .mc-end{padding:8px 12px 10px 34px;color:var(--mc-muted);overflow-wrap:anywhere}
+    #mcr-composer .mc-inspector{padding:16px}
+    #mcr-composer .mc-inspector h3{margin:8px 0 16px}
+    #mcr-composer .mc-field{display:block;margin:14px 0}
+    #mcr-composer .mc-field&gt;span{display:block;margin-bottom:7px;color:var(--mc-muted)}
+    #mcr-composer .mc-input{display:block;width:100%;min-width:0;padding:8px;border:1px solid var(--mc-line);border-radius:4px;background:var(--mc-panel)}
+    #mcr-composer .mc-reference{display:block;width:100%;text-align:left;border:1px solid var(--mc-line);border-radius:4px;padding:9px;background:var(--mc-bg);color:var(--mc-accent);overflow-wrap:anywhere}
+    #mcr-composer .mc-note{padding-top:12px;margin-top:14px;border-top:1px solid var(--mc-line);color:var(--mc-muted);overflow-wrap:anywhere}
+    #mcr-composer .mc-settings{padding:16px}
+    #mcr-composer .mc-param{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--mc-line)}
+    #mcr-composer .mc-param label,#mcr-composer .mc-param div{overflow-wrap:anywhere;min-width:0}
+    #mcr-composer .mc-foot{padding:12px 0 0;color:var(--mc-muted)}
+    #mcr-composer .mc-inline-detail{margin:8px 8px 8px 34px}
+    #mcr-composer [hidden]{display:none!important}
+    @media(max-width:760px){#mcr-composer .mc-layout{grid-template-columns:minmax(0,1fr)}#mcr-composer .mc-main{padding:12px}#mcr-composer .mc-inspector{margin-top:4px}}
+    @media(max-width:440px){#mcr-composer .mc-row{flex-direction:column;gap:3px}#mcr-composer .mc-value{text-align:left}#mcr-composer .mc-children{margin-left:9px;padding-left:2px}#mcr-composer .mc-param{grid-template-columns:minmax(0,1fr)}#mcr-composer .mc-tabs{gap:12px}}
+    @media(pointer:coarse){#mcr-composer button{min-height:44px}#mcr-composer input{font-size:16px}}
+  &lt;/style&gt;
+  &lt;div class=&quot;mc-chrome&quot;&gt;&lt;span class=&quot;mc-brand&quot;&gt;LAB WIZARD&lt;/span&gt;&lt;span&gt;Procedures / &lt;strong&gt;mcr_curve&lt;/strong&gt;&lt;/span&gt;&lt;span class=&quot;mc-muted&quot;&gt;Layout concept&lt;/span&gt;&lt;/div&gt;
+  &lt;div class=&quot;mc-main&quot;&gt;
+    &lt;div class=&quot;mc-head&quot;&gt;&lt;div&gt;&lt;h2&gt;MCR curve&lt;/h2&gt;&lt;p class=&quot;mc-sub&quot;&gt;Count rate against attenuation, at a fixed bias.&lt;/p&gt;&lt;/div&gt;&lt;span class=&quot;mc-status&quot;&gt;✓ Definition valid&lt;/span&gt;&lt;/div&gt;
+    &lt;div class=&quot;mc-tabs&quot; role=&quot;tablist&quot; aria-label=&quot;Procedure sections&quot;&gt;
+      &lt;button role=&quot;tab&quot; aria-selected=&quot;true&quot; aria-controls=&quot;mc-flow-panel&quot; id=&quot;mc-flow-tab&quot; data-tab=&quot;flow&quot;&gt;Workflow&lt;/button&gt;
+      &lt;button role=&quot;tab&quot; aria-selected=&quot;false&quot; aria-controls=&quot;mc-params-panel&quot; id=&quot;mc-params-tab&quot; data-tab=&quot;params&quot;&gt;Parameters · 6&lt;/button&gt;
+      &lt;button role=&quot;tab&quot; aria-selected=&quot;false&quot; aria-controls=&quot;mc-roles-panel&quot; id=&quot;mc-roles-tab&quot; data-tab=&quot;roles&quot;&gt;Instrument roles · 4&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;section id=&quot;mc-flow-panel&quot; role=&quot;tabpanel&quot; aria-labelledby=&quot;mc-flow-tab&quot;&gt;
+      &lt;div class=&quot;mc-layout&quot;&gt;
+        &lt;div class=&quot;mc-flow&quot;&gt;&lt;div class=&quot;mc-flow-head&quot;&gt;&lt;span&gt;Execution order&lt;/span&gt;&lt;span class=&quot;mc-muted&quot;&gt;Values show parameter defaults&lt;/span&gt;&lt;/div&gt;&lt;div class=&quot;mc-tree&quot; id=&quot;mc-tree&quot;&gt;&lt;/div&gt;&lt;/div&gt;
+        &lt;aside class=&quot;mc-inspector&quot; id=&quot;mc-inspector&quot; aria-label=&quot;Selected step&quot;&gt;&lt;/aside&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+    &lt;section id=&quot;mc-params-panel&quot; role=&quot;tabpanel&quot; aria-labelledby=&quot;mc-params-tab&quot; hidden&gt;&lt;div class=&quot;mc-settings&quot; id=&quot;mc-parameters&quot;&gt;&lt;/div&gt;&lt;/section&gt;
+    &lt;section id=&quot;mc-roles-panel&quot; role=&quot;tabpanel&quot; aria-labelledby=&quot;mc-roles-tab&quot; hidden&gt;&lt;div class=&quot;mc-settings&quot; id=&quot;mc-roles&quot;&gt;&lt;/div&gt;&lt;/section&gt;
+    &lt;div class=&quot;mc-foot&quot; id=&quot;mc-foot&quot; aria-live=&quot;polite&quot;&gt;Selected: Count photons · Signal / Attenuation sweep&lt;/div&gt;
+  &lt;/div&gt;
+  &lt;script&gt;
+  (()=&gt;{
+    const root=document.getElementById(&#x27;mcr-composer&#x27;);
+    const state={density:&#x27;Comfortable&#x27;,placement:&#x27;Side panel&#x27;,names:false};
+    const params=[[&#x27;bias.voltage&#x27;,&#x27;Bias voltage&#x27;,&#x27;0&#x27;,&#x27;V&#x27;],[&#x27;bias.settle_s&#x27;,&#x27;Bias settling time&#x27;,&#x27;1&#x27;,&#x27;s&#x27;],[&#x27;attenuation.sweep&#x27;,&#x27;Attenuation sweep&#x27;,&#x27;30 → 0, step 1&#x27;,&#x27;dB&#x27;],[&#x27;attenuation.settle_s&#x27;,&#x27;Attenuator settling time&#x27;,&#x27;1&#x27;,&#x27;s&#x27;],[&#x27;readout.gate_time_s&#x27;,&#x27;Counting gate time&#x27;,&#x27;1&#x27;,&#x27;s&#x27;],[&#x27;readout.threshold_mV&#x27;,&#x27;Counter threshold&#x27;,&#x27;-50&#x27;,&#x27;mV&#x27;]];
+    const roles=[[&#x27;voltage_source&#x27;,&#x27;VSource&#x27;,&#x27;Biases the detector&#x27;],[&#x27;voltage_sense&#x27;,&#x27;VSense&#x27;,&#x27;Reads device voltage&#x27;],[&#x27;counter&#x27;,&#x27;Counter&#x27;,&#x27;Counts photons&#x27;],[&#x27;attenuator&#x27;,&#x27;Attenuator&#x27;,&#x27;Controls attenuation and shutter&#x27;]];
+    const nodes=[
+      {id:&#x27;threshold&#x27;,title:&#x27;Set counter threshold&#x27;,type:&#x27;set_threshold&#x27;,role:&#x27;counter&#x27;,param:5},
+      {id:&#x27;source&#x27;,title:&#x27;Source enabled&#x27;,type:&#x27;source_guard&#x27;,role:&#x27;voltage_source&#x27;,detail:&#x27;Return to 0 V, then off&#x27;,end:&#x27;On exit · return source to 0 V, then turn off&#x27;,children:[
+        {id:&#x27;safe&#x27;,title:&#x27;Attenuator safe-state scope&#x27;,type:&#x27;safe_guard&#x27;,role:&#x27;attenuator&#x27;,detail:&#x27;Restore on exit&#x27;,end:&#x27;On exit · restore attenuator safe state&#x27;,children:[
+          {id:&#x27;bias&#x27;,title:&#x27;Set bias voltage&#x27;,type:&#x27;set_voltage&#x27;,role:&#x27;voltage_source&#x27;,param:0},
+          {id:&#x27;wait-bias&#x27;,title:&#x27;Wait for bias to settle&#x27;,type:&#x27;wait&#x27;,param:1},
+          {id:&#x27;background&#x27;,title:&#x27;Background&#x27;,type:&#x27;with_parameter&#x27;,detail:&#x27;phase = background&#x27;,children:[
+            {id:&#x27;close&#x27;,title:&#x27;Close shutter&#x27;,type:&#x27;close_shutter&#x27;,role:&#x27;attenuator&#x27;},
+            {id:&#x27;wait-bg&#x27;,title:&#x27;Wait for attenuator to settle&#x27;,type:&#x27;wait&#x27;,param:3},
+            {id:&#x27;count-bg&#x27;,title:&#x27;Count photons&#x27;,type:&#x27;count&#x27;,role:&#x27;counter&#x27;,param:4,phase:&#x27;background&#x27;}]},
+          {id:&#x27;open&#x27;,title:&#x27;Open shutter&#x27;,type:&#x27;open_shutter&#x27;,role:&#x27;attenuator&#x27;},
+          {id:&#x27;signal&#x27;,title:&#x27;Signal&#x27;,type:&#x27;with_parameter&#x27;,detail:&#x27;phase = signal&#x27;,children:[
+            {id:&#x27;sweep&#x27;,title:&#x27;Sweep attenuation&#x27;,type:&#x27;sweep&#x27;,param:2,children:[
+              {id:&#x27;attenuation&#x27;,title:&#x27;Set attenuation&#x27;,type:&#x27;set_attenuation&#x27;,role:&#x27;attenuator&#x27;,detail:&#x27;Current sweep value&#x27;},
+              {id:&#x27;wait-signal&#x27;,title:&#x27;Wait for attenuator to settle&#x27;,type:&#x27;wait&#x27;,param:3},
+              {id:&#x27;count&#x27;,title:&#x27;Count photons&#x27;,type:&#x27;count&#x27;,role:&#x27;counter&#x27;,param:4,phase:&#x27;signal&#x27;},
+              {id:&#x27;read&#x27;,title:&#x27;Read device voltage&#x27;,type:&#x27;read_voltage&#x27;,role:&#x27;voltage_sense&#x27;,detail:&#x27;→ device_voltage&#x27;}]}]}
+        ]}
+      ]}
+    ];
+    const all={};function collect(list){list.forEach(n=&gt;{all[n.id]=n;if(n.children)collect(n.children)});}collect(nodes);
+    let selected=&#x27;count&#x27;;const closed=new Set();
+    const esc=v=&gt;String(v).replace(/[&amp;&lt;&gt;&quot;&#x27;]/g,c=&gt;({&#x27;&amp;&#x27;:&#x27;&amp;amp;&#x27;,&#x27;&lt;&#x27;:&#x27;&amp;lt;&#x27;,&#x27;&gt;&#x27;:&#x27;&amp;gt;&#x27;,&#x27;&quot;&#x27;:&#x27;&amp;quot;&#x27;,&quot;&#x27;&quot;:&#x27;&amp;#39;&#x27;}[c]));
+    const value=n=&gt;n.param!==undefined?params[n.param][2]+&#x27; &#x27;+params[n.param][3]:n.detail||n.role||&#x27;&#x27;;
+    function inspector(n){
+      const p=n.param!==undefined?params[n.param]:null;
+      let content=&#x27;&lt;span class=&quot;mc-muted&quot;&gt;Selected step · &#x27;+esc(n.type)+&#x27;&lt;/span&gt;&lt;h3&gt;&#x27;+esc(n.title)+&#x27;&lt;/h3&gt;&#x27;;
+      if(n.role)content+=&#x27;&lt;label class=&quot;mc-field&quot;&gt;&lt;span&gt;Instrument role&lt;/span&gt;&lt;button class=&quot;mc-reference&quot; data-go=&quot;roles&quot;&gt;&#x27;+esc(n.role)+&#x27; ↗&lt;/button&gt;&lt;/label&gt;&#x27;;
+      if(p)content+=&#x27;&lt;div class=&quot;mc-field&quot;&gt;&lt;span&gt;&#x27;+esc(p[1])+&#x27;&lt;/span&gt;&lt;button class=&quot;mc-reference&quot; data-param=&quot;&#x27;+n.param+&#x27;&quot;&gt;↗ &#x27;+esc(p[0])+&#x27;&lt;/button&gt;&lt;p class=&quot;mc-sub&quot;&gt;Default: &#x27;+esc(p[2]+&#x27; &#x27;+p[3])+&#x27;&lt;/p&gt;&lt;/div&gt;&#x27;;
+      if(n.type===&#x27;count&#x27;)content+=&#x27;&lt;div class=&quot;mc-note&quot;&gt;Records&lt;br&gt;counts · int_time · count_rate&lt;/div&gt;&lt;div class=&quot;mc-note&quot;&gt;Inherited row labels&lt;br&gt;phase = &#x27;+esc(n.phase)+(n.phase===&#x27;signal&#x27;?&#x27;&lt;br&gt;attenuation_db = current sweep value&#x27;:&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;;
+      else if(n.end)content+=&#x27;&lt;div class=&quot;mc-note&quot;&gt;&#x27;+esc(n.end)+&#x27;&lt;br&gt;Cleanup also runs when a child step fails or is aborted.&lt;/div&gt;&#x27;;
+      else if(n.type===&#x27;sweep&#x27;)content+=&#x27;&lt;div class=&quot;mc-note&quot;&gt;Repeat the enclosed steps for each value.&lt;br&gt;Row label: attenuation_db&lt;/div&gt;&#x27;;
+      else if(n.type===&#x27;with_parameter&#x27;)content+=&#x27;&lt;div class=&quot;mc-note&quot;&gt;&#x27;+esc(n.detail)+&#x27;&lt;br&gt;Applies to all rows recorded inside this phase.&lt;/div&gt;&#x27;;
+      else if(n.detail)content+=&#x27;&lt;div class=&quot;mc-note&quot;&gt;&#x27;+esc(n.detail)+&#x27;&lt;/div&gt;&#x27;;
+      return content;
+    }
+    function tree(list){return list.map(n=&gt;&#x27;&lt;div class=&quot;mc-node&quot;&gt;&lt;div class=&quot;mc-item&quot;&gt;&#x27;+(n.children?&#x27;&lt;button class=&quot;mc-toggle&quot; data-toggle=&quot;&#x27;+n.id+&#x27;&quot; aria-label=&quot;&#x27;+(closed.has(n.id)?&#x27;Expand &#x27;:&#x27;Collapse &#x27;)+esc(n.title)+&#x27;&quot; aria-expanded=&quot;&#x27;+!closed.has(n.id)+&#x27;&quot;&gt;&#x27;+(closed.has(n.id)?&#x27;▸&#x27;:&#x27;▾&#x27;)+&#x27;&lt;/button&gt;&#x27;:&#x27;&lt;span class=&quot;mc-spacer&quot;&gt;&lt;/span&gt;&#x27;)+&#x27;&lt;button class=&quot;mc-row&quot; data-select=&quot;&#x27;+n.id+&#x27;&quot; aria-pressed=&quot;&#x27;+(selected===n.id)+&#x27;&quot;&gt;&lt;span&gt;&#x27;+esc(state.names?n.type:n.title)+&#x27;&lt;/span&gt;&lt;span class=&quot;mc-value&quot;&gt;&#x27;+esc(value(n))+&#x27;&lt;/span&gt;&lt;/button&gt;&lt;/div&gt;&#x27;+(state.placement===&#x27;Inline&#x27;&amp;&amp;selected===n.id?&#x27;&lt;div class=&quot;mc-inspector mc-inline-detail&quot;&gt;&#x27;+inspector(n)+&#x27;&lt;/div&gt;&#x27;:&#x27;&#x27;)+(n.children&amp;&amp;!closed.has(n.id)?&#x27;&lt;div class=&quot;mc-children&quot;&gt;&#x27;+tree(n.children)+&#x27;&lt;/div&gt;&#x27;:&#x27;&#x27;)+(n.end?&#x27;&lt;div class=&quot;mc-end&quot;&gt;&#x27;+esc(n.end)+&#x27;&lt;/div&gt;&#x27;:&#x27;&#x27;)+&#x27;&lt;/div&gt;&#x27;).join(&#x27;&#x27;);}
+    function render(){
+      root.style.setProperty(&#x27;--mc-row-pad&#x27;,state.density===&#x27;Compact&#x27;?&#x27;5px&#x27;:&#x27;9px&#x27;);
+      root.querySelector(&#x27;#mc-tree&#x27;).innerHTML=tree(nodes);
+      root.querySelector(&#x27;#mc-inspector&#x27;).innerHTML=inspector(all[selected]);
+      root.querySelector(&#x27;#mc-inspector&#x27;).hidden=state.placement===&#x27;Inline&#x27;;
+      root.querySelector(&#x27;.mc-layout&#x27;).style.gridTemplateColumns=state.placement===&#x27;Inline&#x27;?&#x27;minmax(0,1fr)&#x27;:&#x27;&#x27;;
+      root.querySelector(&#x27;#mc-parameters&#x27;).innerHTML=&#x27;&lt;h3&gt;Parameter defaults&lt;/h3&gt;&#x27;+params.map((p,i)=&gt;&#x27;&lt;div class=&quot;mc-param&quot;&gt;&lt;label for=&quot;mc-param-&#x27;+i+&#x27;&quot;&gt;&#x27;+esc(p[1])+&#x27;&lt;div class=&quot;mc-muted&quot;&gt;&#x27;+esc(p[0])+&#x27;&lt;/div&gt;&lt;/label&gt;&lt;div&gt;&lt;input class=&quot;mc-input&quot; id=&quot;mc-param-&#x27;+i+&#x27;&quot; data-edit=&quot;&#x27;+i+&#x27;&quot; value=&quot;&#x27;+esc(p[2])+&#x27;&quot; aria-label=&quot;&#x27;+esc(p[1])+&#x27; default&quot;&gt;&lt;span class=&quot;mc-muted&quot;&gt;&#x27;+esc(p[3])+&#x27;&lt;/span&gt;&lt;/div&gt;&lt;/div&gt;&#x27;).join(&#x27;&#x27;);
+      root.querySelector(&#x27;#mc-roles&#x27;).innerHTML=&#x27;&lt;h3&gt;Required instrument behaviors&lt;/h3&gt;&#x27;+roles.map(r=&gt;&#x27;&lt;div class=&quot;mc-param&quot;&gt;&lt;div&gt;&#x27;+esc(r[0])+&#x27;&lt;div class=&quot;mc-muted&quot;&gt;&#x27;+esc(r[2])+&#x27;&lt;/div&gt;&lt;/div&gt;&lt;span&gt;&#x27;+esc(r[1])+&#x27;&lt;/span&gt;&lt;/div&gt;&#x27;).join(&#x27;&#x27;);
+    }
+    function showTab(name){root.querySelectorAll(&#x27;[data-tab]&#x27;).forEach(b=&gt;b.setAttribute(&#x27;aria-selected&#x27;,b.dataset.tab===name));[&#x27;flow&#x27;,&#x27;params&#x27;,&#x27;roles&#x27;].forEach(n=&gt;root.querySelector(&#x27;#mc-&#x27;+n+&#x27;-panel&#x27;).hidden=n!==name);}
+    root.addEventListener(&#x27;click&#x27;,e=&gt;{
+      const b=e.target.closest(&#x27;button&#x27;);if(!b)return;
+      if(b.dataset.select){selected=b.dataset.select;render();root.querySelector(&#x27;#mc-foot&#x27;).textContent=&#x27;Selected: &#x27;+all[selected].title;}
+      if(b.dataset.toggle){closed.has(b.dataset.toggle)?closed.delete(b.dataset.toggle):closed.add(b.dataset.toggle);render();}
+      if(b.dataset.tab)showTab(b.dataset.tab);
+      if(b.dataset.go)showTab(b.dataset.go);
+      if(b.dataset.param!==undefined){showTab(&#x27;params&#x27;);root.querySelector(&#x27;#mc-param-&#x27;+b.dataset.param).focus();}
+    });
+    root.addEventListener(&#x27;change&#x27;,e=&gt;{if(e.target.dataset.edit!==undefined){params[Number(e.target.dataset.edit)][2]=e.target.value;render();root.querySelector(&#x27;#mc-foot&#x27;).textContent=&#x27;Preview updated · parameter changes stay in this concept&#x27;;}});
+    root.querySelector(&#x27;.mc-tabs&#x27;).addEventListener(&#x27;keydown&#x27;,e=&gt;{if(![&#x27;ArrowLeft&#x27;,&#x27;ArrowRight&#x27;,&#x27;Home&#x27;,&#x27;End&#x27;].includes(e.key))return;const tabs=[...root.querySelectorAll(&#x27;[data-tab]&#x27;)];let i=tabs.indexOf(document.activeElement);if(i&lt;0)return;e.preventDefault();i=e.key===&#x27;Home&#x27;?0:e.key===&#x27;End&#x27;?tabs.length-1:(i+(e.key===&#x27;ArrowRight&#x27;?1:tabs.length-1))%tabs.length;tabs[i].focus();showTab(tabs[i].dataset.tab);});
+    render();
+    if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:render});tweak.addSelect(state,&#x27;placement&#x27;,{label:&#x27;Step editor&#x27;,options:[&#x27;Side panel&#x27;,&#x27;Inline&#x27;]});tweak.addSelect(state,&#x27;density&#x27;,{label:&#x27;Row spacing&#x27;,options:[&#x27;Comfortable&#x27;,&#x27;Compact&#x27;]});tweak.addToggle(state,&#x27;names&#x27;,{label:&#x27;Show internal step names&#x27;});}
+  })();
+  &lt;/script&gt;
+&lt;/div&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+  let lastPointerWasTouch = false;
+  let pinnedByTouch = false;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    pinnedByTouch = false;
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handlePointer = (event) =&gt; {
+    lastPointerWasTouch =
+      event.type === &quot;pointerdown&quot; &amp;&amp; event.pointerType === &quot;touch&quot;;
+  };
+  const handleTouchClick = (event) =&gt; {
+    const isTouch = event.pointerType === &quot;touch&quot; || lastPointerWasTouch;
+    lastPointerWasTouch = false;
+    if (!isTouch || event.detail === 0) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (
+      trigger == null ||
+      !trigger.isConnected ||
+      getContent(trigger).length === 0 ||
+      (pinnedByTouch &amp;&amp; activeTrigger === trigger)
+    ) {
+      if (pinnedByTouch) {
+        closeTooltip();
+      }
+      return;
+    }
+    openTooltip(trigger);
+    pinnedByTouch = activeTrigger === trigger;
+    window.setTimeout(() =&gt; {
+      if (activeTrigger === trigger &amp;&amp; !trigger.isConnected) {
+        closeTooltip(false);
+      }
+    }, 0);
+  };
+  const handleLeave = (event) =&gt; {
+    if (pinnedByTouch) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    lastPointerWasTouch = false;
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    lastPointerWasTouch = false;
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerdown&quot;, handlePointer);
+    document.removeEventListener(&quot;pointercancel&quot;, handlePointer);
+    document.removeEventListener(&quot;click&quot;, handleTouchClick);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerdown&quot;, handlePointer);
+  document.addEventListener(&quot;pointercancel&quot;, handlePointer);
+  document.addEventListener(&quot;click&quot;, handleTouchClick);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-tabs&quot;&gt;
+(() =&gt; {
+  const selector = &#x27;.nav[role=&quot;tablist&quot;] [role=&quot;tab&quot;]&#x27;;
+  const disabled = &#x27;:disabled,[aria-disabled=&quot;true&quot;]&#x27;;
+  const selectTab = (selected) =&gt; {
+    const panelId = selected.getAttribute(&quot;aria-controls&quot;);
+    for (const tab of selected.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;)) {
+      const active = tab === selected;
+      tab.classList.toggle(&quot;active&quot;, active);
+      tab.setAttribute(&quot;aria-selected&quot;, String(active));
+      const id = tab.getAttribute(&quot;aria-controls&quot;);
+      const panel = id &amp;&amp; document.getElementById(id);
+      if (panel != null) {
+        panel.hidden = id !== panelId;
+        if (!panel.hidden &amp;&amp; selected.id) {
+          panel.setAttribute(&quot;aria-labelledby&quot;, selected.id);
+        }
+      }
+    }
+  };
+  const interact = (event) =&gt; {
+    const tab = event.target?.closest?.(selector);
+    if (event.defaultPrevented || tab == null || tab.matches(disabled)) {
+      return;
+    }
+    if (event.type === &quot;click&quot;) {
+      selectTab(tab);
+      return;
+    }
+    const tabs = Array.from(
+      tab.closest(&#x27;[role=&quot;tablist&quot;]&#x27;).querySelectorAll(&#x27;[role=&quot;tab&quot;]&#x27;),
+    ).filter((candidate) =&gt; !candidate.matches(disabled));
+    const current = tabs.indexOf(tab);
+    let next;
+    if (event.key === &quot;ArrowRight&quot; || event.key === &quot;ArrowDown&quot;) {
+      next = (current + 1) % tabs.length;
+    } else if (event.key === &quot;ArrowLeft&quot; || event.key === &quot;ArrowUp&quot;) {
+      next = (current + tabs.length - 1) % tabs.length;
+    } else if (event.key === &quot;Home&quot;) {
+      next = 0;
+    } else if (event.key === &quot;End&quot;) {
+      next = tabs.length - 1;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    tabs[next].focus();
+    selectTab(tabs[next]);
+  };
+
+  for (const list of document.querySelectorAll(&#x27;.nav[role=&quot;tablist&quot;]&#x27;)) {
+    const selected =
+      list.querySelector(&#x27;[role=&quot;tab&quot;][aria-selected=&quot;true&quot;]&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;].active&#x27;) ??
+      list.querySelector(&#x27;[role=&quot;tab&quot;]&#x27;);
+    if (selected != null) {
+      selectTab(selected);
+    }
+  }
+  document.addEventListener(&quot;click&quot;, interact);
+  document.addEventListener(&quot;keydown&quot;, interact);
+  window.addEventListener(&quot;pagehide&quot;, () =&gt; {
+    document.removeEventListener(&quot;click&quot;, interact);
+    document.removeEventListener(&quot;keydown&quot;, interact);
+  }, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

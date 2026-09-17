@@ -1,8 +1,8 @@
 # Procedure composition plan
 
-> **Status: in progress.** Phases 0-5 and 7, and 6.1-6.4, are built. Next:
-> 6.5 (`Laser` ABC) and 6.6 (porting `AgilentN7764A`), plus the deferred 5.6
-> provenance.
+> **Status: in progress.** Phases 0-5 and 7, and 6.1-6.5, are built. Next:
+> 6.6 (porting `AgilentN7764A`) and the deferred 5.6 provenance, plus whatever
+> the database questions below settle on.
 
 How a measurement's *choreography* stops being hand-written Python buried in
 `lib/measurements/`, and becomes something composable, storable, and eventually
@@ -575,7 +575,7 @@ Largely additive — the existing two-page flow survives.
 
 ---
 
-## Phase 6 — `Attenuator` ABC and `mcr_curve` — 6.1-6.4 ✅ done, 6.5-6.6 ⬜
+## Phase 6 — `Attenuator` ABC and `mcr_curve` — 6.1-6.5 ✅ done, 6.6 ⬜
 
 The first procedure *authored* rather than hand-written, and the honest test of
 whether Phases 1-5 work. `mcr_curve` sweeps optical attenuation and records
@@ -684,10 +684,21 @@ served** — `config/instruments/yokogawa_aq2212_key_b3c9ab43/`, attribute
   not be told apart in the database. Making `runs.run_type` a plain string is a
   schema change (and there are no migrations yet — `database_plan.md`), so it is
   left as a decision rather than made here.
-- **6.5** *(later)* A `Laser` ABC has an implementer waiting too —
-  [`yokogawaAQ2212/modules/laser.py`](../lab_wizard/lib/instruments/yokogawaAQ2212/modules/laser.py),
-  with the same `set_output` / safe-state shape. Not needed for MCR; noted so
-  6.1's ABC design stays honest about being the second of three, not a one-off.
+- **6.5 ✅ `Laser` ABC** (`lib/instruments/general/laser.py`): output on/off,
+  power in dBm, and the wavelength it emits, with a safe state of *off*. The
+  AQ2212 module becomes `YokoLaser` (params `type` unchanged, so configs load),
+  gains offline getters and an `apply_baseline` that tunes to its configured
+  wavelength, and keeps `set_wavelength_nm` as a driver extra.
+
+  **Tuning is deliberately not in the contract.** Every laser reports its
+  wavelength; only a tunable one can be told to change it, and nothing sweeps
+  wavelength yet — putting it here would make a fixed-wavelength laser
+  implement a method it must refuse. It moves in when a procedure needs it.
+
+  Also built, because the ABC alone would leave a laser visible but unusable:
+  `RemoteLaser`, the `laser_on` / `laser_off` / `set_laser_power` steps, and
+  `safe_guard` accepting a `Laser`. A test composes a procedure that powers a
+  laser under a guard and checks it is off afterwards.
 - **6.6** *(optional)* Port [`AgilentN7764A`](../lab_wizard/lib/instruments/agilentN7764A.py)
   — 4-channel, legacy `AgilentN7764AConfig(BaseModel)` with no `type: Literal`,
   no `resource_class()`, no `create_inst()`, so `resource_catalog` cannot see it
@@ -759,7 +770,7 @@ the next holder a biased source.
 - **7.2** ✅ **`enter_safe_state()`** on `VSource` (0 V, then off) and
   `Attenuator` (6.1). Concrete on the ABC, so through a proxy it decomposes into
   calls the permission gate records individually — see the correction in 6.1.
-  `Laser` waits for its ABC (6.5).
+  `Laser` has its ABC as of 6.5.
 - **7.3** ✅ **`_query_methods_`**, merged across the MRO by
   `collect_query_methods` as a **union** — a subclass can add a query but not
   quietly turn an inherited one into a write. Declared on `VSense`
@@ -846,6 +857,7 @@ Everything that has to be created or changed, across this plan and
 | ✅ `RunLifecycle`, `LocalTransportClaim` | new | 7.4 |
 | ✅ `pcr_curve` sets its threshold from `PCRReadoutParams` | change | 0.8 |
 | ✅ `mcr_curve` — built-in procedure, simulated attenuator, `with_parameter` | new, composed | 6.4 |
+| ✅ `Laser` ABC, `YokoLaser`, `RemoteLaser`, laser steps, `safe_guard` accepts it | new | 6.5 |
 
 ### Server and client — `lib/server/`, `lib/client/`
 

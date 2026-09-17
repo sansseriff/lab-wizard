@@ -17,6 +17,7 @@ from lab_procedure import Status, Step
 
 from lab_wizard.lib.instruments.general.attenuator import Attenuator
 from lab_wizard.lib.instruments.general.counter import Counter
+from lab_wizard.lib.instruments.general.laser import Laser
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
 
@@ -91,6 +92,40 @@ class CloseShutter(Step):
 
     def run(self) -> Status:
         return Status.FAILED if self.attenuator.close_shutter() is False else Status.SUCCESS
+
+
+class LaserOn(Step):
+    """Start a laser emitting."""
+
+    def __init__(self, laser: Laser, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.laser = laser
+
+    def run(self) -> Status:
+        return Status.FAILED if self.laser.turn_on() is False else Status.SUCCESS
+
+
+class LaserOff(Step):
+    """Stop a laser emitting."""
+
+    def __init__(self, laser: Laser, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.laser = laser
+
+    def run(self) -> Status:
+        return Status.FAILED if self.laser.turn_off() is False else Status.SUCCESS
+
+
+class SetLaserPower(Step):
+    """Set a laser's output power, in dBm."""
+
+    def __init__(self, laser: Laser, power_dbm: float, name: str | None = None) -> None:
+        super().__init__(name=name)
+        self.laser = laser
+        self.power_dbm = power_dbm
+
+    def run(self) -> Status:
+        return Status.FAILED if self.laser.set_power_dbm(self.power_dbm) is False else Status.SUCCESS
 
 
 class Count(Step):

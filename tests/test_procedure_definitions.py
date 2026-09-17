@@ -76,7 +76,12 @@ def test_the_catalog_describes_fields_for_a_palette():
     assert count["emits"] == ["counts", "int_time", "count_rate"]
     assert catalog["sweep"]["fields"]["body"]["kind"] == "step"
     assert catalog["sequence"]["fields"]["children"]["kind"] == "steps"
-    assert catalog["safe_guard"]["fields"]["instrument"]["requires"] == ["VSource", "Attenuator"]
+    # Every behavior that declares a safe state of its own, and only those.
+    assert catalog["safe_guard"]["fields"]["instrument"]["requires"] == [
+        "VSource",
+        "Attenuator",
+        "Laser",
+    ]
 
 
 def test_an_unknown_step_type_names_the_known_ones():

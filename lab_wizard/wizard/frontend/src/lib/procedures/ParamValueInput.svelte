@@ -80,17 +80,17 @@
 		</select>
 		{#if sweep.mode === 'linear'}
 			<div class="grid grid-cols-3 gap-2">
-			{#each ['start', 'stop', 'step'] as const as part (part)}
-				<label class="flex min-w-0 flex-col gap-1 text-xs text-muted">
-					{part}
-					<input
-						class="lw-input mono w-full"
-						value={sweep[part]}
-						onchange={(e) => onchange({ ...sweep, [part]: num(e.currentTarget.value) })}
-						aria-label="{label}: {part}"
-					/>
-				</label>
-			{/each}
+				{#each ['start', 'stop', 'step'] as const as part (part)}
+					<label class="flex min-w-0 flex-col gap-1 text-xs text-muted">
+						{part}
+						<input
+							class="lw-input mono w-full"
+							value={sweep[part]}
+							onchange={(e) => onchange({ ...sweep, [part]: num(e.currentTarget.value) })}
+							aria-label="{label}: {part}"
+						/>
+					</label>
+				{/each}
 			</div>
 		{:else}
 			<input

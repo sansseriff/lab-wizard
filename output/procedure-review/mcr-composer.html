@@ -1,0 +1,135 @@
+<div id="mcr-composer" aria-label="Procedure composer concept">
+  <style>
+    #mcr-composer{--mc-bg:light-dark(#f7f7fb,#0c0c16);--mc-panel:light-dark(#fff,#13131f);--mc-text:light-dark(#16162b,#e8e8f2);--mc-muted:light-dark(#60607c,#aaaac1);--mc-line:light-dark(#e2e2ec,#33334d);--mc-accent:light-dark(#4536d9,#b3acfa);--mc-wash:light-dark(#ecebfd,#242043);--mc-ok:light-dark(#17794a,#65cb96);font-family:Arial,sans-serif;color:var(--mc-text);background:var(--mc-bg);color-scheme:light dark}
+    #mcr-composer *{box-sizing:border-box}
+    #mcr-composer button,#mcr-composer input,#mcr-composer select{font:inherit;color:inherit}
+    #mcr-composer button{cursor:pointer}
+    #mcr-composer .mc-chrome{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 20px;background:var(--mc-panel);border-bottom:1px solid var(--mc-line)}
+    #mcr-composer .mc-brand{font-weight:500;letter-spacing:.06em}
+    #mcr-composer .mc-muted{color:var(--mc-muted)}
+    #mcr-composer .mc-main{padding:20px}
+    #mcr-composer .mc-head{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px}
+    #mcr-composer h2,#mcr-composer h3,#mcr-composer p{margin:0}
+    #mcr-composer h2,#mcr-composer h3{font-weight:500}
+    #mcr-composer .mc-sub{margin-top:6px;color:var(--mc-muted)}
+    #mcr-composer .mc-status{color:var(--mc-ok)}
+    #mcr-composer .mc-tabs{display:flex;gap:20px;flex-wrap:wrap;border-bottom:1px solid var(--mc-line);margin-bottom:16px}
+    #mcr-composer .mc-tabs button{padding:10px 0;background:transparent;border:0;border-bottom:2px solid transparent;color:var(--mc-muted)}
+    #mcr-composer .mc-tabs button[aria-selected=true]{color:var(--mc-accent);border-bottom-color:var(--mc-accent)}
+    #mcr-composer .mc-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:16px;align-items:start}
+    #mcr-composer .mc-flow,#mcr-composer .mc-inspector,#mcr-composer .mc-settings{background:var(--mc-panel);border:1px solid var(--mc-line);border-radius:6px;min-width:0}
+    #mcr-composer .mc-flow-head{padding:14px 16px;border-bottom:1px solid var(--mc-line);display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px}
+    #mcr-composer .mc-tree{padding:10px}
+    #mcr-composer .mc-item{display:flex;align-items:center;gap:4px;min-width:0}
+    #mcr-composer .mc-row{display:flex;flex:1;align-items:baseline;justify-content:space-between;gap:10px;min-width:0;text-align:left;padding:var(--mc-row-pad,9px) 10px;border:0;border-radius:4px;background:transparent}
+    #mcr-composer .mc-row:hover{background:var(--mc-bg)}
+    #mcr-composer .mc-row[aria-pressed=true]{background:var(--mc-wash);color:var(--mc-accent)}
+    #mcr-composer .mc-row span{overflow-wrap:anywhere}
+    #mcr-composer .mc-value{color:var(--mc-muted);text-align:right}
+    #mcr-composer .mc-toggle{width:24px;flex:none;padding:5px 0;border:0;background:transparent;color:var(--mc-muted)}
+    #mcr-composer .mc-spacer{width:24px;flex:none}
+    #mcr-composer .mc-children{margin-left:16px;padding-left:6px;border-left:1px solid var(--mc-line)}
+    #mcr-composer .mc-end{padding:8px 12px 10px 34px;color:var(--mc-muted);overflow-wrap:anywhere}
+    #mcr-composer .mc-inspector{padding:16px}
+    #mcr-composer .mc-inspector h3{margin:8px 0 16px}
+    #mcr-composer .mc-field{display:block;margin:14px 0}
+    #mcr-composer .mc-field>span{display:block;margin-bottom:7px;color:var(--mc-muted)}
+    #mcr-composer .mc-input{display:block;width:100%;min-width:0;padding:8px;border:1px solid var(--mc-line);border-radius:4px;background:var(--mc-panel)}
+    #mcr-composer .mc-reference{display:block;width:100%;text-align:left;border:1px solid var(--mc-line);border-radius:4px;padding:9px;background:var(--mc-bg);color:var(--mc-accent);overflow-wrap:anywhere}
+    #mcr-composer .mc-note{padding-top:12px;margin-top:14px;border-top:1px solid var(--mc-line);color:var(--mc-muted);overflow-wrap:anywhere}
+    #mcr-composer .mc-settings{padding:16px}
+    #mcr-composer .mc-param{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:16px;padding:12px 0;border-bottom:1px solid var(--mc-line)}
+    #mcr-composer .mc-param label,#mcr-composer .mc-param div{overflow-wrap:anywhere;min-width:0}
+    #mcr-composer .mc-foot{padding:12px 0 0;color:var(--mc-muted)}
+    #mcr-composer .mc-inline-detail{margin:8px 8px 8px 34px}
+    #mcr-composer [hidden]{display:none!important}
+    @media(max-width:760px){#mcr-composer .mc-layout{grid-template-columns:minmax(0,1fr)}#mcr-composer .mc-main{padding:12px}#mcr-composer .mc-inspector{margin-top:4px}}
+    @media(max-width:440px){#mcr-composer .mc-row{flex-direction:column;gap:3px}#mcr-composer .mc-value{text-align:left}#mcr-composer .mc-children{margin-left:9px;padding-left:2px}#mcr-composer .mc-param{grid-template-columns:minmax(0,1fr)}#mcr-composer .mc-tabs{gap:12px}}
+    @media(pointer:coarse){#mcr-composer button{min-height:44px}#mcr-composer input{font-size:16px}}
+  </style>
+  <div class="mc-chrome"><span class="mc-brand">LAB WIZARD</span><span>Procedures / <strong>mcr_curve</strong></span><span class="mc-muted">Layout concept</span></div>
+  <div class="mc-main">
+    <div class="mc-head"><div><h2>MCR curve</h2><p class="mc-sub">Count rate against attenuation, at a fixed bias.</p></div><span class="mc-status">✓ Definition valid</span></div>
+    <div class="mc-tabs" role="tablist" aria-label="Procedure sections">
+      <button role="tab" aria-selected="true" aria-controls="mc-flow-panel" id="mc-flow-tab" data-tab="flow">Workflow</button>
+      <button role="tab" aria-selected="false" aria-controls="mc-params-panel" id="mc-params-tab" data-tab="params">Parameters · 6</button>
+      <button role="tab" aria-selected="false" aria-controls="mc-roles-panel" id="mc-roles-tab" data-tab="roles">Instrument roles · 4</button>
+    </div>
+    <section id="mc-flow-panel" role="tabpanel" aria-labelledby="mc-flow-tab">
+      <div class="mc-layout">
+        <div class="mc-flow"><div class="mc-flow-head"><span>Execution order</span><span class="mc-muted">Values show parameter defaults</span></div><div class="mc-tree" id="mc-tree"></div></div>
+        <aside class="mc-inspector" id="mc-inspector" aria-label="Selected step"></aside>
+      </div>
+    </section>
+    <section id="mc-params-panel" role="tabpanel" aria-labelledby="mc-params-tab" hidden><div class="mc-settings" id="mc-parameters"></div></section>
+    <section id="mc-roles-panel" role="tabpanel" aria-labelledby="mc-roles-tab" hidden><div class="mc-settings" id="mc-roles"></div></section>
+    <div class="mc-foot" id="mc-foot" aria-live="polite">Selected: Count photons · Signal / Attenuation sweep</div>
+  </div>
+  <script>
+  (()=>{
+    const root=document.getElementById('mcr-composer');
+    const state={density:'Comfortable',placement:'Side panel',names:false};
+    const params=[['bias.voltage','Bias voltage','0','V'],['bias.settle_s','Bias settling time','1','s'],['attenuation.sweep','Attenuation sweep','30 → 0, step 1','dB'],['attenuation.settle_s','Attenuator settling time','1','s'],['readout.gate_time_s','Counting gate time','1','s'],['readout.threshold_mV','Counter threshold','-50','mV']];
+    const roles=[['voltage_source','VSource','Biases the detector'],['voltage_sense','VSense','Reads device voltage'],['counter','Counter','Counts photons'],['attenuator','Attenuator','Controls attenuation and shutter']];
+    const nodes=[
+      {id:'threshold',title:'Set counter threshold',type:'set_threshold',role:'counter',param:5},
+      {id:'source',title:'Source enabled',type:'source_guard',role:'voltage_source',detail:'Return to 0 V, then off',end:'On exit · return source to 0 V, then turn off',children:[
+        {id:'safe',title:'Attenuator safe-state scope',type:'safe_guard',role:'attenuator',detail:'Restore on exit',end:'On exit · restore attenuator safe state',children:[
+          {id:'bias',title:'Set bias voltage',type:'set_voltage',role:'voltage_source',param:0},
+          {id:'wait-bias',title:'Wait for bias to settle',type:'wait',param:1},
+          {id:'background',title:'Background',type:'with_parameter',detail:'phase = background',children:[
+            {id:'close',title:'Close shutter',type:'close_shutter',role:'attenuator'},
+            {id:'wait-bg',title:'Wait for attenuator to settle',type:'wait',param:3},
+            {id:'count-bg',title:'Count photons',type:'count',role:'counter',param:4,phase:'background'}]},
+          {id:'open',title:'Open shutter',type:'open_shutter',role:'attenuator'},
+          {id:'signal',title:'Signal',type:'with_parameter',detail:'phase = signal',children:[
+            {id:'sweep',title:'Sweep attenuation',type:'sweep',param:2,children:[
+              {id:'attenuation',title:'Set attenuation',type:'set_attenuation',role:'attenuator',detail:'Current sweep value'},
+              {id:'wait-signal',title:'Wait for attenuator to settle',type:'wait',param:3},
+              {id:'count',title:'Count photons',type:'count',role:'counter',param:4,phase:'signal'},
+              {id:'read',title:'Read device voltage',type:'read_voltage',role:'voltage_sense',detail:'→ device_voltage'}]}]}
+        ]}
+      ]}
+    ];
+    const all={};function collect(list){list.forEach(n=>{all[n.id]=n;if(n.children)collect(n.children)});}collect(nodes);
+    let selected='count';const closed=new Set();
+    const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const value=n=>n.param!==undefined?params[n.param][2]+' '+params[n.param][3]:n.detail||n.role||'';
+    function inspector(n){
+      const p=n.param!==undefined?params[n.param]:null;
+      let content='<span class="mc-muted">Selected step · '+esc(n.type)+'</span><h3>'+esc(n.title)+'</h3>';
+      if(n.role)content+='<label class="mc-field"><span>Instrument role</span><button class="mc-reference" data-go="roles">'+esc(n.role)+' ↗</button></label>';
+      if(p)content+='<div class="mc-field"><span>'+esc(p[1])+'</span><button class="mc-reference" data-param="'+n.param+'">↗ '+esc(p[0])+'</button><p class="mc-sub">Default: '+esc(p[2]+' '+p[3])+'</p></div>';
+      if(n.type==='count')content+='<div class="mc-note">Records<br>counts · int_time · count_rate</div><div class="mc-note">Inherited row labels<br>phase = '+esc(n.phase)+(n.phase==='signal'?'<br>attenuation_db = current sweep value':'')+'</div>';
+      else if(n.end)content+='<div class="mc-note">'+esc(n.end)+'<br>Cleanup also runs when a child step fails or is aborted.</div>';
+      else if(n.type==='sweep')content+='<div class="mc-note">Repeat the enclosed steps for each value.<br>Row label: attenuation_db</div>';
+      else if(n.type==='with_parameter')content+='<div class="mc-note">'+esc(n.detail)+'<br>Applies to all rows recorded inside this phase.</div>';
+      else if(n.detail)content+='<div class="mc-note">'+esc(n.detail)+'</div>';
+      return content;
+    }
+    function tree(list){return list.map(n=>'<div class="mc-node"><div class="mc-item">'+(n.children?'<button class="mc-toggle" data-toggle="'+n.id+'" aria-label="'+(closed.has(n.id)?'Expand ':'Collapse ')+esc(n.title)+'" aria-expanded="'+!closed.has(n.id)+'">'+(closed.has(n.id)?'▸':'▾')+'</button>':'<span class="mc-spacer"></span>')+'<button class="mc-row" data-select="'+n.id+'" aria-pressed="'+(selected===n.id)+'"><span>'+esc(state.names?n.type:n.title)+'</span><span class="mc-value">'+esc(value(n))+'</span></button></div>'+(state.placement==='Inline'&&selected===n.id?'<div class="mc-inspector mc-inline-detail">'+inspector(n)+'</div>':'')+(n.children&&!closed.has(n.id)?'<div class="mc-children">'+tree(n.children)+'</div>':'')+(n.end?'<div class="mc-end">'+esc(n.end)+'</div>':'')+'</div>').join('');}
+    function render(){
+      root.style.setProperty('--mc-row-pad',state.density==='Compact'?'5px':'9px');
+      root.querySelector('#mc-tree').innerHTML=tree(nodes);
+      root.querySelector('#mc-inspector').innerHTML=inspector(all[selected]);
+      root.querySelector('#mc-inspector').hidden=state.placement==='Inline';
+      root.querySelector('.mc-layout').style.gridTemplateColumns=state.placement==='Inline'?'minmax(0,1fr)':'';
+      root.querySelector('#mc-parameters').innerHTML='<h3>Parameter defaults</h3>'+params.map((p,i)=>'<div class="mc-param"><label for="mc-param-'+i+'">'+esc(p[1])+'<div class="mc-muted">'+esc(p[0])+'</div></label><div><input class="mc-input" id="mc-param-'+i+'" data-edit="'+i+'" value="'+esc(p[2])+'" aria-label="'+esc(p[1])+' default"><span class="mc-muted">'+esc(p[3])+'</span></div></div>').join('');
+      root.querySelector('#mc-roles').innerHTML='<h3>Required instrument behaviors</h3>'+roles.map(r=>'<div class="mc-param"><div>'+esc(r[0])+'<div class="mc-muted">'+esc(r[2])+'</div></div><span>'+esc(r[1])+'</span></div>').join('');
+    }
+    function showTab(name){root.querySelectorAll('[data-tab]').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===name));['flow','params','roles'].forEach(n=>root.querySelector('#mc-'+n+'-panel').hidden=n!==name);}
+    root.addEventListener('click',e=>{
+      const b=e.target.closest('button');if(!b)return;
+      if(b.dataset.select){selected=b.dataset.select;render();root.querySelector('#mc-foot').textContent='Selected: '+all[selected].title;}
+      if(b.dataset.toggle){closed.has(b.dataset.toggle)?closed.delete(b.dataset.toggle):closed.add(b.dataset.toggle);render();}
+      if(b.dataset.tab)showTab(b.dataset.tab);
+      if(b.dataset.go)showTab(b.dataset.go);
+      if(b.dataset.param!==undefined){showTab('params');root.querySelector('#mc-param-'+b.dataset.param).focus();}
+    });
+    root.addEventListener('change',e=>{if(e.target.dataset.edit!==undefined){params[Number(e.target.dataset.edit)][2]=e.target.value;render();root.querySelector('#mc-foot').textContent='Preview updated · parameter changes stay in this concept';}});
+    root.querySelector('.mc-tabs').addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;const tabs=[...root.querySelectorAll('[data-tab]')];let i=tabs.indexOf(document.activeElement);if(i<0)return;e.preventDefault();i=e.key==='Home'?0:e.key==='End'?tabs.length-1:(i+(e.key==='ArrowRight'?1:tabs.length-1))%tabs.length;tabs[i].focus();showTab(tabs[i].dataset.tab);});
+    render();
+    if(globalThis.Tweak){const tweak=new Tweak({container:root,onChange:render});tweak.addSelect(state,'placement',{label:'Step editor',options:['Side panel','Inline']});tweak.addSelect(state,'density',{label:'Row spacing',options:['Comfortable','Compact']});tweak.addToggle(state,'names',{label:'Show internal step names'});}
+  })();
+  </script>
+</div>

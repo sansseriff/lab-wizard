@@ -10,11 +10,14 @@ from lab_wizard.lib.procedures.spec import AnyStep, Requires, RoleRef, StepClass
 from lab_wizard.lib.task_adapters.instrument_steps import (
     CloseShutter,
     Count,
+    LaserOff,
+    LaserOn,
     OpenShutter,
     ReadVoltage,
     ReturnToZeroAndOff,
     SafeGuard,
     SetAttenuation,
+    SetLaserPower,
     SetThreshold,
     SetVoltage,
     SourceGuard,
@@ -23,7 +26,7 @@ from lab_wizard.lib.task_adapters.instrument_steps import (
 )
 
 # Behaviors that declare a safe state, for the guard.
-_HAS_SAFE_STATE = ("VSource", "Attenuator")
+_HAS_SAFE_STATE = ("VSource", "Attenuator", "Laser")
 
 
 class SetVoltageStepParams(StepParams):
@@ -179,3 +182,37 @@ class CloseShutterStepParams(StepParams):
     @classmethod
     def step_class(cls) -> StepClass:
         return CloseShutter
+
+
+class LaserOnStepParams(StepParams):
+    """Start a laser emitting."""
+
+    type: Literal["laser_on"] = "laser_on"
+    laser: Annotated[RoleRef, Requires("Laser")]
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return LaserOn
+
+
+class LaserOffStepParams(StepParams):
+    """Stop a laser emitting."""
+
+    type: Literal["laser_off"] = "laser_off"
+    laser: Annotated[RoleRef, Requires("Laser")]
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return LaserOff
+
+
+class SetLaserPowerStepParams(StepParams):
+    """Set a laser's output power, in dBm."""
+
+    type: Literal["set_laser_power"] = "set_laser_power"
+    laser: Annotated[RoleRef, Requires("Laser")]
+    power_dbm: Value
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return SetLaserPower
