@@ -17,7 +17,9 @@ from typing import Any
 
 from lab_wizard.lib.plotters.plotter import GenericPlotter
 from lab_wizard.lib.procedures.codegen import (
+    DEFINITION_BLOCK,
     PROCEDURE_BLOCK,
+    definition_block,
     measurement_module_source,
     procedure_block,
     setup_template_source,
@@ -85,8 +87,9 @@ _IMPORT_LINE = re.compile(r"^from (\S+) import (.+)$")
 def refresh_procedure_source(config_dir: Path, project_dir: Path) -> Path:
     """Regenerate a project's step tree from its procedure's current definition.
 
-    Only the ``wizard:procedure`` block is replaced, so anything edited outside
-    it — an extra helper, a changed ``run_measurement`` — survives. Any step
+    Only the ``wizard:procedure`` block, and the ``wizard:definition`` block
+    recording the definition it came from, are replaced, so anything edited
+    outside them — an extra helper, a changed ``run_measurement`` — survives. Any step
     class the new tree needs and the file does not yet import is added.
     """
     project = load_project_config(project_dir / f"{project_dir.name}.yaml")
@@ -96,6 +99,7 @@ def refresh_procedure_source(config_dir: Path, project_dir: Path) -> Path:
 
     block, needed = procedure_block(definition)
     text = _replace_wizard_block(text, PROCEDURE_BLOCK, block)
+    text = _replace_wizard_block(text, DEFINITION_BLOCK, definition_block(definition))
 
     present: set[tuple[str, str]] = set()
     for line in text.splitlines():

@@ -94,6 +94,6 @@ if __name__ == "__main__":
         ],
     ).run(
         resolve=lambda: create_instrument_resources(project, resource_source),
-        execute=lambda resources: PCRCurveMeasurement(resources).run_measurement(),
+        execute=lambda resources: PCRCurveMeasurement(resources).run_measurement(project_dir),
     )
     raise SystemExit(0 if status is Status.SUCCESS else 1)

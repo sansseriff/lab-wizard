@@ -15,15 +15,25 @@ def now() -> datetime:
 
 @dataclass(frozen=True)
 class RunStarted:
-    run_type: str
+    """Everything known about a run before its first reading."""
+
+    procedure: str
     device: str | None = None
-    cryostat: str | None = None
     operator: str | None = None
-    description: str | None = None
-    config: dict[str, Any] = field(default_factory=dict)
-    # How the instruments themselves were configured when the run started —
-    # {name: params}. The measurement's own params are `config`.
+    notes: str | None = None
+    # The project the run belongs to, by directory name.
+    project: str | None = None
+    # Free-form facts about the run: {"cryostat": "BlueFors1"}.
+    metadata: dict[str, Any] = field(default_factory=dict)
+    # The procedure definition that built the step tree, as data.
+    definition: dict[str, Any] | None = None
+    # The measurement's own params: the sweep, the gate time.
+    params: dict[str, Any] = field(default_factory=dict)
+    # How each instrument was configured when the run started, by role.
     instruments: dict[str, Any] = field(default_factory=dict)
+    # The columns the run's rows can carry: {name: {"unit": ...}}.
+    columns: dict[str, Any] = field(default_factory=dict)
+    t: datetime = field(default_factory=now)
 
 
 @dataclass(frozen=True)
@@ -62,6 +72,8 @@ class StepBegan:
     parent_id: NodeId | None
     label: str
     determinate: bool
+    # The step's type as a definition names it: "sweep", "count".
+    kind: str = ""
     t: datetime = field(default_factory=now)
 
 
@@ -76,4 +88,6 @@ class StepProgress:
 class StepEnded:
     node_id: NodeId
     status: str
+    # What was raised, when the step ended because of an exception.
+    error: str | None = None
     t: datetime = field(default_factory=now)

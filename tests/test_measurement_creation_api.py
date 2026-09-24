@@ -29,7 +29,7 @@ from lab_wizard.lib.utilities.config_io import (
     save_instruments_to_config,
 )
 from lab_wizard.wizard.backend.main import app
-from lab_wizard.wizard.workspace import WORKSPACE_ENV, initialize_workspace
+from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 
 RACK = instrument_hash("fakegpib", "sim://api-rack")
 MAINFRAME = instrument_hash("fake900", "5")

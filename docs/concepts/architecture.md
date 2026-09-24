@@ -25,7 +25,7 @@ you can read.
 
 Installed Python and compiled frontend files are immutable package resources.
 `wizard init` creates `lab-wizard.toml` plus the mutable `config/`, `projects/`,
-and `logs/` directories outside the package. The same layout is used whether
+`logs/` and `data/` directories outside the package. The same layout is used whether
 the package is installed editable from this repository or from PyPI.
 
 ## The four layers

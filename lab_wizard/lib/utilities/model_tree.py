@@ -14,13 +14,6 @@ from lab_wizard.lib.utilities.resource_catalog import (
 )
 
 
-class Device(BaseModel):
-    type: Literal["device"] = "device"
-    name: str = Field(description="Name of the device")
-    model: str = Field(description="Wafer")
-    description: str = Field(description="Description of the device")
-
-
 class ProjectInfo(BaseModel):
     schema_version: int = 1
     measurement_type: str
@@ -28,7 +21,12 @@ class ProjectInfo(BaseModel):
 
 
 class RunConfig(BaseModel):
-    device: Device | None = None
+    """Who and what a run is about. Read at the start of every run and recorded with it."""
+
+    device: str | None = Field(default=None, description="The device under test, by its name in the lab database")
+    operator: str | None = None
+    notes: str | None = None
+    # Anything else worth filtering runs by later: {"cryostat": "BlueFors1"}.
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

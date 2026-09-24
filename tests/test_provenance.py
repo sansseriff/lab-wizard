@@ -84,7 +84,7 @@ def test_an_instrument_that_cannot_answer_is_left_out_rather_than_failing_the_ru
     assert instrument_params(proxy) is None
 
 
-def test_the_snapshot_is_keyed_by_the_name_the_project_uses():
+def test_the_snapshot_is_keyed_by_role():
     @dataclass
     class Resources:
         attenuator: Any
@@ -94,9 +94,31 @@ def test_the_snapshot_is_keyed_by_the_name_the_project_uses():
     resources = Resources(attenuator=_local_attenuator())
     snapshot = baseline_snapshot(resources)
 
-    assert list(snapshot) == ["bench_att"]
-    assert snapshot["bench_att"]["port"] == "sim://prov-att"
+    assert list(snapshot) == ["attenuator"]
+    entry = snapshot["attenuator"]
+    assert entry["class"] == "FakeAttenuator"
+    assert entry["type"] == "fake_attenuator"
+    assert entry["attribute_name"] == "bench_att"
+    assert entry["params"]["port"] == "sim://prov-att"
     json.dumps(snapshot)  # it has to survive the trip to the database
+
+
+def test_an_instrument_whose_params_cannot_be_read_is_still_listed():
+    @dataclass
+    class Resources:
+        attenuator: Any
+        spares: list = field(default_factory=list)
+
+    resources = Resources(attenuator=StandInAttenuator(), spares=[_local_attenuator(), _local_attenuator()])
+    snapshot = baseline_snapshot(resources)
+
+    assert snapshot["attenuator"] == {
+        "class": "StandInAttenuator",
+        "type": None,
+        "attribute_name": None,
+        "params": {},
+    }
+    assert list(snapshot) == ["attenuator", "spares[0]", "spares[1]"]
 
 
 # --------------------------- into the database ---------------------------

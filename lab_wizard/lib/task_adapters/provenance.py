@@ -15,10 +15,12 @@ that has since changed. See ``plans/procedure_plan.md`` 5.6.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
+from collections.abc import Iterable
 from typing import Any
 
-from lab_wizard.lib.task_adapters.lifecycle import bound_instruments
+from lab_wizard.lib.instruments.general.behavior import InstrumentBehavior
 
 logger = logging.getLogger(__name__)
 
@@ -48,25 +50,35 @@ def instrument_params(instrument: Any) -> dict[str, Any] | None:
 
 
 def baseline_snapshot(resources: Any) -> dict[str, Any]:
-    """``{name: params}`` for every instrument this run drives.
+    """``{role: {class, type, attribute_name, params}}`` for every instrument the run drives.
 
-    Keyed by ``attribute_name`` — the same handle the project uses to name the
-    instrument — falling back to the class name when an instrument has none.
+    Keyed by **role** (the resources field the procedure knows it by), so the
+    same key means the same job in every run of a procedure, whatever
+    instrument filled it. An instrument whose params cannot be read is still
+    listed, by class, so a run never forgets which instruments it used. A role
+    holding several instruments lists them as ``role[0]``, ``role[1]``.
     """
+    if dataclasses.is_dataclass(resources) and not isinstance(resources, type):
+        roles: Iterable[tuple[str, Any]] = (
+            (f.name, getattr(resources, f.name)) for f in dataclasses.fields(resources)
+        )
+    else:
+        roles = vars(resources).items()
+
     out: dict[str, Any] = {}
-    for instrument in bound_instruments(resources):
-        params = instrument_params(instrument)
-        if params is None:
-            continue
-        # A proxy answers unknown attributes with a remote call, so a name that
-        # is not a string is not a name.
-        name = getattr(instrument, "attribute_name", None)
-        if not isinstance(name, str) or not name:
-            name = type(instrument).__name__
-        if name in out:  # two unnamed instruments of one type
-            for n in range(2, 100):
-                if f"{name}_{n}" not in out:
-                    name = f"{name}_{n}"
-                    break
-        out[name] = params
+    for role, value in roles:
+        items = value if isinstance(value, (list, tuple)) else (value,)
+        instruments = [item for item in items if isinstance(item, InstrumentBehavior)]
+        for index, instrument in enumerate(instruments):
+            key = role if len(instruments) == 1 else f"{role}[{index}]"
+            params = instrument_params(instrument) or {}
+            # A proxy answers unknown attributes with a remote call, so a name
+            # that is not a string is not a name.
+            name = getattr(instrument, "attribute_name", None)
+            out[key] = {
+                "class": type(instrument).__name__,
+                "type": params.get("type"),
+                "attribute_name": name if isinstance(name, str) and name else None,
+                "params": params,
+            }
     return out

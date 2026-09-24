@@ -40,7 +40,7 @@ def test_a_sweep_records_flat_rows_carrying_the_swept_parameter() -> None:
     )
 
     runner = ProcedureRunner(data_bus=data_bus, status_bus=status_bus)
-    status = runner.run(procedure, RunStarted(run_type="unit_test"))
+    status = runner.run(procedure, RunStarted(procedure="unit_test"))
 
     assert status is Status.SUCCESS
     points = [m for m in data_messages if isinstance(m, Point)]

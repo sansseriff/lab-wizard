@@ -95,8 +95,11 @@ class Step:
             label = self.segment
         self.node_id = (parent_id or ()) + (label,)
         status = Status.ABORTED
+        error: str | None = None
         context.status_bus.emit(
-            StepBegan(self.node_id, parent_id, self.name, self.determinate)
+            StepBegan(
+                self.node_id, parent_id, self.name, self.determinate, kind=step_kind(type(self))
+            )
         )
         with context.executing(self.node_id):
             try:
@@ -105,11 +108,12 @@ class Step:
                     return Status.ABORTED
                 status = self.run()
                 return status
-            except Exception:
+            except Exception as exc:
                 status = Status.FAILED
+                error = f"{type(exc).__name__}: {exc}"
                 raise
             finally:
                 try:
                     self.on_exit(status)
                 finally:
-                    context.status_bus.emit(StepEnded(self.node_id, status.value))
+                    context.status_bus.emit(StepEnded(self.node_id, status.value, error=error))

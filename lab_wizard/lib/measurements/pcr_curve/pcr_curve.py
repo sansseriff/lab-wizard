@@ -14,13 +14,10 @@ Configuration comes from the typed
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lab_procedure import (
-    Point,
-    ProcedureRunner,
-    RunEnded,
-    RunStarted,
     Sequence,
     Status,
     Step,
@@ -29,8 +26,7 @@ from lab_procedure import (
 )
 
 from lab_wizard.lib.instruments.general.counter import Counter
-from lab_wizard.lib.task_adapters import PlotterSink, SaverSink
-from lab_wizard.lib.task_adapters.provenance import baseline_snapshot
+from lab_wizard.lib.task_adapters.run import run_procedure
 from lab_wizard.lib.task_adapters.instrument_steps import (
     SetThreshold,
     SetVoltage,
@@ -111,15 +107,11 @@ class PCRCurveMeasurement:
     def build_procedure(self) -> Step:
         return build_pcr_procedure(self.resources)
 
-    def run_measurement(self) -> Status:
-        runner = ProcedureRunner(instruments=self.resources)
-        bus = runner.context.data_bus
-        message_types = (RunStarted, Point, RunEnded)
-        bus.subscribe(message_types, SaverSink(self.resources.savers).handle)
-        bus.subscribe(message_types, PlotterSink(self.resources.plotters).handle)
-        run_started = RunStarted(
-            run_type="pcr_curve",
-            config=self.resources.params.model_dump(mode="json"),
-            instruments=baseline_snapshot(self.resources),
+    def run_measurement(self, project_dir: Path | None = None) -> Status:
+        """Run once. Recorded in the lab database when ``project_dir`` names its project."""
+        return run_procedure(
+            self.build_procedure(),
+            self.resources,
+            procedure='pcr_curve',
+            project_dir=project_dir,
         )
-        return runner.run(self.build_procedure(), run_started)

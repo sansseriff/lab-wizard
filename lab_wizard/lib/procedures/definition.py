@@ -41,6 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, fi
 from lab_wizard.lib.measurements.general.sweep_params import SweepParams
 from lab_wizard.lib.procedures.spec import (
     AnyStep,
+    ParamRef,
     ProcedureError,
     RenderContext,
     StepParams,
@@ -219,8 +220,26 @@ class ProcedureDefinition(BaseModel):
             )
         return {role: registered[decl.behavior] for role, decl in self.roles.items()}
 
+    def columns(self) -> dict[str, dict[str, Any]]:
+        """``{name: {"unit": ...}}`` for every column this procedure's rows can carry.
+
+        In tree order, like :meth:`emitted_fields`. A swept column takes the
+        unit of the sweep param it iterates; a recorded field has none yet,
+        because steps do not declare units.
+        """
+        tree = self.param_tree
+        out: dict[str, dict[str, Any]] = {}
+        for step in self.body.walk():
+            values = getattr(step, "values", None)
+            decl = tree.find(values.param) if isinstance(values, ParamRef) else None
+            for name in step.swept_parameters():
+                out.setdefault(name, {"unit": decl.unit if decl is not None else None})
+            for name in step.emitted_fields():
+                out.setdefault(name, {"unit": None})
+        return out
+
     def emitted_fields(self) -> list[str]:
-        """Every column this procedure's observations can carry, in tree order."""
+        """Every column this procedure's rows can carry, in tree order."""
         seen: dict[str, None] = {}
         for step in self.body.walk():
             for name in (*step.swept_parameters(), *step.emitted_fields()):

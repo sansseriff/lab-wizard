@@ -14,6 +14,7 @@ import importlib
 import importlib.util
 import math
 import shutil
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -276,6 +277,13 @@ def test_the_generated_mcr_project_runs_as_a_script(tmp_path: Path):
     )
     assert result.returncode == 0, result.stderr
     assert "Traceback" not in result.stderr
+
+    # No workspace manifest above it, so the project records into its own folder.
+    with sqlite3.connect(setup_path.parent / "data" / "lab.db") as db:
+        (status,) = db.execute("select status from runs").fetchone()
+        (points,) = db.execute("select count(*) from points").fetchone()
+    assert status == "success"
+    assert points == 1 + len(ATTENUATIONS)
 
 
 def test_an_embedded_mcr_project_runs_outside_any_workspace(tmp_path: Path):

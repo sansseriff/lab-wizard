@@ -12,6 +12,7 @@ ref/
 # Local Lab Wizard workspace state (created by `wizard init .`)
 lab-wizard.toml
 config/
+/data/
 projects/
 logs/
 

@@ -223,7 +223,7 @@ def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path) -> No
 
     status = runner.run(
         measurement.build_procedure(),
-        RunStarted(run_type="iv_curve", config=resources.params.model_dump(mode="json")),
+        RunStarted(procedure="iv_curve", params=resources.params.model_dump(mode="json")),
     )
     assert status is Status.SUCCESS
     assert len(observations) == len(SWEEP_V)

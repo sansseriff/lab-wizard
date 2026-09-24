@@ -1,6 +1,6 @@
 # The lab data system: recording runs, saving files, and the viewer
 
-> **Status: Phase 1 built (2026-09-23); Phases 2–8 not started.** Decisions
+> **Status: Phases 1–2 built (2026-09-23); Phases 3–8 not started.** Decisions
 > still marked **(open)** in §14 need an answer; everything else was settled
 > in review.
 >
@@ -170,8 +170,11 @@ project", but `DatabaseSaver` passes it straight to SQLite, so it is relative to
 walks upward for a directory literally named `config` containing `server/` or
 `instruments/`, so it ignores the manifest's `config_dir` setting and the
 environment variable. The recorder needs the manifest (for `data_dir`), so
-`workspace.py` moves into `lab_wizard/lib/` (the library must not import the
-GUI package) and replaces `find_workspace_config_dir` everywhere.
+`workspace.py` moved into `lab_wizard/lib/` (the library must not import the
+GUI package). **Replacing `find_workspace_config_dir` is deferred:** instrument
+resolution depends on it, and many test fixtures (and any workspace made before
+the manifest existed) have a `config/` directory and no `lab-wizard.toml`, so
+switching it is its own change with its own tests.
 
 (`config/server/` is unrelated to data. It holds the *instrument* server's
 `server.yaml`, with its bind address and permissions, plus its pid file, log and
@@ -205,13 +208,21 @@ Every output is a sink subscribed to that stream:
 | `EventPublisher` (websocket) | when the wizard launched the run, or a web plotter needs it | `runner_plan.md` |
 
 Generated projects stop wiring sinks by hand. `run_measurement` calls one
-library function, `attach_sinks(runner, resources, project)`, which adds the
-recorder and whatever the project configures. Changing what a sink does never
-means regenerating projects.
+library function, `run_procedure(tree, resources, procedure=, definition=,
+project_dir=)` in `lab_wizard/lib/task_adapters/run.py`, which builds
+`RunStarted` from the project, calls `attach_sinks` (the recorder, then the
+configured savers and plotters) and runs. Changing what a sink does never means
+regenerating projects.
 
-The recorder needs the database's `run_id` before any other sink can link to
-it, so it is subscribed first and `RunStarted` handling returns the id to the
-run (`RunContext.run_id`), which later messages carry.
+**A run started from a project is always recorded; a bare step tree is not.**
+`run_procedure` records when it is given `project_dir`, which a generated
+module passes as its own folder. Tests and notebooks that run a tree directly
+record nothing unless they attach a `DatabaseRecorder` themselves.
+
+The recorder is subscribed first, so its `run_id` exists before any other sink
+sees the run start. It is exposed as `DatabaseRecorder.run_id`; putting it on
+the messages themselves waits for the first sink that needs it (the event
+stream in `runner_plan.md`).
 
 ---
 
@@ -385,11 +396,11 @@ When a run ends, the recorder flattens its facts into `run_facets`:
 | Facet key | From |
 |---|---|
 | `procedure`, `status`, `operator`, `project` | `runs` columns |
-| `date`, `time` | `started_at`, in the lab's **local** time |
+| `date` | `started_at`, as the lab's **local** date (a folder template's `{time}` is computed by the file saver, not a facet: one value per run filters nothing) |
 | `device` | `devices.name` |
 | `device.<prop>` | each scalar in `devices.properties` |
 | `run.<key>` | each scalar in `runs.metadata` (`run.cryostat`) |
-| `instrument.<role>.type` | `runs.instruments` |
+| `instrument.<role>.type`, `instrument.<role>.class` | `runs.instruments`: the config type when the params say it, and the Python class always |
 | `instrument.<role>.<param path>` | each scalar leaf of that instrument's params |
 | `param.<path>` | each scalar leaf of `runs.params` |
 | `column` | one row per recorded column ("runs that recorded `device_voltage`") |
@@ -560,7 +571,10 @@ A run records only what it is told; today every run's `device_id` is NULL.
 - **The wizard** asks for the device when generating a project and shows it on
   the project page, since people swap devices between runs of one project.
 - **The instrument snapshot** (`provenance.baseline_snapshot`) is keyed by
-  **role** and records each instrument's `type` and key with its params.
+  **role** and records each instrument's `class`, config `type`,
+  `attribute_name` and params. An instrument whose params cannot be read (some
+  modules and channels today) is still listed by class. The config key (the
+  hash) is not available from an instrument, so it is not recorded.
 - **Units.** `emits` changes from a tuple of names to `{name: unit}`;
   `ReadVoltage` takes a unit with its field. Swept columns take the unit of the
   sweep param (`ParamDecl.unit`). Together they fill `columns`.
@@ -595,7 +609,7 @@ go through the rule until they are ported (Phase 4). `SaverSink` and
 gained `parameter`, so `emitted_fields()` lists it. Generated projects under
 `projects/` that predate this import `Observation` and must be regenerated.
 
-### Phase 2: recording (`lab_wizard/lib/data/`, new)
+### Phase 2: recording (`lab_wizard/lib/data/`, new) — built
 
 - Move `workspace.py` into `lab_wizard/lib/`; replace
   `find_workspace_config_dir`; add `data_dir` to the manifest.
@@ -605,6 +619,37 @@ gained `parameter`, so `emitted_fields()` lists it. Generated projects under
 - Run start capture (§12).
 - Tests: a generated mcr project run as a script, rows read back; facets for
   device, instrument, params; an embedded project records into its own folder.
+
+As built:
+
+- `lab_wizard/lib/data/`: `schema.py` (plain `sqlite3`, WAL, version check that
+  refuses rather than alters), `recorder.py`, `facets.py`, `encoding.py`
+  (NaN → null, numpy → lists and numbers). `run_procedure` and `attach_sinks`
+  live in `lab_wizard/lib/task_adapters/run.py` beside the other run plumbing.
+- `workspace.py` moved to `lab_wizard/lib/workspace.py` with `data_dir`;
+  `clean_workspace` and `wizard clean` never touch it.
+  `find_workspace_config_dir` stays for now (§3).
+- `RunStarted` is `{procedure, device, operator, notes, project, metadata,
+  definition, params, instruments, columns, t}`. `StepBegan` carries `kind`;
+  `StepEnded` carries `error`.
+- `RunConfig` is `{device, operator, notes, metadata}`; the generators write
+  them empty. **Not built: the GUI asking for the device.** Until it is, the
+  `run:` block is edited in the YAML (documented in `docs/wizard/measurements.md`).
+- Generated modules carry `DEFINITION` in a `wizard:definition` block,
+  regenerated with the step tree by `refresh_procedure_source`, and
+  `run_measurement` is one `run_procedure` call. `iv_curve`/`pcr_curve` take
+  `project_dir` from their setup script (their module is copied into the
+  project, so `__file__` cannot be trusted) and record `definition: null`.
+- `runs.columns` is the declared columns plus any recorded column nobody
+  declared, so a hand-written measurement's columns are still listed.
+- `ProcedureDefinition.columns()` gives units for swept columns (from their
+  sweep param); recorded fields get units in Phase 4.
+- The old `DatabaseSaver` still runs if a project selects it (it writes its own
+  `measurements.db`) until Phase 5 replaces it.
+- Tests: `tests/test_data_recording.py`; the own-server end-to-end test now
+  reads the workspace database (device, operator, cryostat, role-keyed
+  provenance through the server, steps, facets); the mcr script test checks a
+  project outside a workspace records into its own `data/lab.db`.
 
 ### Phase 3: reading (`lab_wizard/lib/data/`)
 
@@ -727,6 +772,8 @@ Still open:
 - **Close the open row on every exit path.** A missed close loses the last
   point.
 - **`latest` updates on `observe()`, not on close.**
+- **`values` is an SQL keyword.** The `points."values"` column must be quoted
+  in every query.
 - **NaN and infinity are not JSON.** `json.dumps` writes `NaN` by default, which
   SQLite's JSON functions reject. Store `null`; use `allow_nan=False` so a
   regression fails loudly. In CSV, write an empty cell.

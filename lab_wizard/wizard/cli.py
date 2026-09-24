@@ -7,7 +7,7 @@ import os
 import subprocess
 import sys
 
-from lab_wizard.wizard.workspace import (
+from lab_wizard.lib.workspace import (
     WORKSPACE_ENV,
     clean_workspace,
     initialize_workspace,
@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> None:
         print(f"  remove {workspace.projects_dir}")
         print(f"  remove {workspace.logs_dir}")
         print(f"  remove {workspace.manifest}")
+        print(f"  keep   {workspace.data_dir} (recorded measurements are never cleaned)")
         if not args.yes and input(
             "Return this workspace to its uninitialized state? [y/N] "
         ).lower() not in {

@@ -452,7 +452,7 @@ def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> N
 
     status = runner.run(
         PCRCurveMeasurement(resources).build_procedure(),
-        RunStarted(run_type="pcr_curve", config=resources.params.model_dump(mode="json")),
+        RunStarted(procedure="pcr_curve", params=resources.params.model_dump(mode="json")),
     )
     assert status is Status.SUCCESS
     assert len(observations) == len(SWEEP_V)

@@ -89,7 +89,7 @@ does three things:
 
 1. **Writes a project YAML** containing only the *subset* of config you selected
    — the chosen instrument lineages (leaf back to root), savers, and plotters —
-   plus a `device` block and measurement defaults. This is a self-contained
+   plus a `run:` block and measurement defaults. This is a self-contained
    snapshot, so the project keeps working even if the central config changes.
 2. **Fills in the setup template** by replacing the `# wizard:<block>:start/end`
    regions:
@@ -175,8 +175,30 @@ The template's `__main__` block picks local resources, a per-attribute
 [`RunLifecycle`](../../lab_wizard/lib/task_adapters/lifecycle.py). The same
 procedure works in each mode because measurements consume behavior ABCs, which
 both local instruments and [remote proxies](../remote/architecture.md) satisfy.
-Rows flow through the procedure data bus to the configured saver and
-plotter adapters.
+Rows flow through the procedure data bus to the lab database and to the
+configured saver and plotter adapters.
+
+### Every run is recorded
+
+A run started from a project is recorded in the workspace's lab database,
+`data/lab.db`: the run itself, one row per point, every step it executed, what
+each instrument was configured with, and the procedure definition it ran. A
+project outside any workspace records into its own `data/lab.db` instead. The
+database does not need to be configured or selected.
+
+What the run is *about* comes from the project YAML's `run:` block, read at the
+start of every run, so edit it when you swap devices:
+
+```yaml
+run:
+  device: A7                        # the device under test, by name
+  operator: andrew
+  notes: first cooldown after rewiring
+  metadata: {cryostat: BlueFors1}   # anything else worth filtering runs by
+```
+
+A device named here for the first time is added to the database. Everything in
+the block becomes something the Data page will be able to filter runs by.
 
 Every run goes through the same steps, in this order:
 

@@ -15,12 +15,12 @@ class SaverSink:
         if isinstance(message, RunStarted):
             for saver in self.savers:
                 saver.start_run(
-                    run_type=message.run_type,
+                    run_type=message.procedure,
                     device=message.device,
-                    cryostat=message.cryostat,
+                    cryostat=message.metadata.get("cryostat"),
                     operator=message.operator,
-                    description=message.description,
-                    config=message.config,
+                    description=message.notes,
+                    config=message.params,
                     instruments=message.instruments,
                 )
             return

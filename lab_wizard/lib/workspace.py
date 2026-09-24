@@ -30,6 +30,8 @@ class Workspace:
     config_dir: Path
     projects_dir: Path
     logs_dir: Path
+    # Where recorded runs live: the lab database, and saved run folders.
+    data_dir: Path
     config_schema: int
 
 
@@ -66,6 +68,7 @@ def _resolve_from_root(root: Path) -> Workspace:
         config_dir=path_for("config_dir", "config"),
         projects_dir=path_for("projects_dir", "projects"),
         logs_dir=path_for("logs_dir", "logs"),
+        data_dir=path_for("data_dir", "data"),
         config_schema=schema,
     )
 
@@ -142,6 +145,7 @@ def initialize_workspace(path: str | Path) -> tuple[Workspace, bool]:
             'config_dir = "config"\n'
             'projects_dir = "projects"\n'
             'logs_dir = "logs"\n'
+            'data_dir = "data"\n'
             "\n"
             "[lab_wizard]\n"
             f"config_schema = {CONFIG_SCHEMA_VERSION}\n",
@@ -154,6 +158,7 @@ def initialize_workspace(path: str | Path) -> tuple[Workspace, bool]:
         (workspace.config_dir / name).mkdir(parents=True, exist_ok=True)
     workspace.projects_dir.mkdir(parents=True, exist_ok=True)
     workspace.logs_dir.mkdir(parents=True, exist_ok=True)
+    workspace.data_dir.mkdir(parents=True, exist_ok=True)
     return workspace, created
 
 
@@ -163,6 +168,8 @@ def clean_workspace(workspace: Workspace) -> list[Path]:
     Every managed directory must resolve strictly below the workspace root.
     Validation happens before deletion, and the manifest is removed last.
     """
+    # ``data_dir`` is deliberately not here: it holds the lab's recorded
+    # measurements, which cleaning a workspace must never delete.
     targets = {workspace.config_dir, workspace.projects_dir, workspace.logs_dir}
     for target in targets:
         if target == workspace.root or not target.is_relative_to(workspace.root):

@@ -18,7 +18,7 @@ def test_saver_sink_writes_a_point_to_the_stand_in_saver() -> None:
     bus = MessageBus()
     bus.subscribe((RunStarted, Point, RunEnded), sink.handle)
 
-    bus.emit(RunStarted(run_type="iv_curve", device="device-a"))
+    bus.emit(RunStarted(procedure="iv_curve", device="device-a"))
     bus.emit(
         Point(
             seq=3,
@@ -49,7 +49,7 @@ def test_database_saver_persists_a_points_values_as_json(tmp_path: Path) -> None
     saver = DatabaseSaver(str(db_path))
     sink = SaverSink([saver])
 
-    sink.handle(RunStarted(run_type="iv_curve", device="device-a"))
+    sink.handle(RunStarted(procedure="iv_curve", device="device-a"))
     sink.handle(
         Point(
             seq=0,

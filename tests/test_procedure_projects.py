@@ -298,6 +298,8 @@ def test_refreshing_replaces_the_tree_and_keeps_edits_outside_it(tmp_path: Path)
         resource_source_for(project, Path(out["project_dir"])),
     )
     assert ProcedureRunner().run(measurement.ComposedPcrMeasurement(resources).build_procedure()) is Status.SUCCESS
+    # The definition every run records was regenerated with the tree.
+    assert ProcedureDefinition.model_validate(measurement.DEFINITION) == ProcedureDefinition.model_validate(changed)
 
 
 def test_a_hand_written_measurement_takes_a_preset_too(tmp_path: Path):

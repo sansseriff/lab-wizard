@@ -26,7 +26,7 @@ class Env(BaseModel):
 
     @classmethod
     def from_current_workspace(cls) -> "Env":
-        from lab_wizard.wizard.workspace import require_workspace
+        from lab_wizard.lib.workspace import require_workspace
 
         workspace = require_workspace()
         return cls(

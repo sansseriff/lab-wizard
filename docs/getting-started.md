@@ -35,6 +35,7 @@ of a fresh clone.
 To return a development checkout to that fresh-clone state, run `wizard clean`.
 The command lists `config/`, `projects/`, `logs/`, and `lab-wizard.toml` and asks
 for confirmation before deleting them. `wizard clean --yes` skips the prompt.
+It never deletes `data/`, which holds the recorded measurements.
 
 ## PyPI install
 
@@ -50,7 +51,7 @@ python -m pip install lab-wizard
 wizard init .
 ```
 
-`wizard init` creates `lab-wizard.toml`, `config/`, `projects/`, and `logs/`.
+`wizard init` creates `lab-wizard.toml`, `config/`, `projects/`, `logs/`, and `data/`.
 These are user-owned runtime state; they are never stored in `site-packages`.
 
 ## Launch the GUI
@@ -153,12 +154,14 @@ lab_wizard_repo/
 ├── config/                   # generated; user-owned YAML state
 ├── projects/                 # generated measurement projects
 ├── logs/                     # generated runtime logs
+├── data/                     # generated; lab.db, where every run is recorded
 ├── lab_wizard/
 │   ├── lib/                 # the instrument library (importable, no GUI)
 │   │   ├── instruments/     #   instrument models (general/ + per-vendor dirs)
 │   │   ├── measurements/    #   hand-written measurements + setup templates
 │   │   ├── procedures/      #   procedure definitions, step schemas, codegen
-│   │   ├── task_adapters/   #   steps, run lifecycle, saver/plotter sinks
+│   │   ├── task_adapters/   #   steps, run lifecycle, the run entry point, sinks
+│   │   ├── data/            #   the lab database: schema, recorder, facets
 │   │   ├── savers/          #   data persistence (DatabaseSaver, schema)
 │   │   ├── plotters/        #   plotting (scaffolding — see Roadmap)
 │   │   ├── server/          #   remote-control server (ZMQ + JSON-RPC)

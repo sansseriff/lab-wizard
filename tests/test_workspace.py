@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from lab_wizard.wizard import cli
-from lab_wizard.wizard.workspace import (
+from lab_wizard.lib.workspace import (
     MANIFEST_NAME,
     WORKSPACE_ENV,
     clean_workspace,

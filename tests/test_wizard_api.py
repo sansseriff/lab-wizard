@@ -21,7 +21,7 @@ from lab_wizard.lib.utilities.config_io import (
     instrument_hash,
     save_instruments_to_config,
 )
-from lab_wizard.wizard.workspace import WORKSPACE_ENV, initialize_workspace
+from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 
 _PROLOGIX_KEY = instrument_hash("prologix_gpib", "/dev/ttyUSB0")
 _SIM900_KEY = instrument_hash("sim900", "5")

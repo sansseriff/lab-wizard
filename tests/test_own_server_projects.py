@@ -39,7 +39,7 @@ from lab_wizard.lib.utilities.config_io import (
 )
 from lab_wizard.wizard.backend.main import app
 from lab_wizard.wizard.backend.server_control import set_server_bind, start_server, stop_server
-from lab_wizard.wizard.workspace import WORKSPACE_ENV, initialize_workspace
+from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 
 RACK = instrument_hash("fakegpib", "sim://own-rack")
 MAINFRAME = instrument_hash("fake900", "5")
@@ -150,6 +150,11 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
     assert "instruments" not in payload["resources"]
     assert set(payload["resources"]["instrument_sources"].values()) == {own["name"]}
 
+    # Name the device under test and where it sat, as a person does before a run.
+    payload["run"] = {"device": "A7", "operator": "andrew", "notes": None, "metadata": {"cryostat": "BlueFors1"}}
+    with Path(out["yaml_file"]).open("w", encoding="utf-8") as f:
+        YAML(typ="safe").dump(payload, f)
+
     setup_path = Path(out["setup_file"])
     result = subprocess.run(
         [sys.executable, str(setup_path)], capture_output=True, text=True, timeout=300, cwd=str(setup_path.parent)
@@ -157,25 +162,45 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Traceback" not in result.stderr
 
-    # The data came back through the server: a background count, then one count
-    # and one voltage per attenuation.
-    with sqlite3.connect(setup_path.parent / "measurements.db") as db:
-        rows = [json.loads(data) for (data,) in db.execute("select data from measurements order by id")]
-        (recorded,) = db.execute("select instruments from runs").fetchone()
+    # The run is recorded in the workspace's database, not the project folder.
+    db = sqlite3.connect(ws.data_dir / "lab.db")
+    db.row_factory = sqlite3.Row
+    (run,) = db.execute("select * from runs").fetchall()
+    assert (run["procedure"], run["status"], run["project"]) == ("mcr_curve", "success", setup_path.parent.name)
+    assert db.execute("select name from devices where id = ?", (run["device_id"],)).fetchone()["name"] == "A7"
+    assert json.loads(run["definition"])["name"] == "mcr_curve"
 
-    # Provenance (procedure plan 5.6): what the instruments were configured
-    # with, read back through the server that owns them, since this workspace's
-    # project carries no copy of it.
-    configured = json.loads(recorded)
-    assert set(configured) == set(payload["resources"]["instrument_sources"])
-    assert configured[selections[3]["attribute"]]["type"] == "fake_attenuator"
-    background = [r for r in rows if r["phase"] == "background"]
-    counts = [r for r in rows if r["phase"] == "signal" and "counts" in r]
-    voltages = [r for r in rows if r["phase"] == "signal" and "device_voltage" in r]
-    assert len(background) == 1
-    assert [r["attenuation_db"] for r in counts] == [10.0, 0.0]
-    assert background[0]["counts"] < counts[0]["counts"] < counts[1]["counts"]
-    assert [r["attenuation_db"] for r in voltages] == [10.0, 0.0]
+    # The data came back through the server: a background row, then one row
+    # per attenuation holding both its count and its device voltage.
+    rows = [json.loads(r["values"]) for r in db.execute('select "values" from points order by seq')]
+    assert [r["phase"] for r in rows] == ["background", "signal", "signal"]
+    assert [r["attenuation_db"] for r in rows[1:]] == [10.0, 0.0]
+    assert all({"counts", "device_voltage"} <= r.keys() for r in rows[1:])
+    assert rows[0]["counts"] < rows[1]["counts"] < rows[2]["counts"]
+
+    # Provenance (procedure plan 5.6): what each role's instrument was
+    # configured with, read back through the server that owns it, since this
+    # workspace's project carries no copy of it.
+    configured = json.loads(run["instruments"])
+    assert set(configured) == {"voltage_source", "voltage_sense", "counter", "attenuator"}
+    assert configured["attenuator"]["type"] == "fake_attenuator"
+
+    # Every step's execution, closed, and the facts the sidebar will filter by.
+    steps = db.execute("select path, kind, status from steps").fetchall()
+    assert steps and all(s["status"] == "success" for s in steps)
+    assert any(s["path"].endswith("sweep[0]/sequence#1/count[2]") for s in steps)
+    facets = {(f["key"], f["value"]) for f in db.execute("select key, value from run_facets")}
+    assert {
+        ("procedure", "mcr_curve"),
+        ("status", "success"),
+        ("device", "A7"),
+        ("operator", "andrew"),
+        ("run.cryostat", "BlueFors1"),
+        ("instrument.attenuator.type", "fake_attenuator"),
+        ("param.readout.gate_time_s", "0.02"),
+        ("column", "device_voltage"),
+    } <= facets
+    db.close()
 
     # The run handed everything back: no claims left, and the attenuator the
     # procedure closed and fully attenuated is what the server now reports.

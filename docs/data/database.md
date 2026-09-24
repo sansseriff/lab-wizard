@@ -4,6 +4,16 @@ icon: lucide/database
 
 # The measurement database
 
+!!! note "Two databases, for now"
+    Every run started from a project is now recorded in the workspace's lab
+    database, `data/lab.db` ([`lib/data/`](../../lab_wizard/lib/data/)), with
+    one row per point, every step the run executed, and the filters the Data
+    page will offer. See [Every run is recorded](../wizard/measurements.md#every-run-is-recorded).
+    The `database_saver` below is the older, per-project database; it still
+    works if a project selects it, and is being replaced
+    (`plans/semantic_data_plan.md`). This page will describe the lab database
+    once reading it back is built.
+
 The `database_saver` persists measurement data to **SQLite** via SQLAlchemy. It
 is the one fully-implemented saver. Schema:
 [`savers/schema.py`](../../lab_wizard/lib/savers/schema.py); runtime:
