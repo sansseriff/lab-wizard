@@ -21,7 +21,7 @@ from lab_procedure import (
     ValueAbove,
     ValueBelow,
 )
-from lab_procedure.messages import Observation
+from lab_procedure.messages import Point
 
 from lab_wizard.lib.instruments.general.counter import StandInCounter
 from lab_wizard.lib.task_adapters.instrument_steps import Count
@@ -142,17 +142,16 @@ def test_a_condition_on_a_value_never_recorded_is_an_error_not_a_failure():
         _run(ValueAbove("count_rate", 1.0))
 
 
-def test_observations_are_flat_rows_carrying_the_swept_parameters():
+def test_rows_are_flat_and_carry_the_swept_parameters():
     from lab_procedure import Sweep
 
     runner = ProcedureRunner()
-    rows: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, rows.append)
+    rows: list[Point] = []
+    runner.context.data_bus.subscribe(Point, rows.append)
     counter = Counts(10, 20)
     runner.run(Sweep("bias_voltage", [0.1, 0.2], lambda v: Count(counter, 2.0)))
 
-    assert [r.data for r in rows] == [
+    assert [r.values for r in rows] == [
         {"bias_voltage": 0.1, "counts": 10, "int_time": 2.0, "count_rate": 5.0},
         {"bias_voltage": 0.2, "counts": 20, "int_time": 2.0, "count_rate": 10.0},
     ]
-    assert rows[0].metadata == {"bias_voltage": 0.1}

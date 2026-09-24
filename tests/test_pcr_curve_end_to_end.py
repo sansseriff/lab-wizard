@@ -30,7 +30,7 @@ from typing import Any, cast
 import pytest
 from ruamel.yaml import YAML
 
-from lab_procedure import Observation, ProcedureRunner, RunStarted, Status
+from lab_procedure import Point, ProcedureRunner, RunStarted, Status
 
 from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
 from lab_wizard.lib.instruments.fake_rack.fake_counter import (
@@ -447,8 +447,8 @@ def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> N
     )
 
     runner = ProcedureRunner(instruments=resources)
-    observations: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, observations.append)
+    observations: list[Point] = []
+    runner.context.data_bus.subscribe(Point, observations.append)
 
     status = runner.run(
         PCRCurveMeasurement(resources).build_procedure(),
@@ -458,7 +458,7 @@ def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> N
     assert len(observations) == len(SWEEP_V)
 
     for observation, bias in zip(observations, SWEEP_V):
-        data = observation.data
+        data = observation.values
         assert data["bias_voltage"] == pytest.approx(bias)
         assert data["int_time"] == GATE_TIME_S
         assert data["count_rate"] == pytest.approx(data["counts"] / GATE_TIME_S)
@@ -488,12 +488,12 @@ def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Pa
     resources.counter.set_threshold(DEVICE.pulse_amplitude_mV * 2)
 
     runner = ProcedureRunner(instruments=resources)
-    observations: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, observations.append)
+    observations: list[Point] = []
+    runner.context.data_bus.subscribe(Point, observations.append)
     assert runner.run(PCRCurveMeasurement(resources).build_procedure()) is Status.SUCCESS
 
     assert resources.counter.get_threshold() == pytest.approx(THRESHOLD_MV)
-    top = observations[-1].data
+    top = observations[-1].values
     expected = _expected_counts(SWEEP_V[-1])
     assert abs(top["counts"] - expected) <= 5.0 * math.sqrt(expected) + 5.0
 
@@ -507,11 +507,11 @@ def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path) -> None
     )
 
     runner = ProcedureRunner(instruments=resources)
-    observations: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, observations.append)
+    observations: list[Point] = []
+    runner.context.data_bus.subscribe(Point, observations.append)
     runner.run(PCRCurveMeasurement(resources).build_procedure())
 
-    counts = {o.data["bias_voltage"]: o.data["counts"] for o in observations}
+    counts = {o.values["bias_voltage"]: o.values["counts"] for o in observations}
     plateau = DEVICE.incident_photon_rate_hz * DEVICE.max_detection_efficiency * GATE_TIME_S
 
     assert counts[0.0] == 0, "no bias, no clicks"

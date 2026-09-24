@@ -32,16 +32,27 @@ class ProcedureRunner:
         self._root = root
         if run_started is not None:
             self.context.data_bus.emit(run_started)
+        status = Status.FAILED
         try:
-            self.status = root.execute(self.context)
-            return self.status
+            status = root.execute(self.context)
+            return status
+        except KeyboardInterrupt:
+            # Ctrl-C is the operator stopping the run, not the run failing.
+            status = Status.ABORTED
+            raise
         except Exception as exc:
-            self.status = Status.FAILED
+            status = Status.FAILED
             node_id = root.node_id or (root.name,)
             self.context.data_bus.emit(StepFailed(node_id, str(exc)))
             raise
         finally:
-            self.context.data_bus.emit(RunEnded((self.status or Status.FAILED).value))
+            self.status = status
+            try:
+                # However the run ended, the row being recorded is data: a
+                # count taken before an abort still happened.
+                self.context.close_point()
+            finally:
+                self.context.data_bus.emit(RunEnded(status.value))
 
     def start(self, root: Step, run_started: RunStarted | None = None) -> Thread:
         if self._thread is not None and self._thread.is_alive():

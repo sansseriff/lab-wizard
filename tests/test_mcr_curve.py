@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from lab_procedure import Observation, ProcedureRunner, Status
+from lab_procedure import Point, ProcedureRunner, Status
 
 from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
 from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuator, FakeAttenuatorParams
@@ -238,13 +238,17 @@ def test_the_measured_mcr_curve_follows_the_attenuation(tmp_path: Path):
     )
 
     runner = ProcedureRunner(instruments=resources)
-    rows: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, rows.append)
+    rows: list[Point] = []
+    runner.context.data_bus.subscribe(Point, rows.append)
     assert runner.run(measurement.McrCurveMeasurement(resources).build_procedure()) is Status.SUCCESS
 
-    background = [r.data for r in rows if r.data.get("phase") == "background"]
-    counts = [r.data for r in rows if r.data.get("phase") == "signal" and "counts" in r.data]
-    voltages = [r.data for r in rows if r.data.get("phase") == "signal" and "device_voltage" in r.data]
+    # One row for the background, then one per attenuation holding both the
+    # count and the device voltage read at it.
+    background = [r.values for r in rows if r.values["phase"] == "background"]
+    counts = [r.values for r in rows if r.values["phase"] == "signal"]
+    voltages = counts
+    assert len(rows) == 1 + len(ATTENUATIONS)
+    assert all({"counts", "device_voltage"} <= row.keys() for row in counts)
 
     assert len(background) == 1
     expected_dark = _expected_rate(0.0) * GATE_S

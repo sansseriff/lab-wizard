@@ -69,7 +69,8 @@ generated setup file.
 |---|---|
 | `sequence` | children in order; stops at the first that does not succeed |
 | `sweep` | its body once per value, binding `parameter` |
-| `repeat`, `wait` | the obvious |
+| `repeat` | its body `count` times, binding `parameter` (default `repeat`) to 0, 1, 2 … so each repetition is its own row |
+| `wait` | waits, abortably |
 | `with_parameter` | its body with `parameter` set to `value`, so its rows carry it — `phase: background` |
 | `retry` | its child until it succeeds, up to `max_attempts`; a raised error is retried too |
 | `if` | `then` if `condition` succeeds, else `otherwise` (or nothing) |
@@ -90,8 +91,34 @@ aborted, and a condition is just a step that fails. `sequence` with a
 `value_below` in it stops the run when a count rate climbs too high; `retry`
 around a `count` recovers from a timeout.
 
-Every recorded row is flat: it carries the swept values in force as well as the
-reading, so a nested sweep produces more rows, never a nested structure.
+## How readings become rows
+
+A run's data is a table of rows. **A row is everything recorded while the same
+parameter values were in force, until a field would be recorded twice.** The
+parameters are whatever `sweep`, `repeat` and `with_parameter` have bound at the
+time, and every row carries them.
+
+So in an MCR curve, the `count` and the `read_voltage` taken at one attenuation
+share a row, while the background count, taken before any attenuation is set,
+is a row of its own:
+
+```text
+seq  phase       attenuation_db  counts  count_rate  device_voltage
+0    background                  1       20.0
+1    signal      20.0            387     7740.0      0.0
+2    signal      10.0            4004    80080.0     0.0
+```
+
+A nested sweep produces more rows, never a nested structure, and **the order of
+the loops does not change the rows**: sweeping trigger level inside bias, or
+bias inside trigger level, records the same rows in a different order. The
+order is kept in each row's `seq`, and each row names the steps that recorded
+into it, as paths like `sweep[0]/sequence#2/count[2]` (`#2` is the sweep's third
+value, `[2]` the third child of its sequence).
+
+A reading placed at an outer loop level is taken fewer times, so it lands on a
+row of its own with fewer parameters. A step may not record a field with the
+same name as a parameter in force; the row already carries it.
 
 ## Writing one
 

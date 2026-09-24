@@ -2,7 +2,7 @@ from lab_procedure.bus import MessageBus
 from lab_procedure.context import RunContext
 from lab_procedure.core import Status, Step
 from lab_procedure.messages import (
-    Observation,
+    Point,
     RunEnded,
     RunStarted,
     StepBegan,
@@ -29,7 +29,7 @@ __all__ = [
     "If",
     "Invert",
     "MessageBus",
-    "Observation",
+    "Point",
     "ProcedureRunner",
     "Repeat",
     "Retry",

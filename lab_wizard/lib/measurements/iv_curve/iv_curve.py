@@ -2,8 +2,8 @@
 
 The measurement is expressed as a ``Step`` tree: turn the source on, sweep the
 bias voltage (set, settle, measure), then return to zero / turn off. Each
-measured point is emitted as an :class:`~lab_procedure.Observation` on the
-run's ``data_bus``; savers and plotters consume that stream via
+measured point is recorded with ``RunContext.observe`` and reaches the run's
+``data_bus`` as a :class:`~lab_procedure.Point`; savers and plotters consume that stream via
 :class:`~lab_wizard.lib.task_adapters.savers.SaverSink` and
 :class:`~lab_wizard.lib.task_adapters.plotters.PlotterSink`.
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from lab_procedure import (
-    Observation,
+    Point,
     ProcedureRunner,
     RunEnded,
     RunStarted,
@@ -53,7 +53,7 @@ if TYPE_CHECKING:
 
 
 class MeasureIVPoint(Step):
-    """Read the sense voltage at a bias point and emit one observation.
+    """Read the sense voltage at a bias point and record it.
 
     Current through the bias resistor is inferred as
     ``(bias_voltage - sense_voltage) / bias_resistance_ohm`` (amps).
@@ -79,18 +79,9 @@ class MeasureIVPoint(Step):
         # resistance would instead report zero current everywhere the device
         # is superconducting, which is most of an SNSPD IV curve.
         current = (self.bias_voltage - sense_voltage) / self.bias_resistance_ohm
-        self.context.data_bus.emit(
-            Observation(
-                data={
-                    "bias_voltage": self.bias_voltage,
-                    "sense_voltage": sense_voltage,
-                    "current": current,
-                },
-                metadata=self.context.snapshot_parameters(),
-                sequence_index=self.context.next_sequence_index(),
-                sweep_index=self.context.sweep_index,
-            )
-        )
+        # ``bias_voltage`` is not recorded here: the sweep binds it, so the row
+        # already carries it.
+        self.context.observe({"sense_voltage": sense_voltage, "current": current})
         return Status.SUCCESS
 
 
@@ -135,7 +126,7 @@ class IVCurveMeasurement:
     def run_measurement(self) -> Status:
         runner = ProcedureRunner(instruments=self.resources)
         bus = runner.context.data_bus
-        message_types = (RunStarted, Observation, RunEnded)
+        message_types = (RunStarted, Point, RunEnded)
         bus.subscribe(message_types, SaverSink(self.resources.savers).handle)
         bus.subscribe(message_types, PlotterSink(self.resources.plotters).handle)
         run_started = RunStarted(

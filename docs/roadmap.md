@@ -13,21 +13,20 @@ the current source. Look here before assuming a feature works end to end.
   [`MplPlotter`](../lab_wizard/lib/plotters/mpl_plotter.py) and
   [`BokehPlotter`](../lab_wizard/lib/plotters/bokeh_plotter.py) store the last
   payload and print; nothing renders. `StandInPlotter` is a deliberate no-op.
-  The wiring around them is real — a run publishes observations and
+  The wiring around them is real — a run publishes rows and
   `PlotterSink` forwards each one — so a working plotter is two method bodies.
 
 ## Savers and data
 
 - ✅ **`DatabaseSaver`** (SQLite) works: a `runs` row per run, a `measurements`
-  row per observation, the measurement's parameters and the instruments'
+  row per point of the run, the measurement's parameters and the instruments'
   configured params both recorded. See [Measurement database](data/database.md).
 - ❌ **No file saver.** No CSV / HDF5 / Parquet. A
   `FileSaverParams`/`FileSaver` pair dropped into `lib/savers/` would be
   discovered automatically.
 - ⚠️ **The stored data does not say what it means.** Nothing records which
   columns are axes and which are readings, so every consumer guesses from
-  names. Related: one point of a curve can span two rows (a count and a voltage
-  read are separate observations), `runs.run_type` is a five-value enum that
+  names. Related: `runs.run_type` is a five-value enum that
   stores any composed procedure as `OTHER`, and `runs.device_id` is always NULL
   because no measurement passes a device. Designed in
   `plans/semantic_data_plan.md`; not built.

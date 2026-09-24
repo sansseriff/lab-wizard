@@ -25,7 +25,7 @@ from typing import Any, cast
 import pytest
 from ruamel.yaml import YAML
 
-from lab_procedure import Observation, ProcedureRunner, RunStarted, Status
+from lab_procedure import Point, ProcedureRunner, RunStarted, Status
 
 from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
 from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
@@ -218,8 +218,8 @@ def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path) -> No
 
     measurement = IVCurveMeasurement(resources)
     runner = ProcedureRunner(instruments=resources)
-    observations: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, observations.append)
+    observations: list[Point] = []
+    runner.context.data_bus.subscribe(Point, observations.append)
 
     status = runner.run(
         measurement.build_procedure(),
@@ -232,12 +232,12 @@ def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path) -> No
     for observation, bias, (true_current, true_voltage) in zip(
         observations, SWEEP_V, expected
     ):
-        data = observation.data
+        data = observation.values
         assert data["bias_voltage"] == pytest.approx(bias)
         assert data["sense_voltage"] == pytest.approx(true_voltage)
         assert data["current"] == pytest.approx(true_current)
 
-    sense = [o.data["sense_voltage"] for o in observations]
+    sense = [o.values["sense_voltage"] for o in observations]
     superconducting = [
         v for bias, v in zip(SWEEP_V, sense) if bias < SWITCHING_BIAS_V
     ]
@@ -266,14 +266,14 @@ def test_measured_current_matches_the_detectors_true_bias_current(
     )
 
     runner = ProcedureRunner(instruments=resources)
-    observations: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, observations.append)
+    observations: list[Point] = []
+    runner.context.data_bus.subscribe(Point, observations.append)
     runner.run(IVCurveMeasurement(resources).build_procedure())
 
     switching = next(
-        o for o in observations if o.data["bias_voltage"] >= SWITCHING_BIAS_V
+        o for o in observations if o.values["bias_voltage"] >= SWITCHING_BIAS_V
     )
-    assert switching.data["current"] == pytest.approx(
+    assert switching.values["current"] == pytest.approx(
         DEVICE.critical_current_a / 1.5, rel=1e-6
     )
 

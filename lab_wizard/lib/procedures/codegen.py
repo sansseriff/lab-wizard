@@ -108,7 +108,7 @@ def measurement_module_source(definition: ProcedureDefinition) -> str:
     fn = f"build_{python_identifier(definition.name)}_procedure"
     block, step_imports = procedure_block(definition)
     imports = set(step_imports) | {
-        ("lab_procedure", "Observation"),
+        ("lab_procedure", "Point"),
         ("lab_procedure", "ProcedureRunner"),
         ("lab_procedure", "RunEnded"),
         ("lab_procedure", "RunStarted"),
@@ -155,7 +155,7 @@ class {prefix}Measurement:
     def run_measurement(self) -> Status:
         runner = ProcedureRunner(instruments=self.resources)
         bus = runner.context.data_bus
-        message_types = (RunStarted, Observation, RunEnded)
+        message_types = (RunStarted, Point, RunEnded)
         bus.subscribe(message_types, SaverSink(self.resources.savers).handle)
         bus.subscribe(message_types, PlotterSink(self.resources.plotters).handle)
         run_started = RunStarted(

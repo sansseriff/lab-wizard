@@ -17,7 +17,7 @@ instance in `config/savers/`. Configure an instance here, then bind it while
 
 | Type | Class | Status |
 |---|---|---|
-| `database_saver` | [`DatabaseSaver`](../../lab_wizard/lib/savers/database_saver.py) | **working** — SQLite, one row per observation |
+| `database_saver` | [`DatabaseSaver`](../../lab_wizard/lib/savers/database_saver.py) | **working** — SQLite, one row per point of a run |
 | — | `StandInSaver` | deliberate no-op, for tests and scaffolding |
 
 There is **no file (CSV/HDF5/Parquet) saver** yet. Dropping a
@@ -35,12 +35,12 @@ saver lifecycle:
 | Message | Saver call | Carries |
 |---|---|---|
 | `RunStarted` | `start_run` | the measurement's parameters, and what each instrument was configured with |
-| `Observation` | `write_measurement` | one row: the readings plus every swept value in force |
+| `Point` | `write_measurement` | one row: the readings taken at one set of parameter values, plus those values |
 | `RunEnded` | `end_run` | the closing timestamp |
 
-The second line is the important one: **an observation is flat**. The sweep
-values in force are copied onto it, so whether the run swept bias inside trigger
-level or the other way round is invisible in the stored data — which is what
+The second line is the important one: **a row is flat**. The sweep values in
+force are part of it, so whether the run swept bias inside trigger level or the
+other way round is invisible in the stored data — which is what
 lets the dataset be sliced arbitrarily afterwards.
 
 ## Database

@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-from lab_procedure import Observation, ProcedureRunner, Status
+from lab_procedure import Point, ProcedureRunner, Status
 
 from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
 from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
@@ -231,17 +231,17 @@ def test_the_composed_procedure_measures_the_detectors_curve(tmp_path: Path):
     )
 
     runner = ProcedureRunner(instruments=resources)
-    rows: list[Observation] = []
-    runner.context.data_bus.subscribe(Observation, rows.append)
+    rows: list[Point] = []
+    runner.context.data_bus.subscribe(Point, rows.append)
     status = runner.run(measurement.ComposedPcrMeasurement(resources).build_procedure())
 
     assert status is Status.SUCCESS
-    assert [row.data["bias_voltage"] for row in rows] == SWEEP_V
+    assert [row.values["bias_voltage"] for row in rows] == SWEEP_V
     for row, bias in zip(rows, SWEEP_V):
         expected = _expected_counts(bias)
-        assert abs(row.data["counts"] - expected) <= 5 * math.sqrt(expected) + 5, (bias, row.data)
+        assert abs(row.values["counts"] - expected) <= 5 * math.sqrt(expected) + 5, (bias, row.values)
     # The counter's config said 400 mV, which counts nothing; the procedure set its own.
-    assert rows[-1].data["counts"] > 1000
+    assert rows[-1].values["counts"] > 1000
     assert resources.voltage_source is not None
 
 

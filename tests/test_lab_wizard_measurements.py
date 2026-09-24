@@ -81,7 +81,7 @@ def _iv_resources(points: list[float], *, settle_s: float = 0.0) -> IVCurveResou
     )
 
 
-def test_iv_curve_emits_one_observation_per_point_and_shuts_down() -> None:
+def test_iv_curve_records_one_row_per_point_and_shuts_down() -> None:
     points = [0.0, 0.1, 0.2]
     resources = _iv_resources(points)
     saver = resources.savers[0]
@@ -95,13 +95,13 @@ def test_iv_curve_emits_one_observation_per_point_and_shuts_down() -> None:
 
     rows = saver.measurements
     assert len(rows) == len(points)
-    for row, bias in zip(rows, points):
+    for seq, (row, bias) in enumerate(zip(rows, points)):
         data = row["data"]
         assert data["bias_voltage"] == bias
         assert data["sense_voltage"] == 0.05
         expected_current = (bias - 0.05) / 100_000.0
         assert data["current"] == expected_current
-        assert row["metadata"]["bias_voltage"] == bias
+        assert row["metadata"]["seq"] == seq
 
     # Source returned to zero and turned off in cleanup.
     assert resources.voltage_source.voltage == 0.0

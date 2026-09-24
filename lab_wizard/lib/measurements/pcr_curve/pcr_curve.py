@@ -2,9 +2,8 @@
 
 The measurement is expressed as a ``Step`` tree: set the counter's threshold,
 turn the source on, sweep the bias voltage (set, settle, count), then return to
-zero / turn off. Each bias point emits an :class:`~lab_procedure.Observation`
-on the run's ``data_bus``;
-savers and plotters consume that stream via
+zero / turn off. Each bias point is recorded with ``RunContext.observe`` and reaches the
+run's ``data_bus`` as a :class:`~lab_procedure.Point`; savers and plotters consume that stream via
 :class:`~lab_wizard.lib.task_adapters.savers.SaverSink` and
 :class:`~lab_wizard.lib.task_adapters.plotters.PlotterSink`.
 
@@ -18,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lab_procedure import (
-    Observation,
+    Point,
     ProcedureRunner,
     RunEnded,
     RunStarted,
@@ -45,7 +44,7 @@ if TYPE_CHECKING:
 
 
 class CountAtBias(Step):
-    """Count for ``gate_time`` seconds at a bias point and emit one observation."""
+    """Count for ``gate_time`` seconds at a bias point and record the count."""
 
     def __init__(
         self,
@@ -63,18 +62,10 @@ class CountAtBias(Step):
         assert self.context is not None
         counts = self.counter.count(self.gate_time)
         count_rate = counts / self.gate_time if self.gate_time else 0.0
-        self.context.data_bus.emit(
-            Observation(
-                data={
-                    "bias_voltage": self.bias_voltage,
-                    "counts": counts,
-                    "int_time": self.gate_time,
-                    "count_rate": count_rate,
-                },
-                metadata=self.context.snapshot_parameters(),
-                sequence_index=self.context.next_sequence_index(),
-                sweep_index=self.context.sweep_index,
-            )
+        # ``bias_voltage`` is not recorded here: the sweep binds it, so the row
+        # already carries it.
+        self.context.observe(
+            {"counts": counts, "int_time": self.gate_time, "count_rate": count_rate}
         )
         return Status.SUCCESS
 
@@ -123,7 +114,7 @@ class PCRCurveMeasurement:
     def run_measurement(self) -> Status:
         runner = ProcedureRunner(instruments=self.resources)
         bus = runner.context.data_bus
-        message_types = (RunStarted, Observation, RunEnded)
+        message_types = (RunStarted, Point, RunEnded)
         bus.subscribe(message_types, SaverSink(self.resources.savers).handle)
         bus.subscribe(message_types, PlotterSink(self.resources.plotters).handle)
         run_started = RunStarted(

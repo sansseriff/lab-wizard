@@ -102,22 +102,30 @@ class WithParameterStepParams(StepParams):
 
 
 class RepeatStepParams(StepParams):
-    """Run ``body`` ``count`` times."""
+    """Run ``body`` ``count`` times; its rows carry ``parameter`` = 0, 1, 2 ...
+
+    The index keeps repetitions apart in the data, the way a sweep's value
+    keeps its points apart.
+    """
 
     type: Literal["repeat"] = "repeat"
     count: Value
+    parameter: str = Field(default="repeat", json_schema_extra={"column": "records"})
     body: AnyStep
 
     @classmethod
     def step_class(cls) -> StepClass:
         return Repeat
 
+    def swept_parameters(self) -> tuple[str, ...]:
+        return (self.parameter,)
+
     def render(self, ctx: RenderContext) -> str:
         # Repeat's constructor calls its child argument ``child_factory``, and a
         # step instance is accepted there; the YAML says ``body``.
         count = ctx.value(self.count, f"{self.label()}.count")
         name = f", name={self.name!r}" if self.name else ""
-        return f"{ctx.use(Repeat)}({count}, {ctx.step(self.body)}{name})"
+        return f"{ctx.use(Repeat)}({count}, {ctx.step(self.body)}{name}, parameter={self.parameter!r})"
 
 
 class WaitStepParams(StepParams):

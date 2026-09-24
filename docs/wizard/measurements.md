@@ -175,7 +175,7 @@ The template's `__main__` block picks local resources, a per-attribute
 [`RunLifecycle`](../../lab_wizard/lib/task_adapters/lifecycle.py). The same
 procedure works in each mode because measurements consume behavior ABCs, which
 both local instruments and [remote proxies](../remote/architecture.md) satisfy.
-Observations flow through the procedure data bus to the configured saver and
+Rows flow through the procedure data bus to the configured saver and
 plotter adapters.
 
 Every run goes through the same steps, in this order:

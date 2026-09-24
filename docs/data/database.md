@@ -41,7 +41,7 @@ graph TD
 | `devices` | a device on a wafer | `wafer_id`, `name`, `pixel_geometry`, `width_nm` |
 | `cryostats` | a cryostat | `name`, `location` |
 | `runs` | one measurement program invocation | `cryostat_id`, `device_id`, `run_type`, `started_at`, `config` (JSON), `instruments` (JSON) |
-| `measurements` | one observation | `run_id`, `timestamp`, `counts`, `int_time`, `temperature`, `data` (JSON), `metadata` (JSON) |
+| `measurements` | one row of a run: the readings taken at one set of parameter values | `run_id`, `timestamp`, `counts`, `int_time`, `temperature`, `data` (JSON), `metadata` (JSON) |
 | `measurement_details` | sub-structure of one integration (histogram bins, time windows) | `measurement_id`, `detail_type`, `bin_index`, `value` |
 
 Design principles baked into the schema:
@@ -68,24 +68,22 @@ Indexes exist on `runs(cryostat, started_at)`, `runs(run_type)`, and
 
 ## What a procedure writes
 
-**A procedure adds no columns.** The schema is fixed; a run's observations land
-in `measurements.data` as JSON keys. An `mcr_curve` run over three attenuations
-writes seven rows that look like this (abbreviated):
+**A procedure adds no columns.** The schema is fixed; a run's rows land in
+`measurements.data` as JSON keys. A row is everything recorded while the same
+parameter values were in force (see
+[Procedures](../concepts/procedures.md#how-readings-become-rows)), so an
+`mcr_curve` run over three attenuations writes four rows (abbreviated):
 
 ```json
-{"phase": "background", "counts": 1,     "int_time": 0.05, "count_rate": 20.0}
-{"phase": "signal", "attenuation_db": 20.0, "counts": 387, "count_rate": 7740.0}
-{"phase": "signal", "attenuation_db": 20.0, "device_voltage": 0.0}
-{"phase": "signal", "attenuation_db": 10.0, "counts": 4004, "count_rate": 80080.0}
-...
+{"phase": "background", "counts": 1, "int_time": 0.05, "count_rate": 20.0}
+{"phase": "signal", "attenuation_db": 20.0, "counts": 387, "count_rate": 7740.0, "device_voltage": 0.0}
+{"phase": "signal", "attenuation_db": 10.0, "counts": 4004, "count_rate": 80080.0, "device_voltage": 0.0}
+{"phase": "signal", "attenuation_db": 0.0, "counts": 39165, "count_rate": 783300.0, "device_voltage": 0.0}
 ```
 
-Two things to notice. The swept value is copied onto every row, so the loop
-nesting is invisible in the data — which is the whole point. But a `count` and a
-`read_voltage` at the same attenuation are **two rows**, because each
-`observe()` writes one; reassembling a point means matching on `attenuation_db`.
-That is a known divergence from *one row per integration*, designed in
-`plans/semantic_data_plan.md`.
+The swept value is on every row, so the loop nesting is invisible in the data,
+which is the whole point. `measurements.metadata` holds the row's position in
+the run (`seq`) and the steps that recorded into it (`steps`).
 
 ## Using it
 

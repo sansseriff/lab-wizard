@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 
 NodeId = tuple[str, ...]
+
+
+def now() -> datetime:
+    """The current time, in UTC. Every message is stamped with it."""
+    return datetime.now(UTC)
 
 
 @dataclass(frozen=True)
@@ -21,18 +27,27 @@ class RunStarted:
 
 
 @dataclass(frozen=True)
-class Observation:
-    data: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-    details: list[dict[str, Any]] = field(default_factory=list)
-    temperature: float | None = None
-    sequence_index: int | None = None
-    sweep_index: int | None = None
+class Point:
+    """One row of a run's data: everything recorded at one set of parameters.
+
+    ``values`` holds the parameters that were in force (the swept values and
+    labels such as ``phase``) followed by every field recorded under them, so
+    a nested sweep produces more rows, never a nested structure. ``seq`` counts
+    rows in the order they were recorded, ``t`` is when the row's last reading
+    was taken, and ``steps`` names the steps that recorded into it. See
+    :meth:`RunContext.observe` for how readings become rows.
+    """
+
+    seq: int
+    t: datetime
+    values: dict[str, Any]
+    steps: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class RunEnded:
     status: str
+    t: datetime = field(default_factory=now)
 
 
 @dataclass(frozen=True)
@@ -47,6 +62,7 @@ class StepBegan:
     parent_id: NodeId | None
     label: str
     determinate: bool
+    t: datetime = field(default_factory=now)
 
 
 @dataclass(frozen=True)
@@ -60,3 +76,4 @@ class StepProgress:
 class StepEnded:
     node_id: NodeId
     status: str
+    t: datetime = field(default_factory=now)

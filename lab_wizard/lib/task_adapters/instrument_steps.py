@@ -3,9 +3,9 @@
 These wrap the concrete instrument contracts
 (:class:`~lab_wizard.lib.instruments.general.vsource.VSource`) as
 :class:`~lab_procedure.Step` nodes so measurements can compose them with
-``Sequence``/``Sweep``/``Wait``. They carry no measurement-specific logic and
-emit no :class:`~lab_procedure.Observation`; data-producing steps live with
-their measurement.
+``Sequence``/``Sweep``/``Wait``. They carry no measurement-specific logic. The
+few that take readings (``Count``, ``ReadVoltage``) record them with
+``RunContext.observe``, which turns them into rows.
 """
 
 from __future__ import annotations
@@ -132,8 +132,8 @@ class Count(Step):
     """Count for one gate and record ``counts``, ``int_time`` and ``count_rate``.
 
     The generic counterpart of a measurement-specific counting step. The swept
-    parameters in force go into the observation too (``RunContext.observe``),
-    so a count inside a bias sweep is a row carrying its bias.
+    parameters in force go into the row too (``RunContext.observe``), so a
+    count inside a bias sweep is a row carrying its bias.
     """
 
     emits = ("counts", "int_time", "count_rate")

@@ -4,7 +4,7 @@ import time
 
 from lab_procedure import (
     MessageBus,
-    Observation,
+    Point,
     ProcedureRunner,
     RunStarted,
     Sequence,
@@ -15,25 +15,18 @@ from lab_procedure import (
 )
 
 
-class EmitObservation(Step):
+class Record(Step):
     def __init__(self, value: object, name: str | None = None) -> None:
         super().__init__(name=name)
         self.value = value
 
     def run(self) -> Status:
         assert self.context is not None
-        self.context.data_bus.emit(
-            Observation(
-                data={"value": self.value},
-                metadata=self.context.snapshot_parameters(),
-                sequence_index=self.context.next_sequence_index(),
-                sweep_index=self.context.sweep_index,
-            )
-        )
+        self.context.observe({"value": self.value})
         return Status.SUCCESS
 
 
-def test_sequence_sweep_emits_flat_observations_with_parameter_snapshots() -> None:
+def test_a_sweep_records_flat_rows_carrying_the_swept_parameter() -> None:
     data_bus = MessageBus()
     status_bus = MessageBus()
     data_messages: list[object] = []
@@ -42,7 +35,7 @@ def test_sequence_sweep_emits_flat_observations_with_parameter_snapshots() -> No
     status_bus.subscribe(object, status_messages.append)
 
     procedure = Sequence(
-        Sweep("bias_voltage", [0.0, 0.1, 0.2], lambda value: EmitObservation(value)),
+        Sweep("bias_voltage", [0.0, 0.1, 0.2], lambda value: Record(value)),
         name="root",
     )
 
@@ -50,10 +43,13 @@ def test_sequence_sweep_emits_flat_observations_with_parameter_snapshots() -> No
     status = runner.run(procedure, RunStarted(run_type="unit_test"))
 
     assert status is Status.SUCCESS
-    observations = [m for m in data_messages if isinstance(m, Observation)]
-    assert [m.data["value"] for m in observations] == [0.0, 0.1, 0.2]
-    assert [m.metadata["bias_voltage"] for m in observations] == [0.0, 0.1, 0.2]
-    assert [m.sequence_index for m in observations] == [0, 1, 2]
+    points = [m for m in data_messages if isinstance(m, Point)]
+    assert [p.values for p in points] == [
+        {"bias_voltage": 0.0, "value": 0.0},
+        {"bias_voltage": 0.1, "value": 0.1},
+        {"bias_voltage": 0.2, "value": 0.2},
+    ]
+    assert [p.seq for p in points] == [0, 1, 2]
     assert status_messages
 
 

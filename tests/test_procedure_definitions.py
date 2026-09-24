@@ -107,6 +107,17 @@ def test_a_correct_definition_checks_and_renders():
     assert definition.emitted_fields() == ["bias", "counts", "int_time", "count_rate"]
 
 
+def test_a_repeat_records_its_index_under_its_parameter():
+    default = _definition({"type": "repeat", "count": 3, "body": COUNT})
+    default.check()
+    expr, _ctx = default.render_body()
+    assert expr == "Repeat(3, Count(counter=counter, gate_time=params.gate_s), parameter='repeat')"
+    assert default.emitted_fields() == ["repeat", "counts", "int_time", "count_rate"]
+
+    named = _definition({"type": "repeat", "count": 3, "parameter": "shot", "body": COUNT})
+    assert named.emitted_fields()[0] == "shot"
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     [

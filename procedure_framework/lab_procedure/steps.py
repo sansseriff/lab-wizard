@@ -33,6 +33,13 @@ class Sequence(Step):
 
 
 class Repeat(Step):
+    """Run a child ``count`` times, binding ``parameter`` to 0, 1, 2 ...
+
+    The binding is what keeps repetitions apart in the data: ten counts at one
+    bias are ten rows told apart by ``repeat``, exactly as a sweep's rows are
+    told apart by its value.
+    """
+
     determinate = True
 
     def __init__(
@@ -40,12 +47,15 @@ class Repeat(Step):
         count: int,
         child_factory: Callable[[int], Step] | Step,
         name: str | None = None,
+        *,
+        parameter: str = "repeat",
     ) -> None:
         super().__init__(name=name)
         if count < 0:
             raise ValueError("Repeat count must be non-negative")
         self.count = count
         self.child_factory = child_factory
+        self.parameter = parameter
         self._active_child: Step | None = None
 
     def abort(self) -> None:
@@ -63,21 +73,21 @@ class Repeat(Step):
         if self.count == 0:
             self.report_progress(1.0)
             return Status.SUCCESS
+        assert self.context is not None
         for index in range(self.count):
             if self.aborted:
                 return Status.ABORTED
-            assert self.context is not None
-            self.context.sweep_index = index
             self.report_progress(
                 index / self.count,
                 detail=f"repeat {index + 1}/{self.count}",
             )
-            child = self._make_child(index)
-            self._active_child = child
-            try:
-                status = child.execute(self.context, self.node_id, position=index)
-            finally:
-                self._active_child = None
+            with self.context.bound_parameter(self.parameter, index):
+                child = self._make_child(index)
+                self._active_child = child
+                try:
+                    status = child.execute(self.context, self.node_id, iteration=index)
+                finally:
+                    self._active_child = None
             if status is not Status.SUCCESS:
                 return status
         self.report_progress(1.0)
@@ -120,7 +130,7 @@ class Sweep(Step):
                 child = self.child_factory(value)
                 self._active_child = child
                 try:
-                    status = child.execute(self.context, self.node_id, position=index)
+                    status = child.execute(self.context, self.node_id, iteration=index)
                 finally:
                     self._active_child = None
             if status is not Status.SUCCESS:
@@ -227,7 +237,7 @@ class Retry(Step):
                 return Status.ABORTED
             last_attempt = attempt == self.max_attempts - 1
             try:
-                status = self.child.execute(self.context, self.node_id, position=attempt)
+                status = self.child.execute(self.context, self.node_id, iteration=attempt)
             except Exception:
                 if last_attempt:
                     raise

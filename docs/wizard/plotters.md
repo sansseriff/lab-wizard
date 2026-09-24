@@ -27,12 +27,12 @@ no hardware addressing, no hierarchy, one YAML file per configured instance in
 
 ## How a plotter receives data
 
-A run publishes every observation on its data bus.
+A run publishes every row on its data bus.
 [`PlotterSink`](../../lab_wizard/lib/task_adapters/plotters.py) forwards each
-one's `data` dict to every bound plotter's `plot()` — the same stream the savers
+row's `values` to every bound plotter's `plot()` — the same stream the savers
 receive, so a plotter and the database never disagree about what happened.
 
-Because each observation is one flat row — the swept values in force alongside
+Because each row is flat — the swept values in force alongside
 the readings — "plot count rate against bias" is a choice of two column names,
 not a traversal of the run's loop structure. The columns a procedure produces
 are listed in its [composer](procedures.md), which is what a future axis picker

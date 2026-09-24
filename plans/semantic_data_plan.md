@@ -1,359 +1,761 @@
-# Saving what a measurement *means*
+# The lab data system: recording runs, saving files, and the viewer
 
-> **Status: proposed — decisions needed, nothing built.**
+> **Status: Phase 1 built (2026-09-23); Phases 2–8 not started.** Decisions
+> still marked **(open)** in §14 need an answer; everything else was settled
+> in review.
 >
 > **This is a startup document.** It is written for an engineer or agent picking
-> this up cold, and it is meant to be enough on its own: the problem, the code
-> as it stands, what other people do, a proposal, the decisions that are not
-> mine to make, and the traps. Read it end to end before changing anything.
+> this up cold. Read it end to end before changing anything.
 >
-> It follows from [`procedure_plan.md`](procedure_plan.md) meeting
-> [`database_plan.md`](database_plan.md). Now that a procedure is a declared
-> tree rather than a hand-written loop, the saving system can finally know which
-> of a run's values are *the measurement* and which are *the circumstances*.
+> It supersedes the schema in [`database_plan.md`](database_plan.md). Running a
+> project from the GUI and live plotting are planned in
+> [`runner_plan.md`](runner_plan.md); both consume the stream described in §4.
+> No backwards compatibility with databases written before this work is
+> required: existing `measurements.db` files are abandoned, not migrated.
 
 ---
 
-## 1. The problem, in the lab's words
+## 1. What this is for
 
-An MCR curve **means** one thing: count rate as a function of optical
-attenuation. Everything else it records — the bias it held, the phase labels,
-the device voltage, the order the points were taken in — matters for judging
-drift and hysteresis, but is not what the measurement *is*.
+A **Data** page in the lab_wizard GUI that is better than browsing a tree of CSV
+files. A lab member must be able to:
 
-A PCR curve sweeping bias voltage at several trigger levels means count rate as
-a function of (bias, trigger level). Whether the run swept all biases at one
-trigger level and then repeated, or alternated the loops the other way round, is
-**operationally** different — it changes what drifts between neighbouring points
-— but **semantically** identical. Both runs measure the same surface.
+1. **Filter all the workspace's runs** from a sidebar, in many ways at once: all
+   runs on one device type, all runs that used a particular laser, all MCR
+   curves, everything from last Tuesday.
+2. **See what a run produced**: a plot chosen by the procedure's author, shown
+   by default when a run is selected.
+3. **Overlay runs**: plot the same quantity from several runs, including a
+   subset of each ("the lowest trigger level of each of these five runs").
+4. **Put any column on any axis.** A measured voltage against another measured
+   voltage is a normal plot.
+5. **Plot simple derived quantities** (background-subtracted rate, normalized
+   efficiency) without leaving the viewer.
+6. **Reconstruct what happened**: the procedure's structure, the order and
+   timing of every step, which step produced which data.
+7. **Hand off to a notebook** with one click, landing where the viewer stopped.
 
-So the stored form has to carry two things at once:
+And, because many lab members are used to files:
 
-1. **the relation** — which columns are axes, which are readings;
-2. **the run as it happened** — order, nesting, phases — so hysteresis and drift
-   remain visible.
+8. **Optionally save every run as a folder of plain files** (CSV and YAML) that
+   opens without lab_wizard.
 
-Today the second is recorded and the first is not recorded at all. Nothing in
-the database says that `attenuation_db` is an axis and `counts` is a reading;
-every consumer — a plot, an export, a person six months later — guesses from
-column names.
-
-**The goal is not to throw away the hierarchy.** It is to stop the hierarchy
-being the only thing the data model knows.
+Nobody should ever have to write SQL.
 
 ---
 
-## 2. What exists today
+## 2. The decisions
 
-### 2.1 The pipeline, end to end
+| # | Decision | Why |
+|---|---|---|
+| D1 | **One database per workspace**, at `<workspace>/<data_dir>/lab.db`. Synchronization across computers is future work. | "All the lab's data" cannot be filtered across per-project files. |
+| D2 | **Runs are what you filter; points are what you plot.** | Every filter anyone asked for is a fact about a run. |
+| D3 | **Only structural columns are typed.** Every measured or swept value lives in one JSON `values` object per point. | One shape; no procedure ever changes the schema; no orphaned columns. |
+| D4 | **A point row is everything recorded while the same parameter values were in force, until a field would be recorded twice.** (§5) | Loop order does not change the data; readings taken together share a row. |
+| D5 | **The execution is recorded**: a `steps` row per step execution, and every point names its steps. (§6) | The run replays as a timeline; loop order stays recoverable. |
+| D6 | **The sidebar is faceted search** over a derived `run_facets` table. (§8) | New procedures and instruments become filters with no code change. |
+| D7 | **No axis roles.** The procedure author declares default `plots:`; any column may go on any axis. (§9) | Inference cannot know an IV curve's x is sometimes a read voltage. |
+| D8 | **Derived quantities are computed when read, never stored**, from a small restricted expression language. (§10) | Fixing a formula fixes every past run. |
+| D9 | **The viewer supports nothing it cannot export as code.** (§11) | Sets the viewer's scope; the notebook handoff is lossless. |
+| D10 | **Arrays are stored as arrays** inside `values`. `measurement_details` is deleted. | Simple; a 4096-bin histogram is ~20 KB. |
+| D11 | **Setter steps may record the value they reached** (`record:`). | "The attenuation actually reached" is a measurement. |
+| D12 | **`Repeat` binds a named parameter**, like `Sweep`. | Otherwise repeated rows are identical in `values`. |
+| D13 | **One stream, many sinks.** A run emits one stream of messages; the database recorder, file saver, plotters and the GUI's live view all subscribe to it. (§4) | Every consumer sees the same rows, built once. |
+| D14 | **The database is always written; it is not a "saver" option.** Savers are the *optional* extra outputs, starting with the file saver. (§7) | A run missing from the database is missing from the viewer. |
+| D15 | **A run folder is a lossless copy of a run's database rows.** The file saver, the viewer's "Export run" and a future "Import run" share one format. (§7) | One format, three uses; files are never a second-class record. |
+| D16 | **All plotting uses one plot evaluator**, from `lab_wizard.data`: the viewer, the matplotlib window and the web plot all turn a plot spec plus points into series the same way. | A plot looks the same live and afterwards. |
 
-| Stage | Where |
+---
+
+## 3. The schema
+
+Five tables in one SQLite file. JSON columns hold dicts; every plain column is
+something **every** run or point has.
+
+```
+meta
+  key TEXT PRIMARY KEY, value TEXT          -- schema_version, created_at
+
+devices
+  id          INTEGER PRIMARY KEY
+  name        TEXT UNIQUE NOT NULL          -- "A7"
+  properties  JSON                          -- {"type":"SNSPD-A","wafer":"W12","width_nm":80}
+  notes       TEXT
+
+runs
+  id            INTEGER PRIMARY KEY
+  procedure     TEXT NOT NULL               -- "mcr_curve"; any string
+  status        TEXT NOT NULL               -- running | success | failed | aborted
+  started_at    TEXT NOT NULL               -- UTC ISO-8601
+  ended_at      TEXT
+  device_id     INTEGER REFERENCES devices
+  operator      TEXT
+  notes         TEXT
+  project       TEXT                        -- project directory name
+  metadata      JSON                        -- the project's run.metadata: {"cryostat":"BlueFors1"}
+  definition    JSON                        -- the procedure definition, snapshotted
+  params        JSON                        -- the params it ran with
+  instruments   JSON                        -- {role: {type, key, attribute_name, params}}
+  columns       JSON                        -- {name: {unit, steps:[...], bins?}}
+
+steps
+  id          INTEGER PRIMARY KEY           -- insertion order = start order
+  run_id      INTEGER NOT NULL REFERENCES runs
+  path        TEXT NOT NULL                 -- see §6
+  kind        TEXT NOT NULL                 -- the definition's step type
+  started_at  TEXT NOT NULL
+  ended_at    TEXT
+  status      TEXT                          -- success | failed | aborted
+  error       TEXT
+
+points
+  run_id  INTEGER NOT NULL REFERENCES runs
+  seq     INTEGER NOT NULL                  -- 0, 1, 2 ... in recording order
+  t       TEXT NOT NULL                     -- when its last reading was taken, UTC
+  steps   JSON NOT NULL                     -- paths of the steps that contributed
+  values  JSON NOT NULL                     -- {"phase":"signal","attenuation_db":20.0,"counts":387}
+  PRIMARY KEY (run_id, seq)
+
+run_facets                                  -- derived; rebuildable at any time
+  run_id  INTEGER NOT NULL REFERENCES runs
+  key     TEXT NOT NULL                     -- "device.type"
+  value   TEXT NOT NULL                     -- "SNSPD-A"
+  num     REAL                              -- value as a number, when it is one
+  PRIMARY KEY (run_id, key, value)
+  INDEX (key, value), INDEX (key, num)
+```
+
+Deleted outright: `measurements`, `measurement_details`, `wafers`,
+`cryostats`, the `RunType` enum, `add_missing_columns`. A wafer is a device
+property; a cryostat is run metadata.
+
+**Versioning.** `meta.schema_version` is checked on open; a mismatch refuses to
+open, naming both versions. Migrations are deferred until a change needs one
+(§14, Q2).
+
+**SQLite settings.** WAL mode, `foreign_keys=ON`, one connection per run
+process, one short transaction per point.
+
+### Where the database lives
+
+The workspace manifest `lab-wizard.toml` gains a data directory, beside the
+paths it already has:
+
+```toml
+[workspace]
+config_dir = "config"
+projects_dir = "projects"
+logs_dir = "logs"
+data_dir = "data"          # new: lab.db, and the file saver's default root
+```
+
+A run finds its workspace from the project directory with
+`workspace.find_workspace` (which reads the manifest and honours
+`LAB_WIZARD_WORKSPACE`) and records to `<data_dir>/lab.db`.
+
+A project **outside any workspace** (the `pedagogical_embedded` generation
+style, whose point is that the folder is all it needs) records to
+`<project>/data/lab.db`: the project folder is treated as its own small
+workspace. No configuration is involved in either case.
+
+This replaces today's arrangement, where `db_path: measurements.db` is copied
+from `config/savers/` into every project. Its description says "relative to the
+project", but `DatabaseSaver` passes it straight to SQLite, so it is relative to
+**whatever directory the process was started in**. That is why an empty
+`measurements.db` sits at the repository root.
+
+**Two workspace-discovery functions exist and disagree.**
+`lab_wizard/wizard/workspace.py::find_workspace` reads the manifest.
+`lab_wizard/lib/client/server_discovery.py::find_workspace_config_dir` instead
+walks upward for a directory literally named `config` containing `server/` or
+`instruments/`, so it ignores the manifest's `config_dir` setting and the
+environment variable. The recorder needs the manifest (for `data_dir`), so
+`workspace.py` moves into `lab_wizard/lib/` (the library must not import the
+GUI package) and replaces `find_workspace_config_dir` everywhere.
+
+(`config/server/` is unrelated to data. It holds the *instrument* server's
+`server.yaml`, with its bind address and permissions, plus its pid file, log and
+event audit log. `wizard init` creates it empty; the wizard writes `server.yaml`
+when the user enables the server, see `wizard/backend/server_control.py`. Its
+only overlap with this work is that `find_workspace_config_dir` uses its
+existence as a sign that it has found a workspace.)
+
+---
+
+## 4. One stream, many sinks
+
+A run already emits messages on two buses (`RunContext.data_bus`,
+`status_bus`). After this work the messages are:
+
+| Message | Carries |
 |---|---|
-| A procedure definition (roles, params, step tree) | `config/procedures/<name>.yml`, or `lab_wizard/lib/procedures/library/` |
-| Generated Python for a project | `lab_wizard/lib/procedures/codegen.py` → `projects/<project>/<name>.py` |
-| Steps that touch instruments | `lab_wizard/lib/task_adapters/instrument_steps.py` |
-| The run loop and messages | `procedure_framework/lab_procedure/` (`core.py`, `steps.py`, `context.py`, `messages.py`) |
-| Message → saver bridge | `lab_wizard/lib/task_adapters/savers.py` (`SaverSink`) |
-| Message → plotter bridge | `lab_wizard/lib/task_adapters/plotters.py` (`PlotterSink`) |
-| The database | `lab_wizard/lib/savers/schema.py`, `database_saver.py`, `query.py` |
+| `RunStarted` | procedure, device, operator, notes, metadata, definition, params, instruments, columns |
+| `Point` | seq, t, steps, values (one closed row, §5) |
+| `StepBegan` / `StepEnded` | path, kind, time, status, error |
+| `StepProgress` | path, fraction, detail (live only; not recorded) |
+| `RunEnded` | status, time |
 
-### 2.2 How a row is produced now
+Every output is a sink subscribed to that stream:
 
-`RunContext.observe(data)` (`procedure_framework/lab_procedure/context.py`) is
-the only way data leaves a step:
+| Sink | When | Where |
+|---|---|---|
+| `DatabaseRecorder` | always | §3 |
+| `FileSaver` | when the project configures one | §7 |
+| `MplPlotter`, `WebPlotter` | when the project configures one | `runner_plan.md` |
+| `EventPublisher` (websocket) | when the wizard launched the run, or a web plotter needs it | `runner_plan.md` |
+
+Generated projects stop wiring sinks by hand. `run_measurement` calls one
+library function, `attach_sinks(runner, resources, project)`, which adds the
+recorder and whatever the project configures. Changing what a sink does never
+means regenerating projects.
+
+The recorder needs the database's `run_id` before any other sink can link to
+it, so it is subscribed first and `RunStarted` handling returns the id to the
+run (`RunContext.run_id`), which later messages carry.
+
+---
+
+## 5. The point rule
+
+> A row is everything recorded while the same parameter values were in force,
+> until a field would be recorded twice.
+
+"Parameter values in force" is `RunContext.snapshot_parameters()`: whatever
+`Sweep`, `WithParameter` and (after D12) `Repeat` have bound at the moment of
+the `observe()` call.
+
+On each `observe(fields)`:
+
+- if a row is open, the parameters equal the open row's, **and** none of
+  `fields` is already on the row → merge into the open row;
+- otherwise close the open row (emit a `Point`) and open a new one with the
+  current parameters plus `fields`.
+
+A row also closes as soon as the parameters it was recorded under go out of
+force, which is the end of its loop iteration (`RunContext.bound_parameter`).
+The rows are the same either way; this only makes each one appear when it is
+complete instead of when the next reading arrives, which a live plot needs.
+
+When the run ends (success, failure, abort or exception) the open row is
+closed **before** `RunEnded`.
+
+A step may not record a field named like a parameter in force: the row already
+carries the parameter, and a reading under the same name would silently replace
+it. `observe()` raises `ValueError`.
+
+### Worked example: loop order does not change the rows
+
+PCR, bias ∈ {0.02, 0.03} V, trigger ∈ {−50, −40, −30} mV, with `count` and
+`read_voltage` in the innermost loop. With trigger as the inner loop, twelve
+observations merge into six rows:
+
+| seq | bias_voltage | trigger_mV | count_rate | device_voltage |
+|---|---|---|---|---|
+| 0 | 0.02 | −50 | 33333.3 | 0.0 |
+| 1 | 0.02 | −40 | 40000.0 | 0.0 |
+| 2 | 0.02 | −30 | 46666.7 | 0.0 |
+| 3 | 0.03 | −50 | 50000.0 | 0.0 |
+| 4 | 0.03 | −40 | 60000.0 | 0.0 |
+| 5 | 0.03 | −30 | 70000.0 | 0.0 |
+
+With bias as the inner loop, the same six rows arrive with different `seq`. The
+guarantee: **two procedures that take the same readings at the same parameter
+values produce the same set of rows, whatever the loop order.** Order lives in
+`seq`, `t` and `steps`, never in the shape of `values`.
+
+A reading placed at an outer loop level genuinely happens fewer times, so it
+lands on its own row with fewer parameters (`{bias_voltage, device_voltage}`).
+That is correct: the procedure measured something different.
+
+### Edge cases
+
+| Situation | Outcome |
+|---|---|
+| mcr background count (in no loop) | `{phase: background}` is its own key → one row |
+| `repeat: 10` | binds `repeat` = 0…9 (D12) → ten distinct rows |
+| sweep up then down (hysteresis) | the second visit to a value is a new row, told apart by `seq` |
+| `retry` around `count` | a failed attempt records nothing → one row |
+| two steps recording the same field under one set of parameters | two rows; `definition.check()` warns (§13 Phase 4) |
+| a setter with `record:` | its read-back opens the row; the count and voltage join it |
+| a sweep that lists the same value twice | two rows, since the first closes when its iteration ends |
+
+### Where it lives
+
+In `RunContext`, before the data bus, so every sink sees whole rows.
+`RunContext.latest` keeps updating on **every** `observe()`, not at close, so
+condition steps (`value_above`) read what was just measured.
+
+---
+
+## 6. Recording the execution
+
+`Step.execute` emits `StepBegan`/`StepEnded`, timestamped, with a node path
+([core.py](../procedure_framework/lab_procedure/core.py)) on the status bus.
+Nothing outside the tests consumes them yet; the wizard has no live progress
+view (that is `runner_plan.md`). The recorder will subscribe to them and write
+one `steps` row per execution.
+
+**Paths.** The runtime tree mirrors the definition tree one to one; the only
+extra level is a repeated child. `[n]` is a child's position among its
+parent's children; `#n` marks the nth run of a child that a sweep, repeat or
+retry runs again. The real mcr count at the third attenuation is:
+
+```
+sequence/source_guard[1]/safe_guard[0]/sequence[0]/with_parameter[4]/sweep[0]/sequence#2/count[2]
+```
+
+A segment is the step's `name:` when its author set one, otherwise its kind
+(`SourceGuard` → `source_guard`, the definition's step type), so a path can be
+walked against `runs.definition`.
+
+**Points name their steps.** `RunContext` keeps the executing step's path,
+pushed and popped by `Step.execute`; each `observe()` appends it to the open
+row's `steps`.
+
+---
+
+## 7. File saving
+
+For lab members who want files. The file saver writes a **run folder** while
+the run happens. It is the same data as the database rows, laid out for a file
+browser and a spreadsheet.
+
+### What a run folder contains
+
+```
+2026-09-22/mcr_curve_A7_143012/
+  run.yaml          # everything on the runs row: procedure, device, operator,
+                    #   times, status, metadata, params, instruments, columns (with units)
+  points.csv        # one line per point: seq, t, then one column per recorded name
+  steps.csv         # the timeline: path, kind, started_at, ended_at, status, error
+  procedure.yaml    # the definition snapshot
+  arrival_time.csv  # one file per array column: seq, then one column per bin
+  plot.png          # optional: the default plot, drawn at the end
+```
+
+`points.csv` rows are the §5 rows exactly, so a file user gets one line per
+point with every reading at that point on it. Missing values are empty cells.
+The column order is: `seq`, `t`, swept parameters in tree order, then recorded
+fields in tree order, all taken from `columns`.
+
+### The folder hierarchy is a choice of facets
+
+A folder tree can only be ordered one way. The saver builds each run's path
+from a template whose fields are **facet keys** (§8):
+
+```yaml
+savers:
+  files:
+    type: file_saver
+    root: ""                                   # empty = <workspace>/<data_dir>/files
+    path: "{date}/{procedure}_{device}_{time}"  # any facet keys
+    plot_png: true
+```
+
+`{date}/{procedure}_{device}_{time}` is the default. A lab that thinks by device
+writes `{device.wafer}/{device}/{date}_{procedure}`. This is the whole trade in
+one line: files commit to one ordering of the facets, while the viewer can
+filter by any of them in any order.
+
+### Writing while the run happens
+
+- `run.yaml` and `procedure.yaml` are written at `RunStarted`; `run.yaml` is
+  rewritten at `RunEnded` with the status and end time.
+- `points.csv` and `steps.csv` are appended and flushed per row, so a crash
+  loses at most the open point.
+- The header comes from `columns`, which is known at `RunStarted` from the
+  definition. If a field not in `columns` turns up anyway, the file is rewritten
+  once at `RunEnded` with the complete header.
+
+### One format, three uses (D15)
+
+The same writer backs the file saver, the viewer's **Export run** (for someone
+who wants files from a run that was not saved as files), and later **Import
+run** (bringing a folder from another computer or an embedded project into a
+workspace database). Import is out of scope now, but the format must stay
+lossless so it remains possible: everything on the `runs`, `steps` and `points`
+rows must be in the folder.
+
+---
+
+## 8. Facets: how the sidebar works
+
+When a run ends, the recorder flattens its facts into `run_facets`:
+
+| Facet key | From |
+|---|---|
+| `procedure`, `status`, `operator`, `project` | `runs` columns |
+| `date`, `time` | `started_at`, in the lab's **local** time |
+| `device` | `devices.name` |
+| `device.<prop>` | each scalar in `devices.properties` |
+| `run.<key>` | each scalar in `runs.metadata` (`run.cryostat`) |
+| `instrument.<role>.type` | `runs.instruments` |
+| `instrument.<role>.<param path>` | each scalar leaf of that instrument's params |
+| `param.<path>` | each scalar leaf of `runs.params` |
+| `column` | one row per recorded column ("runs that recorded `device_voltage`") |
+
+Only scalar leaves become facets. `num` is filled when the value parses as a
+number, so a numeric facet with many values can be a range slider.
+
+The sidebar is one query shape (facet values with counts under the current
+filters), so it **builds itself**: the first run on a new instrument type adds
+that filter.
+
+`run_facets` is a cache, rebuilt for a run when it ends, for a device's runs
+when that device is edited, and for everything by a `rebuild` command.
+
+**The honest limit.** A filter finds only what was recorded. "Every run with the
+4.5 µm QCL" needs the wavelength to be a param of that instrument's config;
+"every run on SNSPD-A devices" needs the device named at run start (§12).
+
+---
+
+## 9. Default plots
+
+A procedure definition gains an optional `plots:` list. The first is what the
+viewer shows for a run, and what a live plotter draws; the others are tabs.
+
+```yaml
+plots:
+  - name: MCR
+    x: attenuation_db
+    y: [count_rate]
+    where: {phase: signal}
+    log_y: true
+  - name: Attenuator linearity
+    x: attenuation_db
+    y: [attenuation_db_reached]
+  - name: Stayed superconducting
+    x: attenuation_db
+    y: [device_voltage]
+```
+
+**Fallback** with no `plots:`: x = the innermost swept parameter, y = the first
+recorded field.
+
+The viewer uses the **current** definition's `plots:` and `derived:`, so a plot
+added later applies to past runs; if the procedure was deleted, the snapshot in
+`runs.definition`. The composer gets a Plots panel, and a plot customized in the
+viewer can be saved back into the procedure.
+
+---
+
+## 10. Derived quantities
+
+A procedure gains an optional `derived:` map; the viewer also accepts ad-hoc
+expressions.
+
+```yaml
+derived:
+  rate_minus_dark: count_rate - mean(count_rate, phase == "background")
+  normalized: rate_minus_dark / max(rate_minus_dark)
+```
+
+**The language, completely:**
+
+- numbers, strings, column names (recorded or derived);
+- `+ - * / **`, unary `-`, parentheses;
+- comparisons `== != < <= > >=` and `and or not`, only inside a reduction's
+  condition;
+- row functions `abs sqrt exp log log10`;
+- per-run reductions returning one number: `mean min max sum count first last`,
+  each `f(expr)` or `f(expr, condition)`.
+
+Parsed with Python's `ast` against a whitelist of node types (never `eval`) and
+compiled to a **polars expression**, evaluated on a DataFrame holding the
+points of one or more runs. Per-run reductions map directly onto polars window
+expressions:
+
+| Expression | Polars |
+|---|---|
+| `count_rate / int_time` | `pl.col("count_rate") / pl.col("int_time")` |
+| `max(x)` | `pl.col("x").max().over("run_id")` |
+| `mean(count_rate, phase == "background")` | `pl.col("count_rate").filter(pl.col("phase") == "background").mean().over("run_id")` |
+
+So a spec over five runs is one lazy query, not a Python loop over runs.
+Derived values are never stored.
+
+Anything else belongs in a notebook: fits (including jitter FWHM), arithmetic
+between runs, joins against calibration data, anything iterative.
+
+---
+
+## 11. Plot specs, overlay and the evaluator
+
+A **plot spec** says what to draw:
+
+```yaml
+runs: [41, 42, 43, 44, 45]
+x: bias_voltage
+y: [count_rate]
+y2: []                          # secondary axis
+where:
+  phase: signal                 # equals
+  trigger_mV: {per_run: min}    # that run's own lowest trigger level
+series: run                     # or any column
+label: device                   # legend text from a facet key
+connect: seq                    # seq (default) | x | none
+kind: line                      # line | scatter | histogram | waterfall
+log_x: false
+log_y: false
+```
+
+`where` accepts per column: a value, `{in: [...]}`, `{range: [lo, hi]}`,
+`{per_run: min | max | first | last}`. `x`, `y` and `where` columns may be
+derived expressions.
+
+- One run selected → the spec starts as that run's first plot.
+- More runs selected → they join `runs:` and `series` becomes `run`.
+- Overlay matches columns by name. Differently named columns across procedures
+  are a notebook job.
+- `connect: seq` joins points in recording order within a series, which is what
+  shows a hysteresis loop; sorting by x would hide it.
+- Array columns use `kind: histogram` (one point) or `waterfall` (points ×
+  bins); a step recording an array declares its bins in `columns`
+  (`"bins": {"start": 0, "step": 4, "unit": "ps"}`).
+
+**The evaluator** (D16) is one function in `lab_wizard.data`: plot spec + a
+polars DataFrame of points (with a `run_id` column) → series ready to draw. The viewer calls it on
+database rows. A live plotter calls it on the rows so far, recomputing the whole
+thing (throttled) as each point arrives, which keeps per-run reductions such as
+`max(...)` correct while the run grows.
+
+**Open in notebook** writes:
 
 ```python
-snapshot = self.snapshot_parameters()          # every swept/bound parameter in force
-observation = Observation(
-    data={**snapshot, **data},                 # flat: axes and readings together
-    metadata=snapshot,
-    sequence_index=self.next_sequence_index(),
-    sweep_index=self.sweep_index,
-)
-self.latest.update(data)                       # what condition steps read
-self.data_bus.emit(observation)
+from lab_wizard.data import load_plot
+spec = {...}                     # the spec, verbatim
+df = load_plot(spec)             # polars DataFrame: one row per plotted point, with run_id and series
+
+import matplotlib.pyplot as plt  # matplotlib is already a dependency
+for (series,), part in df.group_by("series", maintain_order=True):
+    plt.plot(part["x"], part["y"], label=series)
+plt.legend()
 ```
 
-Parameters come into force through `Sweep` (one per value) and `WithParameter`
-(a fixed label such as `phase: background`), both via
-`RunContext.bound_parameter`, which is scoped — it restores the previous value
-on the way out.
-
-`SaverSink.handle` then pulls `counts`, `int_time`, `delta_time` and
-`temperature` out of `data` into typed columns and passes the whole dict as
-`data`, and `DatabaseSaver.write_measurement` writes one `measurements` row.
-
-### 2.3 What that actually produces
-
-A real `mcr_curve` run over three attenuations, dumped from SQLite
-(`runs` is one row; `measurements` is seven):
-
-```
-counts=1     data={"phase":"background","counts":1,"int_time":0.05,"count_rate":20.0}
-counts=387   data={"phase":"signal","attenuation_db":20.0,"counts":387,"int_time":0.05,"count_rate":7740.0}
-counts=NULL  data={"phase":"signal","attenuation_db":20.0,"device_voltage":0.0}
-counts=4004  data={"phase":"signal","attenuation_db":10.0,"counts":4004,...}
-counts=NULL  data={"phase":"signal","attenuation_db":10.0,"device_voltage":0.0}
-counts=39165 data={"phase":"signal","attenuation_db":0.0,"counts":39165,...}
-counts=NULL  data={"phase":"signal","attenuation_db":0.0,"device_voltage":0.0}
-```
-
-Note what is right and what is wrong:
-
-- **Right:** the axis value (`attenuation_db`) is copied onto every row, so the
-  loop nesting is already invisible in the data. That is the property the lab
-  wants, and it already holds.
-- **Wrong:** one point of the curve is **two rows** — counts in one,
-  `device_voltage` in the other, `counts` NULL — reassemblable only by matching
-  on `attenuation_db`. `database_plan.md` says *one row = one integration*;
-  practice drifted to *one row per `observe()` call*.
-- **Missing:** nothing says `attenuation_db` is the axis.
-
-### 2.4 The schema as built
-
-Six tables: `wafers → devices → runs → measurements → measurement_details`,
-with `cryostats` beside `runs` (`lab_wizard/lib/savers/schema.py`).
-
-```
-runs         id, cryostat_id, device_id, run_type, started_at, ended_at,
-             operator, description, config (JSON), instruments (JSON)
-measurements id, run_id, timestamp, counts, int_time, delta_time,
-             temperature, data (JSON), metadata (JSON)
-```
-
-**A procedure adds no columns.** Everything it records lands in
-`measurements.data`. That is worth stating plainly because it is often assumed
-otherwise: the schema is fixed; procedures add *keys*.
-
-Three further gaps, all independent of the semantic question:
-
-- **`runs.run_type` is a five-value enum** (`PCR_CURVE`, `IV_CURVE`,
-  `MCR_CURVE`, `EXTENDED_PCR`, `OTHER`) in a `VARCHAR(12)` column.
-  `_coerce_run_type` turns anything else into `OTHER`, so every composed
-  procedure — `dark_counts`, and anything a user builds in the composer — is
-  stored indistinguishably. A longer name would not fit the column width
-  either.
-- **`runs.device_id` is always NULL.** The project YAML carries a `run.device`
-  block (name, model, description) and a `run.metadata` block (operator,
-  description, tags), and **nothing reads them**: neither `iv_curve.py`,
-  `pcr_curve.py` nor `codegen.py` passes `device=` to `RunStarted`. For a
-  database whose whole hierarchy is wafers → devices → runs, every run is
-  unattached.
-- **`measurement_details`** (`detail_type`, `bin_index`, `bin_value`, `value`)
-  exists for per-point arrays and has never been written to.
-
-`runs.instruments` was added recently (procedure plan 5.6) and holds what each
-instrument was configured with at run start. `schema.add_missing_columns` adds
-nullable columns to databases written before they existed — there is no
-migration framework, and this is the substitute.
+(Not `df.plot`: polars' plot namespace needs `altair`, which lab_wizard does not
+depend on.)
 
 ---
 
-## 3. How other people solve this
+## 12. Run start: what gets captured
 
-None of this is exotic; it is the oldest problem in experiment data.
+A run records only what it is told; today every run's `device_id` is NULL.
 
-| System | Where the structure lives | Storage shape |
-|---|---|---|
-| **QCoDeS** (SQLite; common in quantum-device labs) | an explicit *interdependency graph* per run: each parameter is declared dependent, independent, or inferred-from | a results table per run, one real column per parameter |
-| **xarray / netCDF**, and Quantify on top of it | `dims`/`coords` versus `data_vars` — coordinates are declared, not guessed | N-dimensional arrays, gridded |
-| **NeXus / HDF5** (synchrotrons, neutron sources) | `axes` and `signal` attributes on the data group | arrays in a file hierarchy |
-| **Bluesky / databroker** (NSLS-II and others) | event *descriptors* naming each stream's fields and shapes | documents in a metadata store, bulk arrays in external files |
-| **Tidy data / star schema** (Wickham; Kimball) | convention: a row is an observation; setpoints and readings are columns; context lives in dimension tables | one fact table plus joined dimensions |
-| **EAV** (entity–attribute–value) | nothing is declared; every number is a row | maximal flexibility, poor ergonomics — an anti-pattern for primary data |
+- **Project YAML `run:` block**:
 
-*(Details of QCoDeS's table-per-run layout are from memory and worth checking
-against its docs before copying anything.)*
+  ```yaml
+  run:
+    device: A7                # name in the devices table; required
+    operator: andrew
+    notes: ""
+    metadata: {cryostat: BlueFors1}
+  ```
 
-**The consensus is not about storage — it is about declaring the structure.**
-Every mature system stores, alongside the numbers, a statement of which
-quantities are axes and which are readings. None encodes loop nesting as
-structure; loop order is at most an ordinary recorded value. That is exactly the
-"operationally different, semantically the same" property wanted here, and it is
-why a QCoDeS dataset can be plotted or exported to xarray without anyone knowing
-how its loops were written.
-
-Where systems genuinely differ — where the trade-offs are real — is the
-substrate:
-
-| Substrate | Good | Bad |
-|---|---|---|
-| **A column per parameter, a table per run** (QCoDeS) | fast, typed, obvious within a run | DDL at run time; cross-run queries visit many tables; a table per run |
-| **One long table + JSON per row** (what we have) | no DDL ever; ragged and sparse runs are free; cross-run queries hit one table | values need `json_extract`; no types; indexing needs generated columns |
-| **Value rows** (EAV) | any shape at all | every query is a pivot; slow; unreadable by hand |
-| **Catalog + array files** (HDF5/Parquet beside a DB) | scales to large arrays; native to analysis tools | two stores to keep consistent; incremental durability needs care |
-
-There is **no de facto winner on substrate**. There *is* a de facto winner on
-the question being asked here: store the dependency structure explicitly, and
-keep execution order as data rather than as shape.
+  `Device` in `model_tree.py` shrinks to a name. Properties live in the
+  `devices` table, editable in the viewer, and apply to every past run.
+- **Generated projects** read the `run:` block at each run start and pass it to
+  `RunStarted`. Codegen passes none of it today
+  ([codegen.py](../lab_wizard/lib/procedures/codegen.py), `run_measurement`).
+- **The wizard** asks for the device when generating a project and shows it on
+  the project page, since people swap devices between runs of one project.
+- **The instrument snapshot** (`provenance.baseline_snapshot`) is keyed by
+  **role** and records each instrument's `type` and key with its params.
+- **Units.** `emits` changes from a tuple of names to `{name: unit}`;
+  `ReadVoltage` takes a unit with its field. Swept columns take the unit of the
+  sweep param (`ParamDecl.unit`). Together they fill `columns`.
 
 ---
 
-## 4. The advantage lab_wizard has
+## 13. The work, in order
 
-QCoDeS asks the user to declare `register_parameter(..., setpoints=...)`.
-**Here, the procedure already knows.** Every fact needed for the graph is in the
-definition:
+Each phase leaves the repo working and tested. Running from the GUI and the
+plotters follow in `runner_plan.md`, after Phase 3.
 
-| In the definition | Role in the data |
+### Phase 1: the framework (`procedure_framework/lab_procedure`) — built
+
+- `RunContext`: the point rule (§5); the step path stack; closing the open row.
+  Delete `sweep_index` and `set_parameter`.
+- `Point` replaces `Observation`: `{seq, t, steps, values}`.
+- `ProcedureRunner.run`: close the open row before `RunEnded`, on every path.
+  A Ctrl-C (`KeyboardInterrupt`) must end the run as `aborted`; today it
+  passes the `except Exception` and `RunEnded` reports `failed`.
+- `Step.execute`: push/pop the path; timestamps on step messages; `#n`
+  iteration labels (§6).
+- `Repeat` binds a parameter (default `repeat`).
+- Tests: the two loop orders give the same set of rows; the outer-level read
+  gets its own row; mcr gives 5 rows; repeat, retry, background, abort
+  mid-point.
+
+As built: `tests/test_point_rows.py` covers the rule. `iv_curve` and
+`pcr_curve` emitted `Observation`s directly and now call `observe()`, so they
+go through the rule until they are ported (Phase 4). `SaverSink` and
+`PlotterSink` were adapted just enough to read `Point`; `DatabaseSaver` writes
+`values` as `data` and `{seq, steps}` as `metadata`. The `repeat` step schema
+gained `parameter`, so `emitted_fields()` lists it. Generated projects under
+`projects/` that predate this import `Observation` and must be regenerated.
+
+### Phase 2: recording (`lab_wizard/lib/data/`, new)
+
+- Move `workspace.py` into `lab_wizard/lib/`; replace
+  `find_workspace_config_dir`; add `data_dir` to the manifest.
+- `schema.py` (§3) with the version check.
+- `recorder.py`: the `DatabaseRecorder` sink; facets at run end.
+- `sinks.py`: `attach_sinks`.
+- Run start capture (§12).
+- Tests: a generated mcr project run as a script, rows read back; facets for
+  device, instrument, params; an embedded project records into its own folder.
+
+### Phase 3: reading (`lab_wizard/lib/data/`)
+
+- `find(**filters)`, `facets(filters)`, `Runs.points()` → a polars DataFrame,
+  one row per point, `run_id` and `seq` first, then one column per name in
+  `values`.
+- The expression evaluator (§10), with tests that it rejects everything outside
+  the whitelist.
+- The plot evaluator and `load_plot(spec)` (§11), and notebook text for a spec.
+- Replaces `lib/savers/query.py`, which imports pandas; pandas is not a
+  dependency and is not installed, so `query.py` cannot be imported today.
+- Add `polars` to `lab_wizard/pyproject.toml`. pandas is not used anywhere in
+  the new code.
+
+**Building the DataFrame from `values`.** Points are ragged (a field can be
+missing from a row) and may hold arrays. Build the frame from the rows with the
+schema taken from `runs.columns` rather than inferred, so a column absent from
+the first rows is still typed correctly and missing values are nulls. Array
+columns become polars `List(Float64)`, which the waterfall plot uses directly.
+
+### Phase 4: procedure definitions and ports
+
+- `plots:`, `derived:`; `check()` verifies their columns exist.
+- `emits` with units; `record:` on `set_attenuation`, `set_voltage`,
+  `set_threshold`, `set_laser_power`.
+- `check()` errors on nested sweeps binding the same name and warns when two
+  steps record the same field in one loop body.
+- Composer: Plots and Derived panels. `mcr_curve.yml` gets its plots.
+- **Port `iv_curve` and `pcr_curve` to procedure definitions**, as `mcr_curve`
+  was, and delete `lib/measurements/iv_curve` and `pcr_curve`. Their end-to-end
+  tests move to the procedure form.
+
+### Phase 5: the file saver (`lab_wizard/lib/savers/file_saver.py`)
+
+- `FileSaverParams` (§7) as the saver resource type; `DatabaseSaver` and its
+  params are deleted.
+- The run-folder writer, shared with Export run.
+- Tests: a run folder round-trips everything on its database rows; the path
+  template; crash mid-run leaves a readable folder.
+
+### Phase 6: backend API (`lab_wizard/wizard/backend/data_api.py`, new)
+
+| Endpoint | Returns |
 |---|---|
-| `sweep.parameter` | **coordinate** — an axis of the relation |
-| a step's `emits` (`count` → `counts`, `int_time`, `count_rate`; `read_voltage` → its `field`) | **measured** — a reading |
-| `with_parameter.parameter` | **context** — labels a portion of a run (`phase`) |
-| params referenced but not swept (`bias.voltage`) | **setting** — constant for the run, already in `runs.config` |
+| `GET /api/data/facets?<filters>` | facet keys, values and counts under the filters |
+| `GET /api/data/runs?<filters>&page=` | run summaries |
+| `GET /api/data/runs/{id}` | params, instruments, columns, plots, derived |
+| `GET /api/data/runs/{id}/steps` | the timeline |
+| `POST /api/data/plot` | series for a spec |
+| `POST /api/data/plot/notebook` | Python text for a spec |
+| `POST /api/data/runs/{id}/export` | a run folder, zipped |
+| `GET/PUT /api/data/devices` | the device registry |
+| `POST /api/procedures/{name}/plots` | save a spec into a procedure |
 
-For `mcr_curve` that derives exactly: coordinate `attenuation_db`; measured
-`counts`, `int_time`, `count_rate`, `device_voltage`; context `phase`. Which is
-precisely "count rate against attenuation, with a background phase".
+### Phase 7: the viewer (`routes/data/database`, replacing the stub)
 
-`StepParams.emits` and `swept_parameters()` already expose this
-(`lab_wizard/lib/procedures/spec.py`), and `ProcedureDefinition.emitted_fields()`
-already walks the tree collecting both — the composer's "Records" panel is built
-from it.
+- **Left:** facet sidebar, grouped (Procedure, Device, Device properties, Run,
+  Instruments, Params, Operator, Date, Status), with a search over facet keys.
+- **Middle:** run list (date, procedure, device, operator, status, points),
+  multi-select.
+- **Right:** plot panel: the run's first plot, tabs for the others, a spec
+  editor, "Open in notebook", "Export run". Timeline and Details tabs.
+- A running run refreshes on a poll.
+- Clicking a point shows its steps and highlights them in the timeline.
+- The plot itself is the shared BokehJS component from `runner_plan.md`.
 
-So the answer to *"how do we let the user select the semantic data?"* is: **do
-not ask by default.** Derive it, show it in the composer, and let it be
-overridden where the inference is wrong. A question with an obvious answer 95%
-of the time is a question people learn to click through without reading.
+### Phase 8: cleanup
 
----
-
-## 5. Proposal
-
-Five changes. The first three are the semantic model; the last two are
-independent gaps that belong in the same pass because they touch the same rows.
-
-### 5.1 Derive an observation schema per procedure
-
-`{name: (role, unit, source_step)}` for every column a procedure can produce,
-where role ∈ `coordinate | measured | context`. Derived from the definition;
-overridable per field. Surface it in the composer's Records panel, which today
-lists column names with no roles.
-
-### 5.2 Store it with the run
-
-A `run_parameters` table (`run_id`, `name`, `role`, `unit`, `source_step`), so a
-run stays self-describing after the procedure is edited or deleted. This is
-QCoDeS's interdependency graph, derived instead of hand-declared.
-
-Hand-written measurements (`iv_curve`, `pcr_curve`) have no definition to derive
-from, so they need either a small declaration in their module or no entry at
-all — decide, don't leave it implicit.
-
-### 5.3 One row per point
-
-Accumulate readings into the current point and flush one row per point. A point
-ends when:
-
-- the innermost enclosing loop iteration ends, **or**
-- a field would be overwritten (a `repeat` of 10 counts is 10 points), **or**
-- an explicit `record` step says so, for full control.
-
-Keep `sequence_index`, sweep indices and `phase` on the row: execution order
-stays recoverable, it just stops being the structure.
-
-The natural home is `RunContext` (it already holds `parameters`, `latest` and
-the sequence counter) with the flush driven by `Sweep`/`Repeat` scope exit. Be
-careful: `RunContext.latest` feeds condition steps (`ValueAbove`/`ValueBelow`)
-and must keep updating *immediately*, not at flush time, or a procedure that
-branches on what it just measured will read stale values.
-
-### 5.4 `runs.run_type` becomes a plain string
-
-Holding the procedure name. The enum's only benefit is a typo check, and it is
-losing exactly the information the procedure system exists to organize.
-`query.py::get_runs(run_type=...)` filters on it and keeps working with strings.
-Existing rows hold enum *names* (`MCR_CURVE`), so decide whether to migrate
-them to lowercase names or accept both on read.
-
-### 5.5 Fill in the device
-
-Pass `device`, `cryostat`, `operator` and `description` from the project YAML's
-`run:` block into `RunStarted`, in `codegen.py` and both hand-written
-measurements. `DatabaseSaver._resolve_device_id` already resolves or creates a
-device row; nothing calls it with anything. This is the largest single gap in
-the database and the cheapest to close.
+- `lib/savers/schema.py`, `database_saver.py`, `query.py`; `SaverSink`,
+  `PlotterSink` (replaced by sinks in `attach_sinks`).
+- `docs/data/database.md` rewritten; the Database page's "one row per
+  integration" copy removed.
+- Tests rewritten: `test_lab_wizard_task_adapters.py`,
+  `test_lab_wizard_measurements.py`, `test_own_server_projects.py`,
+  `test_provenance.py`.
 
 ---
 
-## 6. Decisions needed (not the implementer's to make)
+## 14. Decisions
 
-1. **Does a point ever span an outer loop?** The rule in 5.3 ends a point at the
-   innermost loop. A procedure that counts once per outer iteration and reads a
-   temperature once per inner one would produce points with holes. Is that a
-   real pattern in this lab?
-2. **Do role overrides belong to the procedure or to the project?** Per
-   procedure is simplest. A project wanting a different reading of the same
-   procedure would need its own override.
-3. **Are old rows migrated?** Existing databases have one-row-per-observation
-   data and enum run types. Convert, or leave old runs as they are and change
-   only new writes? (There is no migration framework; `add_missing_columns` is
-   additive only.)
-4. **Do per-point arrays** (a histogram, a trace) go in `measurement_details`,
-   in JSON, or in files beside the database? Not urgent until something records
-   one, but it decides whether `measurement_details` survives.
-5. **Should the composer show roles read-only, or make them editable?** Editable
-   costs a UI and a storage field; read-only may be enough for a year.
+Settled in review:
 
----
+- **One database per workspace**; synchronization across computers later.
+- **Savers stay** as a configurable resource, meaning optional extra outputs;
+  the database is always written.
+- **Plotters stay**: a native matplotlib window and a web plotter
+  (`runner_plan.md`).
+- **`iv_curve` and `pcr_curve` are ported** to procedure definitions.
 
-## 7. Traps
+Still open:
 
-- **`WithParameter` is not a sweep.** `phase: background` is a label, not an
-  axis; treating every bound parameter as a coordinate would make `phase` an
-  axis of the relation. The distinction exists in the definition (`sweep` vs
-  `with_parameter`) — keep it.
-- **Sweeps nest and reuse names.** `RenderContext.scoped` uniquifies Python
-  identifiers when two nested sweeps bind the same parameter name; the data side
-  has no such protection.
-- **`Retry` re-runs a failed child.** A retried `count` emits twice for one
-  point; the overwrite rule would split it into two points. Probably wrong —
-  decide whether a retry replaces the value.
-- **Conditionals skip readings.** `If`/`Selector` mean some points legitimately
-  lack a field. Rows must stay ragged; do not assume a rectangular grid.
-- **Plotters consume the same stream.** `PlotterSink` forwards every
-  `Observation.data` to `GenericPlotter.plot`. Changing row granularity changes
-  what plotters see — coordinate the change, or plots quietly halve their points.
-- **Two runs can interleave on one server.** Claims allow two runs to hold
-  different channels of one counter simultaneously (`server_plan.md` Phase 9).
-  Each run has its own `RunContext`, so accumulation is per run — but do not
-  introduce any process-global point buffer.
-- **`counts` is duplicated** in both a typed column and `data`. Whatever the new
-  shape is, keep exactly one of them authoritative.
-- **Legacy projects still run.** Projects generated months ago carry their own
-  instrument copy and use hash lookup; they must keep writing valid rows.
+1. **The default run-folder path template.** (open) Proposed:
+   `{date}/{procedure}_{device}_{time}`. Ask the people who will browse it.
+2. **Migrations.** (open) Proposed: the version check alone until a real change
+   needs a migration; then Alembic, not a hand-rolled substitute.
+3. **Fill-down in the viewer.** (deferred) Explained here because it is easy to
+   misread. When a reading is taken at an outer loop level, for example the
+   device voltage read once per bias before a trigger sweep, it lands on its own
+   row:
+
+   | seq | bias_voltage | trigger_mV | count_rate | device_voltage |
+   |---|---|---|---|---|
+   | 0 | 0.02 | | | 0.0 |
+   | 1 | 0.02 | −50 | 33333.3 | |
+   | 2 | 0.02 | −40 | 40000.0 | |
+
+   Plotting `count_rate` against `device_voltage` then draws nothing, because no
+   row has both. Fill-down would copy row 0's voltage onto rows 1 and 2 when
+   plotting, on the assumption that it did not change during those counts. That
+   assumption is an analysis choice, so it would happen at read time only,
+   never in storage. No current procedure reads at an outer level, so nothing
+   needs it yet. It is one polars expression,
+   `pl.col("device_voltage").forward_fill().over("run_id", "bias_voltage")`,
+   which passes D9 if it is ever wanted.
 
 ---
 
-## 8. How to test it
+## 15. Traps
 
-The repo's testing style is end-to-end against a **simulated rack** — real
-drivers, no hardware — and assertions against the detector model's own physics.
-Follow it rather than mocking savers.
-
-| Use | File |
-|---|---|
-| A procedure run end to end, data checked against the physics | `tests/test_mcr_curve.py` |
-| A generated project run as a script, with a database saver, rows read back from SQLite | `tests/test_own_server_projects.py` |
-| Saver/observation unit behaviour | `tests/test_lab_wizard_task_adapters.py` |
-| Definitions, catalogs, codegen | `tests/test_procedure_definitions.py`, `tests/test_procedure_projects.py` |
-| Schema migration in place | `tests/test_provenance.py::test_a_database_written_before_the_column_existed_still_opens` |
-
-Worth writing: a procedure with **two nested sweeps** whose loop order is
-swapped between two runs, asserting both produce the *same relation* (same set
-of (x1, x2, y) tuples) and different `sequence_index` orders. That is the
-property this whole document is about, and nothing tests it today.
+- **Close the open row on every exit path.** A missed close loses the last
+  point.
+- **`latest` updates on `observe()`, not on close.**
+- **NaN and infinity are not JSON.** `json.dumps` writes `NaN` by default, which
+  SQLite's JSON functions reject. Store `null`; use `allow_nan=False` so a
+  regression fails loudly. In CSV, write an empty cell.
+- **Relative paths resolve against the process's working directory**, not the
+  project. This is today's `db_path` bug; every path the recorder and file saver
+  use must be resolved from the workspace or project directory explicitly.
+- **Local time for `date` and `time`** facets and folder names; UTC in storage.
+- **Facet volume.** Keep only scalar leaves; cap value length.
+- **Float facets.** Store a canonical `repr`.
+- **Two runs writing at once.** Each run process has its own context and
+  connection; WAL mode serializes writes. No process-global buffer.
+- **The file saver is not the record.** If it fails (disk full, a path the
+  template makes invalid) it logs and stops writing files; it must never fail
+  the run, because the database has the data.
 
 ---
 
-## 9. Pointers
+## 16. Pointers
 
-- [`procedure_plan.md`](procedure_plan.md) — the procedure system, its
-  decisions, and the parameter-tier model (§2.1).
-- [`database_plan.md`](database_plan.md) — the original schema rationale. Its
-  §"The Core Data Model" already describes one row per integration carrying
-  every parameter in force; this document is largely about honouring it.
-- [`server_plan.md`](server_plan.md) Phase 9 — claims, and why two runs can
-  write to one database concurrently.
-- `docs/concepts/procedures.md` — the user-facing description of steps,
-  observations and presets.
+- [`runner_plan.md`](runner_plan.md): running from the GUI, the event stream
+  over a websocket, and both plotters.
+- [`procedure_plan.md`](procedure_plan.md) §2.6: "plotting is column
+  selection", which this keeps.
+- [`database_plan.md`](database_plan.md): the original schema and its
+  reasoning.
+- [`server_plan.md`](server_plan.md) Phase 9: why two runs can record at once.
+- `procedure_framework/lab_procedure/`: Phase 1.
+- `lab_wizard/wizard/workspace.py`, `lab_wizard/lib/client/server_discovery.py`:
+  the two workspace discoveries (§3).
+- `lab_wizard/lib/task_adapters/provenance.py`: the instrument snapshot.
+- `lab_wizard/wizard/frontend/src/routes/data/database/`: the stub the viewer
+  replaces.
