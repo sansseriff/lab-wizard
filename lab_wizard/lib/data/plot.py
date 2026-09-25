@@ -219,18 +219,33 @@ def _shape(spec: PlotSpec, part: pl.DataFrame, name: str, bins: dict[str, Any] |
 
 
 def to_series(rows: pl.DataFrame) -> list[dict[str, Any]]:
-    """``evaluate_plot`` rows grouped into drawable series: ``{label, axis, y_name, x, y, z}``."""
+    """``evaluate_plot`` rows grouped into drawable series.
+
+    Each is ``{label, axis, y_name, x, y, z, run_id, seq}``, the last two naming
+    the point each value came from, so a click on a point can find its steps.
+    """
     out = []
     for (label, axis, y_name), part in rows.group_by(["series", "axis", "y_name"], maintain_order=True):
         out.append({
             "label": label, "axis": axis, "y_name": y_name,
             "x": part["x"].to_list(), "y": part["y"].to_list(), "z": part["z"].to_list(),
+            "run_id": part["run_id"].to_list(), "seq": part["seq"].to_list(),
         })
     return out
 
 
-def load_plot(spec: PlotSpec | dict[str, Any], db: str | Path | None = None) -> pl.DataFrame:
-    """Evaluate ``spec`` against its runs in the lab database."""
+def load_plot(
+    spec: PlotSpec | dict[str, Any],
+    db: str | Path | None = None,
+    *,
+    derived: dict[str, str] | None = None,
+) -> pl.DataFrame:
+    """Evaluate ``spec`` against its runs in the lab database.
+
+    ``derived`` are the procedure's derived columns; by default, the ones each
+    run recorded with its definition. The Data page passes the procedure's
+    current ones, so a derived column added later applies to past runs.
+    """
     from lab_wizard.lib.data.read import Lab
 
     spec = spec if isinstance(spec, PlotSpec) else PlotSpec.model_validate(spec)
@@ -249,7 +264,8 @@ def load_plot(spec: PlotSpec | dict[str, Any], db: str | Path | None = None) -> 
             }
         bins = {name: meta["bins"] for name, meta in runs.columns().items() if isinstance(meta, dict) and meta.get("bins")}
         return evaluate_plot(
-            spec, points, run_labels=labels, bins=bins, params=runs.params(), derived=runs.derived()
+            spec, points, run_labels=labels, bins=bins, params=runs.params(),
+            derived=runs.derived() if derived is None else derived,
         )
 
 

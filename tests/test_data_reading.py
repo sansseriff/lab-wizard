@@ -355,5 +355,8 @@ def test_evaluate_plot_serves_a_live_plotter_from_rows_in_memory():
     """A live plotter has no database, only the rows so far; the same evaluator draws them."""
     rows = [{"run_id": 7, "seq": i, "bias": b, "r": b * 10} for i, b in enumerate([0.1, 0.2])]
     series = to_series(evaluate_plot({"x": "bias", "y": ["r / max(r)"], "series": None}, pl.DataFrame(rows)))
-    assert series == [{"label": "", "axis": "y", "y_name": "r / max(r)", "x": [0.1, 0.2], "y": [0.5, 1.0], "z": [None, None]}]
+    assert series == [{
+        "label": "", "axis": "y", "y_name": "r / max(r)", "x": [0.1, 0.2], "y": [0.5, 1.0], "z": [None, None],
+        "run_id": [7, 7], "seq": [0, 1],  # which point each value came from
+    }]
     json.dumps(series)  # ready to send to a browser

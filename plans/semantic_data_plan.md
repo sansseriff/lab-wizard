@@ -1,6 +1,6 @@
 # The lab data system: recording runs, saving files, and the viewer
 
-> **Status: Phases 1–5 built (2026-09-24); Phases 6–8 not started.** Decisions
+> **Status: Phases 1–6 built (2026-09-25); Phases 7–8 not started.** Decisions
 > still marked **(open)** in §14 need an answer; everything else was settled
 > in review.
 >
@@ -791,7 +791,7 @@ As built:
 - Old configs of type `database_saver` are skipped with a warning when savers
   load (existing behavior for an unknown type), not errors.
 
-### Phase 6: backend API (`lab_wizard/wizard/backend/data_api.py`, new)
+### Phase 6: backend API (`lab_wizard/wizard/backend/data_api.py`, new) — built
 
 | Endpoint | Returns |
 |---|---|
@@ -804,6 +804,41 @@ As built:
 | `POST /api/data/runs/{id}/export` | a run folder, zipped |
 | `GET/PUT /api/data/devices` | the device registry |
 | `POST /api/procedures/{name}/plots` | save a spec into a procedure |
+
+As built — Phase 6:
+
+- `data_api.py` holds the logic as functions of the database path (and the
+  config dir where procedures are needed); `main.py` only maps them to routes
+  and turns their errors into 404 (no such run, no database yet) and 422
+  (a filter, spec or device the page can fix).
+- Filters travel as one JSON query parameter, `?filters={"device.wafer": "W12"}`,
+  in the shape `find` takes.
+- `GET /api/data/facets` groups keys into the sidebar's sections server-side
+  (Procedure, Device, Device properties, Run, Instruments, Params, Operator,
+  Project, Date, Status, Columns), and marks a key whose values are all numbers
+  with its range.
+- Before the first run there is no database; the list endpoints answer empty
+  rather than 404.
+- **Current definition, else recorded**: run detail, plot and notebook take
+  plots and `derived:` from the procedure as it is now, and a run whose
+  procedure is gone from the one it recorded (`definition_source` says which).
+  `load_plot` gained `derived=` for this. The notebook writes the derived
+  columns into the spec itself, so it reproduces the page even after the
+  procedure changes.
+- Added beyond the table: `GET /api/data/runs/{id}/points/{seq}` (a point's
+  values and steps, for clicking a point); `to_series` now carries `run_id`
+  and `seq` per value so a click can find its point.
+- `PUT /api/data/devices/{name}` replaces a device's properties and notes and
+  rebuilds the facets of every run on it, in one transaction. Properties are
+  flat, one value each, with no dots in names. A device can be registered
+  before any run uses it.
+- `POST /api/procedures/{name}/plots` appends, or replaces the plot named
+  `replace` (default: its own name); on a built-in it writes the workspace's
+  override, as any edit of a built-in does. The saved plot's `runs` are
+  cleared.
+- Export zips the folder the file saver would write, named
+  `run{id}_{procedure}_{device}`.
+- Tests: `tests/test_data_api.py`.
 
 ### Phase 7: the viewer (`routes/data/database`, replacing the stub)
 
