@@ -42,7 +42,6 @@ from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928, Fake92
 from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
 from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
 from lab_wizard.lib.instruments.general.counter import Counter
-from lab_wizard.lib.measurements.pcr_curve.pcr_curve import PCRCurveMeasurement
 from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     assign_missing_leaf_attribute_names,
@@ -51,11 +50,11 @@ from lab_wizard.lib.utilities.config_io import (
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
 from lab_wizard.lib.client.project_resources import resource_source_for
+from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
     SelectedResource,
-    generate_measurement_project,
 )
 
 PORT = "sim://pcr-rack"
@@ -349,11 +348,12 @@ def _generate_project(tmp_path: Path) -> dict[str, Any]:
     projects_dir = tmp_path / "projects"
     _write_config(config_dir)
 
-    out = generate_measurement_project(
+    out = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="pcr_curve",
+            kind="procedure",
             selected_resources=[
                 SelectedResource(
                     variable_name="voltage_source",
@@ -397,6 +397,15 @@ def _set_measurement_params(yaml_path: Path) -> None:
         io.dump(payload, handle)
 
 
+def _measurement_class(out: dict[str, Any]) -> Any:
+    """The generated project's own measurement class, loaded from its file."""
+    spec = importlib.util.spec_from_file_location("generated_pcr_curve", Path(out["measurement_file"]))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.PcrCurveMeasurement
+
+
 def _load_setup_module(setup_path: Path) -> Any:
     spec = importlib.util.spec_from_file_location("generated_pcr_setup", setup_path)
     assert spec is not None and spec.loader is not None
@@ -418,8 +427,8 @@ def test_generated_setup_wires_the_simulated_counter(tmp_path: Path) -> None:
     ast.parse(setup_text)
     ast.parse(measurement_text)
 
-    assert "from pcr_curve import PCRCurveMeasurement" in setup_text
-    assert "class PCRCurveMeasurement" in measurement_text
+    assert "from pcr_curve import PcrCurveMeasurement" in setup_text
+    assert "class PcrCurveMeasurement" in measurement_text
     config = load_instruments(tmp_path / "config")
     counter_name = config[COUNTER_KEY].channels[0].attribute_name
     source_name = config[GPIB_KEY].children[MAINFRAME_KEY].children[SOURCE_KEY].attribute_name
@@ -451,7 +460,7 @@ def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> N
     runner.context.data_bus.subscribe(Point, observations.append)
 
     status = runner.run(
-        PCRCurveMeasurement(resources).build_procedure(),
+        _measurement_class(out)(resources).build_procedure(),
         RunStarted(procedure="pcr_curve", params=resources.params.model_dump(mode="json")),
     )
     assert status is Status.SUCCESS
@@ -490,7 +499,7 @@ def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Pa
     runner = ProcedureRunner(instruments=resources)
     observations: list[Point] = []
     runner.context.data_bus.subscribe(Point, observations.append)
-    assert runner.run(PCRCurveMeasurement(resources).build_procedure()) is Status.SUCCESS
+    assert runner.run(_measurement_class(out)(resources).build_procedure()) is Status.SUCCESS
 
     assert resources.counter.get_threshold() == pytest.approx(THRESHOLD_MV)
     top = observations[-1].values
@@ -509,7 +518,7 @@ def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path) -> None
     runner = ProcedureRunner(instruments=resources)
     observations: list[Point] = []
     runner.context.data_bus.subscribe(Point, observations.append)
-    runner.run(PCRCurveMeasurement(resources).build_procedure())
+    runner.run(_measurement_class(out)(resources).build_procedure())
 
     counts = {o.values["bias_voltage"]: o.values["counts"] for o in observations}
     plateau = DEVICE.incident_photon_rate_hz * DEVICE.max_detection_efficiency * GATE_TIME_S

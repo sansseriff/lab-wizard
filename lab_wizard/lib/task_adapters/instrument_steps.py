@@ -24,6 +24,19 @@ from lab_wizard.lib.instruments.general.vsource import VSource
 logger = logging.getLogger(__name__)
 
 
+def _record_reached(step: Step, read_back) -> None:
+    """Record what a setter actually reached, under ``step.record``, if it names a field.
+
+    Hardware quantizes and clamps: an attenuator asked for 12.34567 dB sits at
+    12.346, and a non-linear one may be further off. What it reached is a
+    measurement, so it is recorded like one, beside the swept value it was
+    asked for.
+    """
+    if step.record:
+        assert step.context is not None
+        step.context.observe({step.record: read_back()})
+
+
 class SetVoltage(Step):
     """Set the source output to a fixed voltage."""
 
@@ -45,30 +58,38 @@ class SetThreshold(Step):
     what the previous client left. See ``plans/procedure_plan.md`` 0.8.
     """
 
-    def __init__(self, counter: Counter, threshold_mV: float, name: str | None = None) -> None:
+    def __init__(
+        self, counter: Counter, threshold_mV: float, name: str | None = None, *, record: str | None = None
+    ) -> None:
         super().__init__(name=name)
         self.counter = counter
         self.threshold_mV = threshold_mV
+        self.record = record
 
     def run(self) -> Status:
         # A threshold the counter refused would make every later count
         # meaningless, so a refusal fails the step rather than being ignored.
         if self.counter.set_threshold(self.threshold_mV) is False:
             return Status.FAILED
+        _record_reached(self, self.counter.get_threshold)
         return Status.SUCCESS
 
 
 class SetAttenuation(Step):
     """Set an attenuator's attenuation, in dB."""
 
-    def __init__(self, attenuator: Attenuator, attenuation_db: float, name: str | None = None) -> None:
+    def __init__(
+        self, attenuator: Attenuator, attenuation_db: float, name: str | None = None, *, record: str | None = None
+    ) -> None:
         super().__init__(name=name)
         self.attenuator = attenuator
         self.attenuation_db = attenuation_db
+        self.record = record
 
     def run(self) -> Status:
         if self.attenuator.set_attenuation(self.attenuation_db) is False:
             return Status.FAILED
+        _record_reached(self, self.attenuator.get_attenuation)
         return Status.SUCCESS
 
 
@@ -119,13 +140,19 @@ class LaserOff(Step):
 class SetLaserPower(Step):
     """Set a laser's output power, in dBm."""
 
-    def __init__(self, laser: Laser, power_dbm: float, name: str | None = None) -> None:
+    def __init__(
+        self, laser: Laser, power_dbm: float, name: str | None = None, *, record: str | None = None
+    ) -> None:
         super().__init__(name=name)
         self.laser = laser
         self.power_dbm = power_dbm
+        self.record = record
 
     def run(self) -> Status:
-        return Status.FAILED if self.laser.set_power_dbm(self.power_dbm) is False else Status.SUCCESS
+        if self.laser.set_power_dbm(self.power_dbm) is False:
+            return Status.FAILED
+        _record_reached(self, self.laser.get_power_dbm)
+        return Status.SUCCESS
 
 
 class Count(Step):

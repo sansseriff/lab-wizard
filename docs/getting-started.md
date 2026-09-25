@@ -158,7 +158,7 @@ lab_wizard_repo/
 ├── lab_wizard/
 │   ├── lib/                 # the instrument library (importable, no GUI)
 │   │   ├── instruments/     #   instrument models (general/ + per-vendor dirs)
-│   │   ├── measurements/    #   hand-written measurements + setup templates
+│   │   ├── measurements/    #   sweep params shared by measurements
 │   │   ├── procedures/      #   procedure definitions, step schemas, codegen
 │   │   ├── task_adapters/   #   steps, run lifecycle, the run entry point, sinks
 │   │   ├── data/            #   the lab database: schema, recorder, facets

@@ -9,47 +9,30 @@ The **Measurements** section is the core wizard workflow: pick something to run
 saver and plotter (`/measurements/resources`), and generate a runnable project
 folder. `/measurements/projects` lists what has been generated.
 
-What you pick from is both kinds of measurement side by side: hand-written
-Python under `lib/measurements/`, and [procedures](procedures.md) — this
-workspace's own and the ones built into lab_wizard. To the person binding
-instruments they are the same thing: roles to fill and parameters to set.
+What you pick from is a list of [procedures](procedures.md): the ones built
+into lab_wizard (`iv_curve`, `pcr_curve`, `mcr_curve`) and this workspace's own.
+Each has roles to fill and parameters to set.
 
 This page explains how the matching and code generation work.
 
-![Choosing what to run: hand-written measurements and procedures side by side](../assets/screenshots/measurements-choose.webp)
+![Choosing what to run](../assets/screenshots/measurements-choose.webp)
 
 ## How a measurement declares what it needs
 
-A measurement lives in `lib/measurements/<name>/` and has two files:
+A procedure declares its **roles**, each with the behavior it needs
+(`voltage_source: {behavior: VSource}`); every role is an instrument
+requirement, and savers and plotters are always offered too.
 
-- `<name>.py` — the measurement class (the run logic), and
-- `<name>_setup_template.py` — a template the wizard fills in.
-
-The template defines a `@dataclass` ending in `Resources` whose **annotations**
-declare the required resources. From
-[`iv_curve_setup_template.py`](../../lab_wizard/lib/measurements/iv_curve/iv_curve_setup_template.py):
-
-```python
-@dataclass
-class IVCurveResources:
-    # wizard:resource_fields:start
-    savers: list[GenericSaver] = field(default_factory=list)
-    plotters: list[GenericPlotter] = field(default_factory=list)
-    voltage_source: VSource = field(default_factory=StandInVSource)
-    voltage_sense: VSense = field(default_factory=StandInVSense)
-    # wizard:resource_fields:end
-    params: IVCurveParams = field(default_factory=IVCurveParams)
-```
-
+The older, hand-written kind of measurement still works, though none ship: a
+`lib/measurements/<name>/` folder with a measurement class and a
+`<name>_setup_template.py` whose `…Resources` dataclass **annotations** declare
+what it needs.
 [`get_measurements.py`](../../lab_wizard/wizard/backend/get_measurements.py)
-reads these annotations and classifies each field:
-
-- a field typed as a subclass of `GenericSaver` → a **saver** requirement,
-- a subclass of `GenericPlotter` → a **plotter** requirement,
-- anything else (a behavior ABC like `VSource`) → an **instrument** requirement.
-
-`list[T]` annotations are recognized (e.g. `savers: list[GenericSaver]`), and
-`params` is skipped.
+reads those annotations and classifies each field: a subclass of
+`GenericSaver` is a **saver** requirement, of `GenericPlotter` a **plotter**
+requirement, and anything else (a behavior ABC like `VSource`) an
+**instrument** requirement. `list[T]` annotations are recognized, and `params`
+is skipped.
 
 ## Matching resources to requirements
 
@@ -158,9 +141,9 @@ it at once. See [run claims](../remote/operations.md).
 
 ### Procedures and presets
 
-Measurements under `lib/measurements` and [procedures](../concepts/procedures.md)
-are offered side by side, and either can start from a named **params preset**
-from `config/measurements/<name>/`, copied into the project when it is generated.
+A [procedure](../concepts/procedures.md) can start from a named **params
+preset** from `config/measurements/<name>/`, copied into the project when it is
+generated.
 
 ## Running the generated project
 

@@ -16,6 +16,7 @@ from lab_wizard.lib.utilities.config_io import (
     instrument_hash,
     save_instruments_to_config,
 )
+from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
@@ -65,6 +66,7 @@ def test_generate_project_writes_sources_yaml_and_setup(tmp_path: Path) -> None:
 
     req = GenerateProjectRequest(
         measurement_name="iv_curve",
+        kind="procedure",
         selected_resources=[
             SelectedResource(
                 variable_name="voltage_source",
@@ -91,7 +93,7 @@ def test_generate_project_writes_sources_yaml_and_setup(tmp_path: Path) -> None:
         project_prefix="iv_test",
     )
 
-    out = generate_measurement_project(
+    out = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=req,
@@ -108,7 +110,7 @@ def test_generate_project_writes_sources_yaml_and_setup(tmp_path: Path) -> None:
     assert setup_path.exists()
     assert measurement_path.exists()
     assert measurement_path.name == "iv_curve.py"
-    assert "class IVCurveMeasurement" in measurement_path.read_text(encoding="utf-8")
+    assert "class IvCurveMeasurement" in measurement_path.read_text(encoding="utf-8")
 
     y = YAML(typ="safe")
     loader: Any = y
@@ -125,7 +127,7 @@ def test_generate_project_writes_sources_yaml_and_setup(tmp_path: Path) -> None:
 
     setup_text = setup_path.read_text(encoding="utf-8")
     ast.parse(setup_text)
-    assert "from iv_curve import IVCurveMeasurement" in setup_text
+    assert "from iv_curve import IvCurveMeasurement" in setup_text
     assert f"voltage_source_1 = resources.from_attribute({source_name!r})" in setup_text
     assert f"voltage_sense_1 = resources.from_attribute({sense_name!r})" in setup_text
     assert ".from_config(resources, key=" not in setup_text
@@ -137,11 +139,12 @@ def test_the_embedded_style_carries_the_selected_subset_with_comments(tmp_path: 
     """The escape hatch still writes the old self-contained shape."""
     config_dir = tmp_path / "config"
     _write_test_config(config_dir)
-    out = generate_measurement_project(
+    out = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=tmp_path / "projects",
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             generation_style="pedagogical_embedded",
             selected_resources=[
                 SelectedResource(
@@ -202,6 +205,7 @@ def test_generate_project_rejects_wrong_parent_chain(tmp_path: Path) -> None:
 
     req = GenerateProjectRequest(
         measurement_name="iv_curve",
+        kind="procedure",
         selected_resources=[
             SelectedResource(
                 variable_name="voltage_source",
@@ -228,7 +232,7 @@ def test_generate_project_rejects_wrong_parent_chain(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError):
-        generate_measurement_project(
+        generate_procedure_project(
             config_dir=config_dir,
             projects_dir=projects_dir,
             req=req,
@@ -242,6 +246,7 @@ def test_generate_pcr_project_references_the_selected_channel_by_name(tmp_path: 
 
     req = GenerateProjectRequest(
         measurement_name="pcr_curve",
+        kind="procedure",
         selected_resources=[
             SelectedResource(
                 variable_name="voltage_source",
@@ -264,7 +269,7 @@ def test_generate_pcr_project_references_the_selected_channel_by_name(tmp_path: 
         project_prefix="pcr_test",
     )
 
-    out = generate_measurement_project(
+    out = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=req,

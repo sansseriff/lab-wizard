@@ -38,6 +38,13 @@ from typing import Any, Iterator, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model, field_validator, model_validator
 
+from lab_wizard.lib.data.expressions import (
+    ExpressionError,
+    compile_expression,
+    expression_names,
+    expression_params,
+)
+from lab_wizard.lib.data.plot import PlotSpec
 from lab_wizard.lib.measurements.general.sweep_params import SweepParams
 from lab_wizard.lib.procedures.spec import (
     AnyStep,
@@ -176,6 +183,12 @@ class ProcedureDefinition(BaseModel):
     roles: dict[str, RoleDecl] = Field(default_factory=dict)
     params: dict[str, Any] = Field(default_factory=dict)
     body: AnyStep
+    # What a run of this procedure is usually looked at as. The first is what
+    # the Data page and a live plotter draw by default.
+    plots: list[PlotSpec] = Field(default_factory=list)
+    # Columns computed from the recorded ones when read, never stored:
+    # {"above_dark": 'count_rate - mean(count_rate, phase == "background")'}.
+    derived: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod
@@ -224,8 +237,8 @@ class ProcedureDefinition(BaseModel):
         """``{name: {"unit": ...}}`` for every column this procedure's rows can carry.
 
         In tree order, like :meth:`emitted_fields`. A swept column takes the
-        unit of the sweep param it iterates; a recorded field has none yet,
-        because steps do not declare units.
+        unit of the sweep param it iterates; a recorded field takes the unit its
+        step declares.
         """
         tree = self.param_tree
         out: dict[str, dict[str, Any]] = {}
@@ -234,8 +247,8 @@ class ProcedureDefinition(BaseModel):
             decl = tree.find(values.param) if isinstance(values, ParamRef) else None
             for name in step.swept_parameters():
                 out.setdefault(name, {"unit": decl.unit if decl is not None else None})
-            for name in step.emitted_fields():
-                out.setdefault(name, {"unit": None})
+            for name, unit in step.emitted_units().items():
+                out.setdefault(name, {"unit": unit})
         return out
 
     def emitted_fields(self) -> list[str]:
@@ -296,13 +309,184 @@ class ProcedureDefinition(BaseModel):
                         f"(recorded: {', '.join(sorted(emitted)) or 'nothing'})",
                     )
                 )
+        located.extend(self._binding_problems())
+        located.extend(self._derived_problems())
+        located.extend(self._plot_problems())
         return located
+
+    def warnings(self) -> list[tuple[StepPath, str]]:
+        """Things that generate and run, but probably not as intended."""
+        out: list[tuple[StepPath, str]] = []
+        for path, fields in _loop_bodies(self.body, ("body",)):
+            for field, count in fields.items():
+                if count > 1:
+                    out.append((
+                        path,
+                        f"{count} steps record {field!r} at the same parameter values, so each "
+                        "reading lands on its own row. Give them different names, or put them "
+                        "in a repeat if they are repetitions.",
+                    ))
+        return out
+
+    # ------------------------- the data a run produces -------------------------
+
+    def _binding_problems(self) -> list[tuple[StepPath, str]]:
+        """A name bound twice, or recorded while bound, silently loses data."""
+        out: list[tuple[StepPath, str]] = []
+
+        def visit(step: StepParams, path: StepPath, bound: dict[str, StepPath]) -> None:
+            for name in step.emitted_fields():
+                if name in bound:
+                    out.append((path, (
+                        f"{step.label()} records {name!r}, which is a parameter bound by an enclosing "
+                        f"step; every row already carries it. Record the reading under another name."
+                    )))
+            inner = dict(bound)
+            for name in step.swept_parameters():
+                if name in bound:
+                    out.append((path, (
+                        f"{step.label()} binds {name!r}, which an enclosing step already binds; the inner "
+                        "value would replace the outer one in every row. Give it another name."
+                    )))
+                inner[name] = path
+            for child_path, child in _children(step, path):
+                visit(child, child_path, inner)
+
+        visit(self.body, ("body",), {})
+        return out
+
+    def _data_columns(self) -> list[str]:
+        return ["run_id", "seq", *self.emitted_fields()]
+
+    def _derived_problems(self) -> list[tuple[StepPath, str]]:
+        out: list[tuple[StepPath, str]] = []
+        recorded = set(self._data_columns())
+        for name in self.derived:
+            if not name.isidentifier():
+                out.append((("derived", name), f"derived column {name!r} must be a name, like above_dark"))
+            elif name in recorded:
+                out.append((("derived", name), f"derived column {name!r} would replace a recorded column"))
+        # Dependency order, as ``derive`` computes them; a cycle never resolves.
+        pending = dict(self.derived)
+        while pending:
+            ready = [n for n, text in pending.items() if not _names(text) & set(pending)]
+            if not ready:
+                for name in sorted(pending):
+                    out.append((("derived", name), f"derived column {name!r} is part of a cycle"))
+                break
+            for name in ready:
+                del pending[name]
+        for name, text in self.derived.items():
+            out.extend((("derived", name), m) for m in self._expression_problems(text, [*recorded, *self.derived]))
+        return out
+
+    def _plot_problems(self) -> list[tuple[StepPath, str]]:
+        out: list[tuple[StepPath, str]] = []
+        columns = [*self._data_columns(), *self.derived]
+        for index, plot in enumerate(self.plots):
+            where: StepPath = ("plots", index)
+            if plot.runs:
+                out.append((where, "a procedure's plot applies to every run of it, so it names no runs"))
+            known = [*columns, *plot.derived]
+            for key, text in plot.derived.items():
+                out.extend(((*where, "derived", key), m) for m in self._expression_problems(text, known))
+            expressions = [("x", plot.x), *(("y", y) for y in plot.y), *(("y2", y) for y in plot.y2)]
+            expressions += [("where", key) for key in plot.where]
+            if plot.series not in (None, "run"):
+                expressions.append(("series", plot.series))
+            for field, text in expressions:
+                out.extend(((*where, field), m) for m in self._expression_problems(text, known))
+        return out
+
+    def _expression_problems(self, text: str, columns: list[str]) -> list[str]:
+        problems = []
+        tree = self.param_tree
+        for path in sorted(_params_of(text)):
+            decl = tree.find(path)
+            if decl is None:
+                problems.append(f"{text!r} reads param({path!r}), which is not declared")
+            elif decl.type not in ("float", "int"):
+                problems.append(f"{text!r} reads param({path!r}), which is a {decl.type}, not a number")
+        try:
+            compile_expression(text, columns, {0: self.param_defaults()})
+        except ExpressionError as exc:
+            if not problems:
+                problems.append(str(exc))
+        return problems
 
     def check(self) -> None:
         """Raise :class:`ProcedureError` listing every reason this cannot be generated."""
         located = self.diagnose()
         if located:
             raise ProcedureError([message for _path, message in located], located)
+
+
+def _names(text: str) -> set[str]:
+    try:
+        return expression_names(text)
+    except ExpressionError:
+        return set()
+
+
+def _params_of(text: str) -> set[str]:
+    try:
+        return expression_params(text)
+    except ExpressionError:
+        return set()
+
+
+def _children(step: StepParams, path: StepPath) -> Iterator[tuple[StepPath, StepParams]]:
+    for name in type(step).model_fields:
+        value = getattr(step, name)
+        if isinstance(value, StepParams):
+            yield (*path, name), value
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                if isinstance(item, StepParams):
+                    yield (*path, name, index), item
+
+
+_LOOPS = ("sweep", "repeat")
+# Only one of these children records in a given run of the step.
+_ALTERNATIVES = {"if": ("then", "otherwise"), "selector": ("children",)}
+
+
+def _field_counts(step: StepParams, path: StepPath, bodies: list[tuple[StepPath, dict[str, int]]]) -> dict[str, int]:
+    """How many steps record each field, in one run of ``step`` (loops start afresh)."""
+    if step.type in _LOOPS:
+        bodies.append((path, _body_counts(step, path, bodies)))
+        return {}
+    counts: dict[str, int] = {}
+    for name in step.emitted_fields():
+        counts[name] = counts.get(name, 0) + 1
+    alternatives = _ALTERNATIVES.get(step.type, ())
+    branch_max: dict[str, int] = {}
+    for child_path, child in _children(step, path):
+        child_counts = _field_counts(child, child_path, bodies)
+        target = branch_max if child_path[len(path)] in alternatives else None
+        for name, n in child_counts.items():
+            if target is not None:
+                target[name] = max(target.get(name, 0), n)
+            else:
+                counts[name] = counts.get(name, 0) + n
+    for name, n in branch_max.items():
+        counts[name] = counts.get(name, 0) + n
+    return counts
+
+
+def _body_counts(loop: StepParams, path: StepPath, bodies: list[tuple[StepPath, dict[str, int]]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for child_path, child in _children(loop, path):
+        for name, n in _field_counts(child, child_path, bodies).items():
+            counts[name] = counts.get(name, 0) + n
+    return counts
+
+
+def _loop_bodies(body: StepParams, path: StepPath) -> list[tuple[StepPath, dict[str, int]]]:
+    """``(path, {field: steps recording it})`` for the top level and every loop body."""
+    bodies: list[tuple[StepPath, dict[str, int]]] = []
+    top = _field_counts(body, path, bodies)
+    return [(path, top), *bodies]
 
 
 def _behaviors() -> dict[str, type]:

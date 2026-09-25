@@ -63,6 +63,31 @@ export type Step = { type: string; name?: string | null; [field: string]: any };
 
 export type RoleDecl = { behavior: string; description?: string };
 
+/** A per-column condition: a value, or one chosen per run. Ranges and lists are YAML-only. */
+export type WhereCondition =
+	| string
+	| number
+	| boolean
+	| { per_run: 'min' | 'max' | 'first' | 'last' }
+	| { in: unknown[] }
+	| { range: [number, number] };
+
+/** One of a procedure's plots: what a run of it is usually looked at as. */
+export type PlotDecl = {
+	name?: string | null;
+	x: string;
+	y: string[];
+	y2?: string[];
+	where?: Record<string, WhereCondition>;
+	derived?: Record<string, string>;
+	series?: string | null;
+	label?: string | null;
+	connect?: 'seq' | 'x' | 'none';
+	kind?: 'line' | 'scatter' | 'histogram' | 'waterfall';
+	log_x?: boolean;
+	log_y?: boolean;
+};
+
 export type Definition = {
 	schema_version?: number;
 	name: string;
@@ -70,6 +95,8 @@ export type Definition = {
 	roles: Record<string, RoleDecl>;
 	params: ParamGroup;
 	body: Step;
+	plots?: PlotDecl[];
+	derived?: Record<string, string>;
 };
 
 export type Problem = { path: Path; message: string };
@@ -77,9 +104,39 @@ export type Problem = { path: Path; message: string };
 export type CheckResult = {
 	ok: boolean;
 	problems: Problem[];
+	/** Things that generate and run, but probably not as intended. */
+	warnings?: Problem[];
 	records: string[];
 	python: string | null;
 };
+
+export const PER_RUN = ['min', 'max', 'first', 'last'] as const;
+
+/** A typed `where` value: numbers and booleans as themselves, anything else as text. */
+export function whereValue(text: string): string | number | boolean {
+	const trimmed = text.trim();
+	if (trimmed === 'true' || trimmed === 'false') return trimmed === 'true';
+	if (trimmed !== '' && Number.isFinite(Number(trimmed))) return Number(trimmed);
+	return text;
+}
+
+/** A default plot for a procedure: its first recorded column against its first swept one. */
+export function newPlot(
+	records: string[],
+	swept: string[],
+	taken: (string | null | undefined)[]
+): PlotDecl {
+	const x = swept[0] ?? records[0] ?? '';
+	const y = records.find((c) => c !== x) ?? '';
+	return {
+		name: uniqueName(
+			'plot',
+			taken.filter((n): n is string => !!n)
+		),
+		x,
+		y: y ? [y] : []
+	};
+}
 
 export const PARAM_TYPES: ParamType[] = ['float', 'int', 'bool', 'str', 'sweep'];
 

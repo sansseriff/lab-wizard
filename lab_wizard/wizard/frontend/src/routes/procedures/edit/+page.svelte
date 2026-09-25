@@ -16,6 +16,7 @@
 	import Panel from '$lib/components/Panel.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import ParamGroupEditor from '$lib/procedures/ParamGroupEditor.svelte';
+	import PlotsEditor from '$lib/procedures/PlotsEditor.svelte';
 	import PresetsPanel from '$lib/procedures/PresetsPanel.svelte';
 	import RolesEditor from '$lib/procedures/RolesEditor.svelte';
 	import StepOutline from '$lib/procedures/StepOutline.svelte';
@@ -46,7 +47,7 @@
 			: null
 	);
 
-	type Tab = 'compose' | 'params' | 'roles' | 'details' | 'yaml' | 'python' | 'presets';
+	type Tab = 'compose' | 'params' | 'roles' | 'plots' | 'details' | 'yaml' | 'python' | 'presets';
 	let tab = $state<Tab>('compose');
 	let saving = $state(false);
 	let hasBuiltin = $state(untrack(() => !!data.hasBuiltin));
@@ -82,6 +83,7 @@
 	const name = $derived(editor?.definition.name ?? '');
 	const renaming = $derived(!!editor?.loadedName && editor.loadedName !== name);
 	const problems = $derived(editor?.check?.problems ?? []);
+	const warnings = $derived(editor?.check?.warnings ?? []);
 	const canSave = $derived(
 		!!editor &&
 			editor.checkCurrent &&
@@ -212,6 +214,7 @@
 		['compose', 'Workflow'],
 		['params', `Parameters · ${editor ? paramLeaves(editor.definition.params).length : 0}`],
 		['roles', `Instrument roles · ${Object.keys(editor?.definition.roles ?? {}).length}`],
+		['plots', `Plots · ${editor?.definition.plots?.length ?? 0}`],
 		['details', 'Details'],
 		['presets', 'Presets'],
 		['yaml', 'YAML'],
@@ -238,6 +241,13 @@
 
 	async function reveal(problem: Problem) {
 		if (!editor) return;
+		if (problem.path[0] === 'plots' || problem.path[0] === 'derived') {
+			tab = 'plots';
+			await revealElement(
+				problem.path[0] === 'plots' ? `plot-${problem.path[1]}` : 'derived-columns'
+			);
+			return;
+		}
 		if (problem.path[0] === 'params' || problem.path[0] === 'roles') {
 			const kind = problem.path[0];
 			tab = kind;
@@ -366,6 +376,21 @@
 				</ul>
 			</details>
 		{/if}
+		{#if warnings.length}
+			<details class="rounded border border-warn/40 bg-surface px-3 py-2">
+				<summary class="cursor-pointer text-xs text-warn"
+					>{warnings.length} warning{warnings.length === 1 ? '' : 's'} · generates, but check this is
+					intended</summary
+				>
+				<ul class="mt-2 space-y-1">
+					{#each warnings as warning, i (i)}<li>
+							<button class="text-left text-xs text-ink-2 hover:underline" onclick={() => reveal(warning)}
+								>{problemLabel(warning)}</button
+							>
+						</li>{/each}
+				</ul>
+			</details>
+		{/if}
 		{#if saveMessage}<Callout tone={saveMessage.tone}
 				>{saveMessage.text}{#if saveMessage.tone === 'ok'}
 					<a
@@ -445,6 +470,8 @@
 					>
 					<RolesEditor {editor} />
 				</div>
+			{:else if tab === 'plots'}
+				<PlotsEditor {editor} />
 			{:else if tab === 'details'}
 				<Panel
 					title="Procedure details"

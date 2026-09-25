@@ -116,9 +116,18 @@ class SetThresholdStepParams(StepParams):
     counter: Annotated[RoleRef, Requires("Counter")]
     threshold_mV: Value
 
+    # Record what the instrument reached under this name, beside the value asked for.
+    record: str | None = Field(default=None, json_schema_extra={"column": "records"})
+
     @classmethod
     def step_class(cls) -> StepClass:
         return SetThreshold
+
+    def emitted_fields(self) -> tuple[str, ...]:
+        return (self.record,) if self.record else ()
+
+    def emitted_units(self) -> dict[str, str | None]:
+        return {self.record: "mV"} if self.record else {}
 
 
 class CountStepParams(StepParams):
@@ -129,6 +138,7 @@ class CountStepParams(StepParams):
     gate_time: Value
 
     emits = ("counts", "int_time", "count_rate")
+    units = {"int_time": "s", "count_rate": "Hz"}
 
     @classmethod
     def step_class(cls) -> StepClass:
@@ -149,6 +159,9 @@ class ReadVoltageStepParams(StepParams):
     def emitted_fields(self) -> tuple[str, ...]:
         return (self.field,)
 
+    def emitted_units(self) -> dict[str, str | None]:
+        return {self.field: "V"}
+
 
 class SetAttenuationStepParams(StepParams):
     """Set an attenuator's attenuation, in dB."""
@@ -157,9 +170,18 @@ class SetAttenuationStepParams(StepParams):
     attenuator: Annotated[RoleRef, Requires("Attenuator")]
     attenuation_db: Value
 
+    # Record what the instrument reached under this name, beside the value asked for.
+    record: str | None = Field(default=None, json_schema_extra={"column": "records"})
+
     @classmethod
     def step_class(cls) -> StepClass:
         return SetAttenuation
+
+    def emitted_fields(self) -> tuple[str, ...]:
+        return (self.record,) if self.record else ()
+
+    def emitted_units(self) -> dict[str, str | None]:
+        return {self.record: "dB"} if self.record else {}
 
 
 class OpenShutterStepParams(StepParams):
@@ -213,6 +235,15 @@ class SetLaserPowerStepParams(StepParams):
     laser: Annotated[RoleRef, Requires("Laser")]
     power_dbm: Value
 
+    # Record what the instrument reached under this name, beside the value asked for.
+    record: str | None = Field(default=None, json_schema_extra={"column": "records"})
+
     @classmethod
     def step_class(cls) -> StepClass:
         return SetLaserPower
+
+    def emitted_fields(self) -> tuple[str, ...]:
+        return (self.record,) if self.record else ()
+
+    def emitted_units(self) -> dict[str, str | None]:
+        return {self.record: "dBm"} if self.record else {}

@@ -1,43 +1,38 @@
+"""The built-in iv_curve and pcr_curve procedures, run against stand-in instruments.
+
+Each procedure's generated module is built in memory, exactly as a project
+would get it, and run with stand-ins, so these tests check what the procedure
+does with a reading rather than detector physics. The simulated detector is
+exercised in ``test_iv_curve_end_to_end.py`` and ``test_pcr_curve_end_to_end.py``.
+"""
+
 from __future__ import annotations
 
 import time
+import types
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import pytest
 
 from lab_procedure import ProcedureRunner, Status
 
+from lab_wizard.lib.data import find
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.instruments.general.vsense import StandInVSense
 from lab_wizard.lib.instruments.general.vsource import StandInVSource
-from lab_wizard.lib.measurements.iv_curve.iv_curve import (
-    IVCurveMeasurement,
-    build_iv_procedure,
-)
-from lab_wizard.lib.measurements.iv_curve.iv_curve_params import (
-    IVBiasParams,
-    IVCurveParams,
-    IVReadoutParams,
-    IVSafetyParams,
-)
-from lab_wizard.lib.measurements.iv_curve.iv_curve_setup_template import IVCurveResources
-from lab_wizard.lib.measurements.pcr_curve.pcr_curve import PCRCurveMeasurement
-from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import (
-    PCRBiasParams,
-    PCRCurveParams,
-    PCRReadoutParams,
-)
-from lab_wizard.lib.measurements.pcr_curve.pcr_curve_setup_template import (
-    PCRCurveResources,
-)
-from lab_wizard.lib.measurements.general.sweep_params import ExplicitSweepParams
+from lab_wizard.lib.procedures.codegen import measurement_module_source
+from lab_wizard.lib.procedures.storage import load_procedure
 from lab_wizard.lib.savers.saver import StandInSaver
 
 
 class StubCounter(Counter):
     """Counter that returns a fixed number of counts per gate.
 
-    A stub, not a simulation: it exists to check what the measurement does with
-    a count. The simulated counter that produces counts from detector physics
-    is ``fake_rack.fake_counter.FakeCounter``, exercised in
-    ``test_pcr_curve_end_to_end.py``.
+    A stub, not a simulation: it exists to check what the procedure does with a
+    count. The simulated counter that produces counts from detector physics is
+    ``fake_rack.fake_counter.FakeCounter``.
     """
 
     def __init__(self, counts: int) -> None:
@@ -63,55 +58,71 @@ class StubCounter(Counter):
         return self.threshold_mV
 
 
-def _iv_resources(points: list[float], *, settle_s: float = 0.0) -> IVCurveResources:
+@dataclass
+class Resources:
+    params: Any
+    voltage_source: Any = None
+    voltage_sense: Any = None
+    counter: Any = None
+    savers: list = field(default_factory=lambda: [StandInSaver()])
+    plotters: list = field(default_factory=list)
+
+
+def _module(name: str, project_dir: Path) -> types.ModuleType:
+    """The procedure's generated module, as if it sat in ``project_dir``."""
+    definition = load_procedure(project_dir / "no-config", name)
+    module = types.ModuleType(name)
+    module.__file__ = str(project_dir / f"{name}.py")  # where it records its runs
+    exec(compile(measurement_module_source(definition), module.__file__, "exec"), module.__dict__)
+    return module
+
+
+def _params(name: str, values: dict[str, Any]) -> Any:
+    return load_procedure(Path("no-config"), name).params_model().model_validate(values)
+
+
+def _iv_resources(points: list[float], *, settle_s: float = 0.0) -> Resources:
     sense = StandInVSense()
     sense.measurement_value = 0.05
-    return IVCurveResources(
-        savers=[StandInSaver()],
-        plotters=[],
+    return Resources(
         voltage_source=StandInVSource(),
         voltage_sense=sense,
-        params=IVCurveParams(
-            bias=IVBiasParams(
-                sweep=ExplicitSweepParams(values_V=points), settle_s=settle_s
-            ),
-            readout=IVReadoutParams(bias_resistance_ohm=100_000.0),
-            safety=IVSafetyParams(),
-        ),
+        params=_params("iv_curve", {
+            "bias": {"sweep": {"mode": "explicit", "values": points}, "settle_s": settle_s},
+            "readout": {"bias_resistance_ohm": 100_000.0},
+        }),
     )
 
 
-def test_iv_curve_records_one_row_per_point_and_shuts_down() -> None:
+def test_iv_curve_records_one_row_per_point_and_shuts_down(tmp_path: Path) -> None:
     points = [0.0, 0.1, 0.2]
     resources = _iv_resources(points)
-    saver = resources.savers[0]
-    assert isinstance(saver, StandInSaver)
+    module = _module("iv_curve", tmp_path)
 
-    status = IVCurveMeasurement(resources).run_measurement()
+    status = module.IvCurveMeasurement(resources).run_measurement()
 
     assert status is Status.SUCCESS
+    saver = resources.savers[0]
     assert saver.started and saver.ended
     assert saver.run_info is not None and saver.run_info["run_type"] == "iv_curve"
+    assert [(r["data"]["bias_voltage"], r["data"]["sense_voltage"]) for r in saver.measurements] == [
+        (bias, 0.05) for bias in points
+    ]
 
-    rows = saver.measurements
-    assert len(rows) == len(points)
-    for seq, (row, bias) in enumerate(zip(rows, points)):
-        data = row["data"]
-        assert data["bias_voltage"] == bias
-        assert data["sense_voltage"] == 0.05
-        expected_current = (bias - 0.05) / 100_000.0
-        assert data["current"] == expected_current
-        assert row["metadata"]["seq"] == seq
+    # The current is derived when the run is read, from its own bias resistance.
+    runs = find(db=tmp_path / "data" / "lab.db")
+    rows = runs.points(runs.derived())
+    assert rows["current"].to_list() == pytest.approx([(bias - 0.05) / 100_000.0 for bias in points])
 
     # Source returned to zero and turned off in cleanup.
     assert resources.voltage_source.voltage == 0.0
     assert resources.voltage_source.output_enabled is False
 
 
-def test_iv_curve_abort_runs_safe_shutdown() -> None:
+def test_iv_curve_abort_runs_safe_shutdown(tmp_path: Path) -> None:
     resources = _iv_resources([0.0, 0.1], settle_s=10.0)
     runner = ProcedureRunner(instruments=resources)
-    thread = runner.start(build_iv_procedure(resources))
+    thread = runner.start(_module("iv_curve", tmp_path).build_iv_curve_procedure(resources))
 
     time.sleep(0.05)
     runner.abort()
@@ -124,29 +135,24 @@ def test_iv_curve_abort_runs_safe_shutdown() -> None:
     assert resources.voltage_source.output_enabled is False
 
 
-def test_pcr_curve_emits_count_rate_per_point() -> None:
+def test_pcr_curve_records_a_count_rate_per_point(tmp_path: Path) -> None:
     points = [0.0, 0.5, 1.0]
     gate_time = 2.0
     counts = 1000
-    resources = PCRCurveResources(
-        savers=[StandInSaver()],
-        plotters=[],
+    resources = Resources(
         voltage_source=StandInVSource(),
         counter=StubCounter(counts),
-        params=PCRCurveParams(
-            bias=PCRBiasParams(
-                sweep=ExplicitSweepParams(values_V=points), settle_s=0.0
-            ),
-            readout=PCRReadoutParams(gate_time_s=gate_time),
-        ),
+        params=_params("pcr_curve", {
+            "bias": {"sweep": {"mode": "explicit", "values": points}, "settle_s": 0.0},
+            "readout": {"gate_time_s": gate_time, "threshold_mV": -40.0},
+        }),
     )
-    saver = resources.savers[0]
-    assert isinstance(saver, StandInSaver)
 
-    status = PCRCurveMeasurement(resources).run_measurement()
+    status = _module("pcr_curve", tmp_path).PcrCurveMeasurement(resources).run_measurement()
 
     assert status is Status.SUCCESS
-    rows = saver.measurements
+    assert resources.counter.threshold_mV == -40.0  # set by the run, not inherited
+    rows = resources.savers[0].measurements
     assert len(rows) == len(points)
     for row, bias in zip(rows, points):
         data = row["data"]

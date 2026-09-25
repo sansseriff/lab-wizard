@@ -231,11 +231,30 @@ class Runs:
                 out.setdefault(name, meta)
         return out
 
+    def params(self) -> dict[int, dict[str, Any]]:
+        """``{run_id: params}``: what each run was asked to do."""
+        if not self.ids:
+            return {}
+        where, ids = self._where()
+        return {r[0]: json.loads(r[1] or "{}") for r in self.lab.query(f"SELECT id, params FROM runs WHERE id IN {where}", ids)}
+
+    def derived(self) -> dict[str, str]:
+        """The ``derived:`` columns the runs' procedures declare, first run's first."""
+        out: dict[str, str] = {}
+        if not self.ids:
+            return out
+        where, ids = self._where()
+        for (text,) in self.lab.query(f"SELECT definition FROM runs WHERE id IN {where}", ids):
+            for name, expression in ((json.loads(text) or {}).get("derived") or {}).items() if text else ():
+                out.setdefault(name, expression)
+        return out
+
     def points(self, derived: Mapping[str, str] | None = None) -> pl.DataFrame:
         """One row per point: ``run_id``, ``seq``, ``t``, then every column.
 
         Columns come in the runs' declared order. A value a row did not record
-        is null. ``derived`` adds computed columns (see ``expressions``).
+        is null. ``derived`` adds computed columns (see ``expressions``); the
+        runs' own ``derived:`` columns are added with ``points(self.derived())``.
         """
         if not self.ids:
             return pl.DataFrame(schema={"run_id": pl.Int64, "seq": pl.Int64, "t": pl.Datetime("us", "UTC")})
@@ -259,7 +278,7 @@ class Runs:
         )
         if frame.is_empty():
             frame = pl.DataFrame(schema={"run_id": pl.Int64, "seq": pl.Int64, "t": pl.Datetime("us", "UTC")})
-        return derive(frame, derived) if derived else frame
+        return derive(frame, derived, self.params()) if derived else frame
 
     def steps(self) -> pl.DataFrame:
         """Every step execution, in the order they started: the timeline."""

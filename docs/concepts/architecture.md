@@ -38,7 +38,7 @@ graph TD
     BE --> UTIL[lib/utilities<br/>config_io, resource_catalog, model_tree]
     UTIL --> INST[lib/instruments<br/>Params + Instrument classes]
     BE --> GEN[wizard/backend<br/>project_generation, get_measurements]
-    GEN --> MEAS[lib/measurements<br/>templates + measurement classes]
+    GEN --> MEAS[lib/procedures<br/>definitions + code generation]
     INST --> SRV[lib/server + lib/client<br/>remote control]
 ```
 
@@ -50,8 +50,8 @@ graph TD
    (`config_io`), auto-discovers instrument types from source
    (`resource_catalog`), and parses project YAML into a runnable tree
    (`model_tree`). See [Config & discovery](config-and-discovery.md).
-3. **Application layer** (`lib/measurements`, `lib/savers`, `lib/plotters`,
-   `lib/server`, `lib/client`) — what you actually do with instruments.
+3. **Application layer** (`lib/procedures`, `lib/data`, `lib/savers`,
+   `lib/plotters`, `lib/server`, `lib/client`) — what you actually do with instruments.
 4. **GUI layer** (`wizard`) — editing and code generation on top of all the above.
 
 ## Params ↔ Instrument: the central duality { #params-instrument-the-central-duality }

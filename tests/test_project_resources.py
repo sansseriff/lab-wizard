@@ -34,6 +34,7 @@ from lab_wizard.lib.utilities.config_io import (
     save_instruments_to_config,
 )
 from lab_wizard.lib.utilities.model_tree import ResourceConfig, load_project_config
+from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
@@ -81,11 +82,12 @@ def _workspace(root: Path) -> Path:
 def _iv_project(root: Path, style: str = "production") -> Path:
     config_dir = _workspace(root)
     rack = [SelectedNodeRef(type="fake900", key=MAINFRAME), SelectedNodeRef(type="fakegpib", key=RACK)]
-    out = generate_measurement_project(
+    out = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=root / "projects",
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             generation_style=style,
             selected_resources=[
                 SelectedResource(variable_name="voltage_source", type="fake928", key=SOURCE,

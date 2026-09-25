@@ -81,13 +81,13 @@ def _mcr_selections() -> list[dict[str, Any]]:
     ]
 
 
-def test_procedures_are_offered_beside_measurements_with_their_presets(workspace):
+def test_procedures_are_offered_with_their_presets(workspace):
     ws, client = workspace
     definition = load_procedure(ws.config_dir, "mcr_curve")
     save_preset(ws.config_dir, "mcr_curve", "bench", {"bias": {"voltage": 0.02}}, definition.params_model())
 
     choices = {(c["name"], c["kind"]): c for c in client.get("/api/measurement-choices").json()["choices"]}
-    assert ("iv_curve", "measurement") in choices
+    assert ("iv_curve", "procedure") in choices
     mcr = choices[("mcr_curve", "procedure")]
     assert mcr["origin"] == "builtin"
     assert mcr["presets"] == ["bench"]

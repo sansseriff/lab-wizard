@@ -1,0 +1,75 @@
+# IV curve: the voltage across the detector as its bias is swept.
+#
+# Ported from the hand-written lib/measurements/iv_curve. The sense lead sits
+# across the device, so the current through it is inferred from the bias
+# resistor: (bias - sensed voltage) / resistance. That is a derived column,
+# computed when the data is read, so a corrected resistance fixes every run.
+schema_version: 1
+name: iv_curve
+description: Voltage across the detector against its bias, with the current through it inferred.
+roles:
+  voltage_source:
+    behavior: VSource
+    description: Biases the detector through the bias resistor.
+  voltage_sense:
+    behavior: VSense
+    description: Reads the voltage across the detector.
+params:
+  bias:
+    sweep:
+      type: sweep
+      default: {mode: linear, start: 0.0, stop: 1.4, step: 0.005}
+      unit: V
+      description: the bias voltages to visit, in order
+    settle_s:
+      type: float
+      default: 0.05
+      unit: s
+      description: wait after setting each bias before reading
+  readout:
+    bias_resistance_ohm:
+      type: float
+      default: 100000.0
+      unit: ohm
+      description: the bias resistor the current is inferred through
+  safety:
+    turn_on_at_start:
+      type: bool
+      default: true
+      description: turn the source on before the sweep
+    return_to_zero:
+      type: bool
+      default: true
+      description: set the source to 0 V afterwards, even after a failure
+    turn_off_at_end:
+      type: bool
+      default: true
+      description: turn the source off afterwards, even after a failure
+body:
+  type: source_guard
+  source: {role: voltage_source}
+  turn_on_at_start: {param: safety.turn_on_at_start}
+  return_to_zero: {param: safety.return_to_zero}
+  turn_off_at_end: {param: safety.turn_off_at_end}
+  body:
+    type: sweep
+    parameter: bias_voltage
+    values: {param: bias.sweep}
+    body:
+      type: sequence
+      children:
+        - type: set_voltage
+          source: {role: voltage_source}
+          voltage: {swept: bias_voltage}
+        - {type: wait, seconds: {param: bias.settle_s}}
+        - {type: read_voltage, sense: {role: voltage_sense}, field: sense_voltage}
+derived:
+  current: (bias_voltage - sense_voltage) / param("readout.bias_resistance_ohm")
+plots:
+  - name: IV
+    x: sense_voltage
+    y: [current]
+    series: run
+  - name: Sensed voltage
+    x: bias_voltage
+    y: [sense_voltage]

@@ -1,0 +1,62 @@
+# PCR curve: photon count rate against the detector's bias.
+#
+# Ported from the hand-written lib/measurements/pcr_curve. The counter's
+# threshold is set by the run rather than inherited: on a shared counter, the
+# threshold it holds is whatever the last caller left.
+schema_version: 1
+name: pcr_curve
+description: Photon count rate against bias voltage.
+roles:
+  voltage_source:
+    behavior: VSource
+    description: Biases the detector.
+  counter:
+    behavior: Counter
+    description: Counts the detector's pulses.
+params:
+  bias:
+    sweep:
+      type: sweep
+      default: {mode: linear, start: 0.0, stop: 1.0, step: 0.01}
+      unit: V
+      description: the bias voltages to visit, in order
+    settle_s:
+      type: float
+      default: 0.05
+      unit: s
+      description: wait after setting each bias before counting
+  readout:
+    gate_time_s:
+      type: float
+      default: 1.0
+      unit: s
+      description: how long each count lasts
+    threshold_mV:
+      type: float
+      default: -50.0
+      unit: mV
+      description: the counter's discriminator threshold, set at the start of every run
+body:
+  type: sequence
+  children:
+    - type: set_threshold
+      counter: {role: counter}
+      threshold_mV: {param: readout.threshold_mV}
+    - type: source_guard
+      source: {role: voltage_source}
+      body:
+        type: sweep
+        parameter: bias_voltage
+        values: {param: bias.sweep}
+        body:
+          type: sequence
+          children:
+            - type: set_voltage
+              source: {role: voltage_source}
+              voltage: {swept: bias_voltage}
+            - {type: wait, seconds: {param: bias.settle_s}}
+            - {type: count, counter: {role: counter}, gate_time: {param: readout.gate_time_s}}
+plots:
+  - name: PCR
+    x: bias_voltage
+    y: [count_rate]

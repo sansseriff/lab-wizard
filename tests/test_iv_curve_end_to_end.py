@@ -25,14 +25,16 @@ from typing import Any, cast
 import pytest
 from ruamel.yaml import YAML
 
-from lab_procedure import Point, ProcedureRunner, RunStarted, Status
+import polars as pl
+
+from lab_procedure import Status
 
 from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
 from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
 from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
 from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
 from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
-from lab_wizard.lib.measurements.iv_curve.iv_curve import IVCurveMeasurement
+from lab_wizard.lib.data import find
 from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     assign_missing_leaf_attribute_names,
@@ -41,11 +43,11 @@ from lab_wizard.lib.utilities.config_io import (
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
 from lab_wizard.lib.client.project_resources import resource_source_for
+from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
     SelectedResource,
-    generate_measurement_project,
 )
 
 PORT = "sim://e2e-rack"
@@ -105,11 +107,12 @@ def _generate_project(tmp_path: Path) -> dict[str, Any]:
         SelectedNodeRef(type="fakegpib", key=GPIB_KEY),
     ]
 
-    out = generate_measurement_project(
+    out = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             selected_resources=[
                 SelectedResource(
                     variable_name="voltage_source",
@@ -151,12 +154,31 @@ def _set_measurement_params(yaml_path: Path) -> None:
         io.dump(payload, handle)
 
 
-def _load_setup_module(setup_path: Path) -> Any:
-    spec = importlib.util.spec_from_file_location("generated_iv_setup", setup_path)
+def _load_module(path: Path, name: str) -> Any:
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _run_and_read_back(out: dict[str, Any]) -> pl.DataFrame:
+    """Run the generated project once and read its run back, derived columns included.
+
+    The current is not recorded: it is the procedure's derived column, computed
+    from the sensed voltage and the bias resistance the run was given.
+    """
+    setup = _load_module(Path(out["setup_file"]), "generated_iv_setup")
+    measurement = _load_module(Path(out["measurement_file"]), "generated_iv_curve")
+    project = load_project_config(Path(out["yaml_file"]))
+    resources = setup.create_instrument_resources(
+        project, resource_source_for(project, Path(out["project_dir"]))
+    )
+    assert measurement.IvCurveMeasurement(resources).run_measurement() is Status.SUCCESS
+
+    runs = find(db=Path(out["project_dir"]) / "data" / "lab.db", procedure="iv_curve")
+    assert len(runs) == 1
+    return runs.points(runs.derived())
 
 
 def _expected_curve() -> list[tuple[float, float]]:
@@ -183,8 +205,8 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path) -> None:
     ast.parse(setup_text)
     ast.parse(measurement_text)
 
-    assert "from iv_curve import IVCurveMeasurement" in setup_text
-    assert "class IVCurveMeasurement" in measurement_text
+    assert "from iv_curve import IvCurveMeasurement" in setup_text
+    assert "class IvCurveMeasurement" in measurement_text
 
     config = load_instruments(tmp_path / "config")
     mainframe_params = config[GPIB_KEY].children[MAINFRAME_KEY]
@@ -209,35 +231,16 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path) -> None:
 
 
 def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path) -> None:
-    out = _generate_project(tmp_path)
-    module = _load_setup_module(Path(out["setup_file"]))
-    project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(
-        project, resource_source_for(project, Path(out["project_dir"]))
-    )
-
-    measurement = IVCurveMeasurement(resources)
-    runner = ProcedureRunner(instruments=resources)
-    observations: list[Point] = []
-    runner.context.data_bus.subscribe(Point, observations.append)
-
-    status = runner.run(
-        measurement.build_procedure(),
-        RunStarted(procedure="iv_curve", params=resources.params.model_dump(mode="json")),
-    )
-    assert status is Status.SUCCESS
-    assert len(observations) == len(SWEEP_V)
+    rows = _run_and_read_back(_generate_project(tmp_path))
+    assert rows.height == len(SWEEP_V)
 
     expected = _expected_curve()
-    for observation, bias, (true_current, true_voltage) in zip(
-        observations, SWEEP_V, expected
-    ):
-        data = observation.values
-        assert data["bias_voltage"] == pytest.approx(bias)
-        assert data["sense_voltage"] == pytest.approx(true_voltage)
-        assert data["current"] == pytest.approx(true_current)
+    for row, bias, (true_current, true_voltage) in zip(rows.iter_rows(named=True), SWEEP_V, expected):
+        assert row["bias_voltage"] == pytest.approx(bias)
+        assert row["sense_voltage"] == pytest.approx(true_voltage)
+        assert row["current"] == pytest.approx(true_current)
 
-    sense = [o.values["sense_voltage"] for o in observations]
+    sense = rows["sense_voltage"].to_list()
     superconducting = [
         v for bias, v in zip(SWEEP_V, sense) if bias < SWITCHING_BIAS_V
     ]
@@ -253,29 +256,15 @@ def test_measured_current_matches_the_detectors_true_bias_current(
 ) -> None:
     """The point of the whole exercise: the numbers mean what they claim.
 
-    The measurement never sees a current — it infers one from the sensed
-    voltage and the bias resistance in the project YAML. Comparing that against
-    the current the model actually pushed is the check that the inference is
-    right, and it is only possible because the detector is simulated.
+    The measurement never sees a current — it is inferred, when the run is
+    read, from the sensed voltage and the bias resistance in the run's params.
+    Comparing that against the current the model actually pushed is the check
+    that the inference is right, and it is only possible because the detector
+    is simulated.
     """
-    out = _generate_project(tmp_path)
-    module = _load_setup_module(Path(out["setup_file"]))
-    project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(
-        project, resource_source_for(project, Path(out["project_dir"]))
-    )
-
-    runner = ProcedureRunner(instruments=resources)
-    observations: list[Point] = []
-    runner.context.data_bus.subscribe(Point, observations.append)
-    runner.run(IVCurveMeasurement(resources).build_procedure())
-
-    switching = next(
-        o for o in observations if o.values["bias_voltage"] >= SWITCHING_BIAS_V
-    )
-    assert switching.values["current"] == pytest.approx(
-        DEVICE.critical_current_a / 1.5, rel=1e-6
-    )
+    rows = _run_and_read_back(_generate_project(tmp_path))
+    switching = rows.filter(pl.col("bias_voltage") >= SWITCHING_BIAS_V).row(0, named=True)
+    assert switching["current"] == pytest.approx(DEVICE.critical_current_a / 1.5, rel=1e-6)
 
 
 def test_generated_setup_runs_as_a_script(tmp_path: Path) -> None:

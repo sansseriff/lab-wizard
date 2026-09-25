@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import polars as pl
 import pytest
 
 from lab_procedure import Point, ProcedureRunner, Status
@@ -285,20 +286,24 @@ def test_the_generated_mcr_project_runs_as_a_script(tmp_path: Path):
     assert status == "success"
     assert points == 1 + len(ATTENUATIONS)
 
-    # Read back the way the Data page will: the background-subtracted rate,
-    # plotted against attenuation, falls as the attenuation rises.
+    # Read back the way the Data page will: the procedure's own first plot, the
+    # background-subtracted rate (a derived column) against attenuation.
     from lab_wizard.lib.data import find, load_plot, to_series
+    from lab_wizard.lib.procedures.definition import ProcedureDefinition
 
-    (run_id,) = find(db=setup_path.parent / "data" / "lab.db", procedure="mcr_curve").ids
-    (series,) = to_series(load_plot({
-        "runs": [run_id],
-        "x": "attenuation_db",
-        "y": ['count_rate - mean(count_rate, phase == "background")'],
-        "where": {"phase": "signal"},
-    }, setup_path.parent / "data" / "lab.db"))
+    db = setup_path.parent / "data" / "lab.db"
+    runs = find(db=db, procedure="mcr_curve")
+    (run_id,) = runs.ids
+    default = ProcedureDefinition.model_validate(runs.info(run_id)["definition"]).plots[0]
+    assert (default.name, default.y) == ("MCR", ["rate_above_dark"])
+    (series,) = to_series(load_plot(default.model_copy(update={"runs": [run_id]}), db))
     assert series["x"] == ATTENUATIONS
     assert series["y"] == sorted(series["y"])
     assert series["y"][-1] > 100 * max(series["y"][0], 1.0)
+
+    # The attenuation the attenuator actually reached is recorded beside the one asked for.
+    signal = runs.points().filter(pl.col("phase") == "signal")
+    assert signal["attenuation_db_reached"].to_list() == pytest.approx(ATTENUATIONS)
 
 
 def test_an_embedded_mcr_project_runs_outside_any_workspace(tmp_path: Path):

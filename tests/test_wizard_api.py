@@ -48,12 +48,14 @@ class TestGetMeasurements:
         data = response.json()
         assert isinstance(data, dict)
 
-    def test_contains_iv_curve(self, client: TestClient):
-        """The iv_curve measurement should be discovered."""
-        response = client.get("/api/get-measurements")
+    def test_iv_and_pcr_curves_are_offered_as_built_in_procedures(self, client: TestClient):
+        """They were hand-written measurements; now they are procedures like mcr_curve."""
+        response = client.get("/api/measurement-choices")
         assert response.status_code == 200
-        data = response.json()
-        assert "iv_curve" in data
+        choices = {(c["name"], c["kind"]): c for c in response.json()["choices"]}
+        for name in ("iv_curve", "pcr_curve", "mcr_curve"):
+            assert choices[(name, "procedure")]["origin"] == "builtin"
+        assert not any(kind == "measurement" for _name, kind in choices)
 
     def test_measurement_info_structure(self, client: TestClient):
         """Each measurement should have required fields."""
@@ -72,7 +74,7 @@ class TestGetResources:
 
     def test_iv_curve_instruments(self, client: TestClient):
         """iv_curve should require voltage_source and voltage_sense."""
-        response = client.get("/api/get-resources/iv_curve")
+        response = client.get("/api/get-resources/iv_curve?kind=procedure")
         assert response.status_code == 200
         data = response.json()
 
@@ -87,7 +89,7 @@ class TestGetResources:
 
     def test_instrument_req_structure(self, client: TestClient):
         """Each instrument requirement should have the expected fields."""
-        response = client.get("/api/get-resources/iv_curve")
+        response = client.get("/api/get-resources/iv_curve?kind=procedure")
         data = response.json()
 
         for req in data:
@@ -98,7 +100,7 @@ class TestGetResources:
 
     def test_matching_instruments_found(self, client: TestClient):
         """Instrument discovery should find matching implementations."""
-        response = client.get("/api/get-resources/iv_curve")
+        response = client.get("/api/get-resources/iv_curve?kind=procedure")
         data = response.json()
 
         # Find the voltage_source requirement
@@ -121,7 +123,7 @@ class TestGetResources:
 
     def test_voltage_source_includes_dbay_channels(self, client: TestClient):
         """VSource discovery should include DBay channel-level implementations."""
-        response = client.get("/api/get-resources/iv_curve")
+        response = client.get("/api/get-resources/iv_curve?kind=procedure")
         assert response.status_code == 200
         data = response.json()
         vsource_req = next((r for r in data if r["variable_name"] == "voltage_source"), None)
@@ -132,7 +134,7 @@ class TestGetResources:
 
     def test_voltage_sense_includes_sim970_channel(self, client: TestClient):
         """VSense discovery should include channel-level implementations like Sim970Channel."""
-        response = client.get("/api/get-resources/iv_curve")
+        response = client.get("/api/get-resources/iv_curve?kind=procedure")
         assert response.status_code == 200
         data = response.json()
         vsense_req = next((r for r in data if r["variable_name"] == "voltage_sense"), None)
@@ -142,7 +144,7 @@ class TestGetResources:
 
     def test_counter_includes_keysight_channel(self, client: TestClient):
         """Counter discovery should include Keysight channel implementation."""
-        response = client.get("/api/get-resources/pcr_curve")
+        response = client.get("/api/get-resources/pcr_curve?kind=procedure")
         assert response.status_code == 200
         data = response.json()
         counter_req = next((r for r in data if r["variable_name"] == "counter"), None)
@@ -221,6 +223,7 @@ class TestCreateMeasurementProject:
 
         body = {
             "measurement_name": "iv_curve",
+            "kind": "procedure",
             "project_prefix": "api_test",
             "selected_resources": [
                 {

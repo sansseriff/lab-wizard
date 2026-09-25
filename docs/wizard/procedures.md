@@ -30,7 +30,7 @@ button reads **Save workspace copy**.
 
 ## The editor
 
-Seven tabs over one definition, with a pill under the title that says whether it
+Eight tabs over one definition, with a pill under the title that says whether it
 can be generated right now. Nothing that does not check can be saved, so a saved
 procedure always generates.
 
@@ -91,6 +91,20 @@ workspace's instruments could fill it**. A role nothing here can fill is legal �
 a server elsewhere may have one — but it is worth seeing as you declare it,
 because that is exactly the portability cost of asking for something specific.
 
+### Plots
+
+What a run of the procedure is looked at as. The **first plot** is what the Data
+page and a live plotter draw for a run; the others are there to switch to. Each
+plot names its axes by column: anything the procedure records, or a derived
+column. Any column can go on any axis, so a measured voltage against another
+measured voltage is a normal plot. A plot can also keep only some rows (`phase`
+equals `signal`, or each run's own lowest trigger level), draw one line per run
+or per value of a column, and use log axes.
+
+**Derived columns** sit on the same tab: expressions computed from the recorded
+columns whenever a run is read, never stored. Fixing an expression fixes every
+past run. See [Plots and derived columns](../concepts/procedures.md#plots-and-derived-columns).
+
 ### Details, YAML, Python
 
 - **Details** is the procedure's name and description, and where a built-in
@@ -98,8 +112,10 @@ because that is exactly the portability cost of asking for something specific.
 - **YAML** is the file as it is stored, editable if hand-editing is quicker;
   *Apply* loads it back into the composer.
 - **Python** is the module a project would get. The step tree sits between
-  `# wizard:procedure:start` and `# wizard:procedure:end`; regenerating a
-  project replaces only that block, so edits you make around it survive.
+  `# wizard:procedure:start` and `# wizard:procedure:end`, and the definition
+  it was generated from (recorded with every run) between
+  `# wizard:definition` markers; regenerating a project replaces only those
+  blocks, so edits you make around them survive.
 
 ![The Python tab, showing the generated module for a procedure](../assets/screenshots/procedures-python.webp)
 
@@ -111,8 +127,16 @@ The Python tab is there so that is never a mystery.
 Everything is checked after each edit, by the same rules used when saving and
 when generating code — an undeclared role or parameter, a role filled by the
 wrong behavior, a swept value used outside its sweep, a condition on a column no
-step records. Each problem is reported against the step it concerns, so a
-half-built tree tells you which step is wrong rather than printing a paragraph.
+step records, a nested sweep reusing its parent's name, a reading recorded
+under a bound parameter's name, or a plot or derived column naming something
+the procedure never records. Each problem is reported against the step (or plot)
+it concerns, so a half-built tree tells you which step is wrong rather than
+printing a paragraph.
+
+**Warnings** are listed separately and do not block saving: they describe
+something that generates and runs but is probably not intended, such as two
+steps recording `counts` in the same loop body, which puts each reading on its
+own row.
 
 ## Presets
 
@@ -128,7 +152,6 @@ Presets tab waits for unsaved parameter changes to be saved.
 
 ## Where a procedure goes next
 
-A saved procedure appears in [Create measurement](measurements.md) beside the
-hand-written measurements, with its roles to bind and its presets to choose
-from. From there it is an ordinary project: generated Python, an editable YAML,
+A saved procedure appears in [Create measurement](measurements.md) with the
+built-in ones, with its roles to bind and its presets to choose from. From there it is an ordinary project: generated Python, an editable YAML,
 and a run.

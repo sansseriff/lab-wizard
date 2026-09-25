@@ -1,14 +1,19 @@
 """Tests for the typed measurement param models and their YAML round-trip."""
 
+from pathlib import Path
+
 import pytest
 
 from lab_wizard.lib.measurements.general.sweep_params import (
     ExplicitSweepParams,
     LinearSweepParams,
 )
-from lab_wizard.lib.measurements.iv_curve.iv_curve_params import IVCurveParams
-from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
+from lab_wizard.lib.procedures.storage import load_procedure
 from lab_wizard.wizard.backend.project_generation import _measurement_param_defaults
+
+# The built-in procedures, read without a workspace of their own.
+_NO_WORKSPACE = Path(__file__).parent / "no-such-config"
+IVCurveParams = load_procedure(_NO_WORKSPACE, "iv_curve").params_model()
 
 
 def test_linear_sweep_inclusive_ascending():
@@ -65,15 +70,14 @@ def test_partial_params_fill_defaults():
     assert isinstance(params.bias.sweep, LinearSweepParams)
 
 
-@pytest.mark.parametrize(
-    "name,model",
-    [("iv_curve", IVCurveParams), ("pcr_curve", PCRCurveParams)],
-)
-def test_generator_defaults_round_trip_through_model(name, model):
-    """The wizard's YAML defaults must validate back into the typed model and
-    equal the model's own defaults — the anti-drift guarantee."""
-    defaults = _measurement_param_defaults(name)
-    assert model.model_validate(defaults) == model()
+@pytest.mark.parametrize("name", ["iv_curve", "pcr_curve", "mcr_curve"])
+def test_procedure_defaults_round_trip_through_their_model(name):
+    """The YAML defaults a project is generated with must validate back into the
+    params model the generated setup uses, and equal its own defaults — the
+    anti-drift guarantee."""
+    definition = load_procedure(_NO_WORKSPACE, name)
+    model = definition.params_model()
+    assert model.model_validate(definition.param_defaults()) == model()
 
 
 def test_unknown_measurement_has_no_param_defaults():

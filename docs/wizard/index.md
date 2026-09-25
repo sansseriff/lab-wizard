@@ -59,7 +59,7 @@ knowing:
 | `POST /api/manage-instruments/add` | add an instrument, parent chain and all |
 | `POST /api/manage-instruments/discover` | [probe hardware](../concepts/config-and-discovery.md#hardware-discovery) |
 | `GET /api/instrument-sources` | every place an instrument can come from — this workspace, its own server, other machines, remote servers — with the claims each holds |
-| `GET /api/measurement-choices` | hand-written measurements and procedures, side by side |
+| `GET /api/measurement-choices` | every procedure a measurement can be created from |
 | `GET /api/get-resources/{name}?kind=` | what a measurement or procedure requires, and what could fill it |
 | `POST /api/create-measurement-project` | write the project folder |
 | `GET /api/procedures`, `GET/PUT/DELETE /api/procedures/{name}` | the procedure library |

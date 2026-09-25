@@ -10,8 +10,8 @@ instrument it needs, which parameters it takes, and a tree of steps. It lives in
 ordinary Python — the same kind of project a hand-written measurement produces.
 Nothing reads the YAML at run time.
 
-Hand-written measurements under `lib/measurements/` keep working unchanged. A
-procedure is a second way to get the same result without writing Python.
+Every measurement that ships with lab_wizard is a procedure. A hand-written
+measurement under `lib/measurements/<name>/` is still possible, but none ship.
 
 ## A definition
 
@@ -81,10 +81,16 @@ generated setup file.
 | `source_guard` | run a body with a source on; return it to 0 V and off afterwards, always |
 | `safe_guard` | run a body; put an instrument in its declared safe state afterwards, always |
 | `with_settings` | run a body with settings overridden, restoring them afterwards |
-| `set_threshold`, `count` | drive a `Counter`; `count` records `counts`, `int_time`, `count_rate` |
-| `read_voltage` | read a `VSense`; records the reading under `field` |
+| `set_threshold`, `count` | drive a `Counter`; `count` records `counts`, `int_time` (s), `count_rate` (Hz) |
+| `read_voltage` | read a `VSense`; records the reading under `field`, in V |
 | `set_attenuation`, `open_shutter`, `close_shutter` | drive an `Attenuator` |
 | `laser_on`, `laser_off`, `set_laser_power` | drive a `Laser` |
+
+`set_attenuation`, `set_threshold` and `set_laser_power` take an optional
+`record:` naming a column. The value the instrument actually reached is
+recorded there, beside the value that was asked for. Hardware quantizes and
+clamps: an attenuator asked for 12.34567 dB reports 12.346. (`set_voltage` has
+no `record:`, because a voltage source cannot report back what it holds.)
 
 Branching needs no expression language: every step succeeds, fails, or is
 aborted, and a condition is just a step that fails. `sequence` with a
@@ -120,6 +126,42 @@ A reading placed at an outer loop level is taken fewer times, so it lands on a
 row of its own with fewer parameters. A step may not record a field with the
 same name as a parameter in force; the row already carries it.
 
+## Plots and derived columns
+
+A definition can say how its runs are usually looked at, and what to compute
+from them:
+
+```yaml
+derived:
+  rate_above_dark: 'count_rate - mean(count_rate, phase == "background")'
+plots:
+  - name: MCR
+    x: attenuation_db
+    y: [rate_above_dark]
+    where: {phase: signal}
+    log_y: true
+```
+
+The **first plot** is what the Data page and a live plotter draw for a run;
+without any, a run is shown as its first recorded column against its innermost
+sweep. Any column can go on any axis. `where` keeps only some rows, while
+reductions in `x` and `y` still see the whole run, so the signal above is
+subtracted by its own background.
+
+A **derived column** is computed whenever a run is read and never stored, so
+fixing an expression fixes every past run. The language is small: column names,
+numbers, `+ - * / **`, `abs sqrt exp log log10`, the per-run reductions
+`mean min max sum count first last` (each optionally with a condition), and
+`param("path")` for a value from the run's own params:
+
+```yaml
+derived:
+  current: (bias_voltage - sense_voltage) / param("readout.bias_resistance_ohm")
+```
+
+That is how `iv_curve` gets its current: the resistance each run used is in
+its params, so a run taken with a different resistor is still right.
+
 ## Writing one
 
 Procedures are written in the wizard's **Procedures** section — roles,
@@ -133,22 +175,35 @@ the same file.
 A definition is checked before it is saved or generated, and every problem is
 reported at once: a role or param that is not declared, a role filled by the
 wrong behavior (`count` given a `VSource`), a swept value used outside its
-sweep, a sweep param used as a single number, or a condition on a field no step
-records.
+sweep, a sweep param used as a single number, a condition on a field no step
+records, a nested sweep that reuses its parent's name (the inner value would
+replace the outer one in every row), a reading recorded under a bound
+parameter's name, or a plot or derived column that names a column the procedure
+never records or a param it does not declare. Two steps recording the same field
+in one loop body generate and run, and are reported as a warning.
 
 ## Built-in procedures
 
 Procedures that ship with lab_wizard live in
 `lab_wizard/lib/procedures/library/`. A workspace procedure of the same name
 takes precedence, so a lab adapts a built-in by saving its own copy; deleting
-that copy brings the built-in back. The first built-in is **`mcr_curve`**: count
-rate against optical attenuation at a fixed bias, with a background count taken
-through a closed shutter, rebuilt from the old `mcrCurve.py`.
+that copy brings the built-in back. There are three:
+
+- **`iv_curve`**: the voltage across the detector against its bias, with the
+  current through the bias resistor as a derived column.
+- **`pcr_curve`**: photon count rate against bias, with the counter's threshold
+  set by the run.
+- **`mcr_curve`**: count rate against optical attenuation at a fixed bias, with
+  a background count taken through a closed shutter, rebuilt from the old
+  `mcrCurve.py`.
+
+`iv_curve` and `pcr_curve` were hand-written Python and kept the same params, so
+their presets and project YAML still load.
 
 ## Presets
 
 `config/measurements/<measurement>/<preset>.yml` holds a named set of params —
-"the lab's standard sweep" — for a procedure or a hand-written measurement.
+"the lab's standard sweep" — for a procedure.
 Generating a project copies the preset's values into the project; editing the
 preset afterwards changes no existing project.
 

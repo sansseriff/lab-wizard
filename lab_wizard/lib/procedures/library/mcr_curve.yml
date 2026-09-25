@@ -97,6 +97,24 @@ body:
                     - type: set_attenuation
                       attenuator: {role: attenuator}
                       attenuation_db: {swept: attenuation_db}
+                      record: attenuation_db_reached
                     - {type: wait, seconds: {param: attenuation.settle_s}}
                     - {type: count, counter: {role: counter}, gate_time: {param: readout.gate_time_s}}
                     - {type: read_voltage, sense: {role: voltage_sense}, field: device_voltage}
+derived:
+  # Each run subtracted from its own background count rate.
+  rate_above_dark: 'count_rate - mean(count_rate, phase == "background")'
+plots:
+  - name: MCR
+    x: attenuation_db
+    y: [rate_above_dark]
+    where: {phase: signal}
+    log_y: true
+  - name: Attenuation reached
+    x: attenuation_db
+    y: [attenuation_db_reached]
+    where: {phase: signal}
+  - name: Device voltage
+    x: attenuation_db
+    y: [device_voltage]
+    where: {phase: signal}

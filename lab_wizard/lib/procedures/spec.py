@@ -263,6 +263,8 @@ class StepParams(BaseModel):
 
     # Data fields this step records, for plotting and for checking conditions.
     emits: ClassVar[tuple[str, ...]] = ()
+    # The unit of each recorded field that has one: {"count_rate": "Hz"}.
+    units: ClassVar[dict[str, str]] = {}
 
     @classmethod
     def step_class(cls) -> StepClass:
@@ -311,6 +313,10 @@ class StepParams(BaseModel):
 
     def emitted_fields(self) -> tuple[str, ...]:
         return self.emits
+
+    def emitted_units(self) -> dict[str, str | None]:
+        """``{field: unit}`` for every field this step records."""
+        return {name: self.units.get(name) for name in self.emitted_fields()}
 
     def swept_parameters(self) -> tuple[str, ...]:
         """Names this step binds for its descendants (a Sweep binds one)."""

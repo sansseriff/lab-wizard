@@ -6,6 +6,8 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import {
 	blankDefinition,
+	newPlot,
+	whereValue,
 	type Catalog,
 	type FieldKind,
 	type FieldSpec,
@@ -260,4 +262,18 @@ test('nested parameter groups remain selectable and renaming updates nested work
 	expect(validIdentifier('gate_s')).toBe(true);
 	expect(validIdentifier('gate.s')).toBe(false);
 	expect(validIdentifier('3gate')).toBe(false);
+});
+
+test('a plot condition keeps numbers and booleans typed, and anything else as text', () => {
+	expect(whereValue('-50')).toBe(-50);
+	expect(whereValue('0.5')).toBe(0.5);
+	expect(whereValue('true')).toBe(true);
+	expect(whereValue('signal')).toBe('signal');
+	expect(whereValue('')).toBe('');
+});
+
+test('a new plot puts the first recorded column against the first sweep, with a fresh name', () => {
+	const plot = newPlot(['bias', 'counts', 'count_rate'], ['bias'], ['plot']);
+	expect(plot).toEqual({ name: 'plot_2', x: 'bias', y: ['counts'] });
+	expect(newPlot([], [], [])).toEqual({ name: 'plot', x: '', y: [] });
 });

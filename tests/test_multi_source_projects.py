@@ -34,6 +34,7 @@ from lab_wizard.lib.utilities.config_io import (
 )
 from lab_wizard.wizard.backend import instrument_sources as sources_mod
 from lab_wizard.wizard.backend.instrument_sources import ensure_source_registered
+from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
@@ -158,11 +159,12 @@ def test_a_routed_instrument_is_recorded_as_a_source_not_copied(
     """
     config_dir, projects_dir, instruments = workspace
 
-    result = generate_measurement_project(
+    result = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             selected_resources=[_routed_source(), _local_sense(instruments)],
         ),
     )
@@ -186,11 +188,12 @@ def test_a_mixed_project_is_generated_in_from_attribute_style(workspace, fake_so
     a params tree this workspace does not have for a routed instrument."""
     config_dir, projects_dir, instruments = workspace
 
-    result = generate_measurement_project(
+    result = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             selected_resources=[_routed_source(), _local_sense(instruments)],
             generation_style="production",  # deliberately the wrong one
         ),
@@ -208,11 +211,12 @@ def test_the_source_is_registered_so_the_project_can_resolve_it(
     the user never has to type a URL for a server the wizard discovered."""
     config_dir, projects_dir, instruments = workspace
 
-    generate_measurement_project(
+    generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             selected_resources=[_routed_source(), _local_sense(instruments)],
         ),
     )
@@ -235,11 +239,12 @@ def test_an_attribute_the_source_no_longer_offers_is_refused(workspace, fake_sou
         attribute="deleted_instrument",
     )
     with pytest.raises(ValueError, match="no longer offers"):
-        generate_measurement_project(
+        generate_procedure_project(
             config_dir=config_dir,
             projects_dir=projects_dir,
             req=GenerateProjectRequest(
                 measurement_name="iv_curve",
+                kind="procedure",
                 selected_resources=[stale, _local_sense(instruments)],
             ),
         )
@@ -250,11 +255,12 @@ def test_a_routed_selection_without_an_attribute_is_refused(workspace, fake_sour
 
     nameless = SelectedResource(variable_name="voltage_source", source=_REMOTE_SOURCE)
     with pytest.raises(ValueError, match="carries no attribute name"):
-        generate_measurement_project(
+        generate_procedure_project(
             config_dir=config_dir,
             projects_dir=projects_dir,
             req=GenerateProjectRequest(
                 measurement_name="iv_curve",
+                kind="procedure",
                 selected_resources=[nameless, _local_sense(instruments)],
             ),
         )
@@ -285,11 +291,12 @@ def test_two_sources_claiming_one_attribute_name_are_refused(
         variable_name="voltage_source", source=_REMOTE_SOURCE, attribute=clashing
     )
     with pytest.raises(ValueError, match="both provide an instrument named"):
-        generate_measurement_project(
+        generate_procedure_project(
             config_dir=config_dir,
             projects_dir=projects_dir,
             req=GenerateProjectRequest(
                 measurement_name="iv_curve",
+                kind="procedure",
                 selected_resources=[routed, _local_sense(instruments)],
             ),
         )
@@ -317,11 +324,12 @@ def test_a_purely_local_project_is_referenced_by_name_like_any_other(workspace):
             SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
         ],
     )
-    result = generate_measurement_project(
+    result = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             selected_resources=[local_source, _local_sense(instruments)],
             generation_style="production",
         ),
@@ -338,11 +346,12 @@ def test_a_purely_local_project_is_referenced_by_name_like_any_other(workspace):
 def test_the_embedded_style_still_carries_its_own_copy(workspace):
     """The escape hatch: a project that runs outside any workspace."""
     config_dir, projects_dir, instruments = workspace
-    result = generate_measurement_project(
+    result = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
+            kind="procedure",
             selected_resources=[
                 SelectedResource(
                     variable_name="voltage_source",
@@ -367,11 +376,12 @@ def test_the_embedded_style_still_carries_its_own_copy(workspace):
 def test_the_yaml_expanded_style_is_retired_with_a_reason(workspace):
     config_dir, projects_dir, instruments = workspace
     with pytest.raises(ValueError, match="has been retired"):
-        generate_measurement_project(
+        generate_procedure_project(
             config_dir=config_dir,
             projects_dir=projects_dir,
             req=GenerateProjectRequest(
                 measurement_name="iv_curve",
+                kind="procedure",
                 selected_resources=[_local_sense(instruments)],
                 generation_style="pedagogical_yaml_expanded",
             ),

@@ -116,6 +116,7 @@ def procedure_summaries(config_dir: str | Path) -> list[dict[str, Any]]:
             "records": [],
             "presets": list_presets(config_dir, name),
             "problems": [],
+            "warnings": [],
         }
         try:
             definition = load_procedure(config_dir, name)
@@ -127,6 +128,7 @@ def procedure_summaries(config_dir: str | Path) -> list[dict[str, Any]]:
         entry["roles"] = {role: decl.behavior for role, decl in definition.roles.items()}
         entry["records"] = definition.emitted_fields()
         entry["problems"] = [message for _path, message in definition.diagnose()]
+        entry["warnings"] = [message for _path, message in definition.warnings()]
         out.append(entry)
     return out
 
@@ -156,15 +158,22 @@ def check_definition(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         definition = ProcedureDefinition.model_validate(payload)
     except ValidationError as exc:
-        return {"ok": False, "problems": _validation_problems(exc), "records": [], "python": None}
+        return {"ok": False, "problems": _validation_problems(exc), "warnings": [], "records": [], "python": None}
     except ValueError as exc:
-        return {"ok": False, "problems": [_problem((), str(exc))], "records": [], "python": None}
+        return {"ok": False, "problems": [_problem((), str(exc))], "warnings": [], "records": [], "python": None}
 
     problems = [_problem(path, message) for path, message in definition.diagnose()]
     # The whole module a project gets, not just the tree: the roles bound as
     # locals and the params read are what make the tree legible.
     python = format_python_code(measurement_module_source(definition)) if not problems else None
-    return {"ok": not problems, "problems": problems, "records": definition.emitted_fields(), "python": python}
+    return {
+        "ok": not problems,
+        "problems": problems,
+        # Things that generate and run, but probably not as intended.
+        "warnings": [_problem(path, message) for path, message in definition.warnings()],
+        "records": definition.emitted_fields(),
+        "python": python,
+    }
 
 
 # --------------------------- writing ---------------------------

@@ -31,7 +31,7 @@ from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelPar
 from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.procedures.storage import list_presets, save_preset, save_procedure
+from lab_wizard.lib.procedures.storage import list_presets, load_procedure, save_preset, save_procedure
 from lab_wizard.lib.utilities.config_io import (
     assign_missing_leaf_attribute_names,
     instrument_hash,
@@ -47,7 +47,6 @@ from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
     SelectedResource,
-    generate_measurement_project,
 )
 
 PORT = "sim://composed-rack"
@@ -302,19 +301,18 @@ def test_refreshing_replaces_the_tree_and_keeps_edits_outside_it(tmp_path: Path)
     assert ProcedureDefinition.model_validate(measurement.DEFINITION) == ProcedureDefinition.model_validate(changed)
 
 
-def test_a_hand_written_measurement_takes_a_preset_too(tmp_path: Path):
-    from lab_wizard.lib.measurements.pcr_curve.pcr_curve_params import PCRCurveParams
-
+def test_the_built_in_pcr_curve_takes_a_preset(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write_instruments(config_dir)
-    save_preset(config_dir, "pcr_curve", "short", {"readout": {"gate_time_s": 0.25}}, PCRCurveParams)
+    model = load_procedure(config_dir, "pcr_curve").params_model()
+    save_preset(config_dir, "pcr_curve", "short", {"readout": {"gate_time_s": 0.25}}, model)
     assert list_presets(config_dir, "pcr_curve") == ["short"]
 
-    out = generate_measurement_project(
+    out = generate_procedure_project(
         config_dir=config_dir,
         projects_dir=tmp_path / "projects",
         req=GenerateProjectRequest(
-            measurement_name="pcr_curve", selected_resources=_selections(), params_preset="short"
+            measurement_name="pcr_curve", kind="procedure", selected_resources=_selections(), params_preset="short"
         ),
     )
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))

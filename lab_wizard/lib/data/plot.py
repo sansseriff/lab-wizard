@@ -29,7 +29,7 @@ from typing import Any, Literal
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
 
-from lab_wizard.lib.data.expressions import ExpressionError, compile_expression, derive
+from lab_wizard.lib.data.expressions import ExpressionError, Params, compile_expression, derive
 
 __all__ = ["PlotSpec", "evaluate_plot", "load_plot", "notebook_source", "to_series"]
 
@@ -60,7 +60,7 @@ class PlotSpec(BaseModel):
     log_y: bool = False
 
 
-def _where(spec: PlotSpec, columns: list[str]) -> pl.Expr:
+def _where(spec: PlotSpec, columns: list[str], params: Params | None) -> pl.Expr:
     """Which rows to draw, as one condition. Evaluated over whole runs.
 
     A ``where`` chooses the points to draw; it does not change what a
@@ -69,7 +69,7 @@ def _where(spec: PlotSpec, columns: list[str]) -> pl.Expr:
     """
     keep = pl.lit(True)
     for column, wanted in spec.where.items():
-        expr = compile_expression(column, columns)
+        expr = compile_expression(column, columns, params)
         if isinstance(wanted, dict):
             if set(wanted) == {"in"}:
                 keep &= expr.is_in(list(wanted["in"]))
@@ -109,25 +109,30 @@ def evaluate_plot(
     *,
     run_labels: dict[int, str] | None = None,
     bins: dict[str, dict[str, Any]] | None = None,
+    params: Params | None = None,
+    derived: dict[str, str] | None = None,
 ) -> pl.DataFrame:
     """The rows to draw for ``spec``, from ``points`` (as ``Runs.points`` gives).
 
     ``run_labels`` maps a run id to its legend text; ``bins`` gives an array
     column's bin axis, ``{name: {"start": 0, "step": 4}}``, as recorded in
-    ``runs.columns``.
+    ``runs.columns``. ``params`` is ``{run_id: params}``, for ``param("...")``.
+    ``derived`` adds the procedure's own derived columns; the spec's
+    ``derived`` are added over them.
     """
     spec = spec if isinstance(spec, PlotSpec) else PlotSpec.model_validate(spec)
     frame = points.sort(["run_id", "seq"]) if {"run_id", "seq"} <= set(points.columns) else points
-    if spec.derived:
-        frame = derive(frame, spec.derived)
+    all_derived = {**(derived or {}), **spec.derived}
+    if all_derived:
+        frame = derive(frame, all_derived, params)
 
-    keep = _where(spec, frame.columns)
+    keep = _where(spec, frame.columns, params)
     series = _labels(spec, run_labels)
-    x = compile_expression(spec.x, frame.columns)
+    x = compile_expression(spec.x, frame.columns, params)
     parts: list[pl.DataFrame] = []
     for axis, names in (("y", spec.y), ("y2", spec.y2)):
         for name in names:
-            y = compile_expression(name, frame.columns)
+            y = compile_expression(name, frame.columns, params)
             label = series if len(spec.y) + len(spec.y2) == 1 else (
                 pl.concat_str([series, pl.lit(name)], separator=" · ") if spec.series else pl.lit(name)
             )
@@ -204,7 +209,9 @@ def load_plot(spec: PlotSpec | dict[str, Any], db: str | Path | None = None) -> 
                 )
             }
         bins = {name: meta["bins"] for name, meta in runs.columns().items() if isinstance(meta, dict) and meta.get("bins")}
-        return evaluate_plot(spec, points, run_labels=labels, bins=bins)
+        return evaluate_plot(
+            spec, points, run_labels=labels, bins=bins, params=runs.params(), derived=runs.derived()
+        )
 
 
 def notebook_source(spec: PlotSpec | dict[str, Any], db: str | Path) -> str:

@@ -1,6 +1,6 @@
 # The lab data system: recording runs, saving files, and the viewer
 
-> **Status: Phases 1–3 built (2026-09-23); Phases 4–8 not started.** Decisions
+> **Status: Phases 1–4 built (2026-09-24); Phases 5–8 not started.** Decisions
 > still marked **(open)** in §14 need an answer; everything else was settled
 > in review.
 >
@@ -699,7 +699,7 @@ As built — Phase 3:
 - Tests: `tests/test_data_reading.py`, plus the mcr script test reading its own
   recorded run back as a background-subtracted plot.
 
-### Phase 4: procedure definitions and ports
+### Phase 4: procedure definitions and ports — built
 
 - `plots:`, `derived:`; `check()` verifies their columns exist.
 - `emits` with units; `record:` on `set_attenuation`, `set_voltage`,
@@ -710,6 +710,50 @@ As built — Phase 3:
 - **Port `iv_curve` and `pcr_curve` to procedure definitions**, as `mcr_curve`
   was, and delete `lib/measurements/iv_curve` and `pcr_curve`. Their end-to-end
   tests move to the procedure form.
+
+As built:
+
+- `ProcedureDefinition.plots` is a list of `PlotSpec` (from `lib/data/plot.py`)
+  with no `runs`; `derived` is `{name: expression}`. Both round-trip through the
+  generated module's `DEFINITION` block, so every run records them.
+- **Units sit beside `emits`**, as a `units` mapping on each step schema, rather
+  than turning `emits` into a mapping: `emits` is read as a list of names by the
+  frontend catalog and by `main.py`. `emitted_units()` gives
+  `{field: unit}`; `read_voltage` records volts.
+- **`record:` is on `set_attenuation`, `set_threshold` and `set_laser_power`
+  only.** `VSource` has no getter, so `set_voltage` cannot report what it holds.
+- **`param("path")`** joined the expression language: a number from each run's
+  own params, per run. `iv_curve`'s `current` needs it (the bias resistance).
+  `Runs.params()` supplies them; `Runs.derived()` merges the recorded
+  definitions' `derived:`, and `load_plot` applies both. The viewer reading the
+  *current* definition's plots (§9) is the backend's job in Phase 6; the
+  library uses the definition each run recorded.
+- `check()` also errors on a step recording a field named like a parameter an
+  enclosing step binds (what `observe()` would raise at run time), and on plots
+  or derived columns naming unknown columns, undeclared params, non-number
+  params, cycles, or a plot with `runs`. **Warnings** (`definition.warnings()`,
+  and a `warnings` list from `POST /api/procedures/check` and the procedure
+  list) cover two steps recording one field in a loop body; `if` and
+  `selector` branches count as alternatives.
+- Composer: a **Plots** tab (`PlotsEditor.svelte`) edits plots and derived
+  columns; `where` offers equals and per-run min/max/first/last (ranges and
+  lists through the YAML tab). Warnings are listed under the problems.
+  Type-checked and unit-tested; **not yet clicked through in a browser**, and
+  prettier could not check `.svelte` files here (it crashes under bun, and
+  there is no node on this machine).
+- `iv_curve` and `pcr_curve` are in `lib/procedures/library/` with the same
+  params as before (PCR's unused `photon_rate_hz` dropped), plus plots;
+  `mcr_curve` gained plots, `rate_above_dark` and `attenuation_db_reached`.
+- **Not done: removing the hand-written measurement kind.** With nothing left
+  under `lib/measurements/` it offers nothing, but `get_measurements.py`,
+  `generate_measurement_project`, `kind="measurement"` and their endpoints
+  remain. Removing them means editing `main.py`, which was being changed in
+  parallel; it is a self-contained cleanup for later.
+- Tests moved to the procedure form: `test_iv_curve_end_to_end.py` now runs the
+  generated project, records, and checks the *derived* current against the
+  detector model; `test_lab_wizard_measurements.py` builds each generated module
+  in memory and runs it on stand-ins; generation tests call
+  `generate_procedure_project`. New: `tests/test_procedure_data_model.py`.
 
 ### Phase 5: the file saver (`lab_wizard/lib/savers/file_saver.py`)
 

@@ -187,11 +187,15 @@ def test_an_exempt_behavior_still_falls_back_rather_than_failing():
 # quietly out of date.
 
 
-def test_shipped_measurements_still_get_their_defaults():
-    from lab_wizard.wizard.backend.project_generation import _measurement_param_defaults
+def test_the_ported_procedures_keep_the_params_the_measurements_had(tmp_path):
+    """iv_curve and pcr_curve were hand-written; their project YAML and presets
+    still validate because the procedures kept the same params."""
+    from lab_wizard.lib.procedures.storage import load_procedure
 
-    assert set(_measurement_param_defaults("iv_curve")) == {"bias", "readout", "safety"}
-    assert set(_measurement_param_defaults("pcr_curve")) == {"bias", "readout"}
+    iv = load_procedure(tmp_path, "iv_curve").param_defaults()
+    assert set(iv) == {"bias", "readout", "safety"}
+    assert iv["readout"] == {"bias_resistance_ohm": 100_000.0}
+    assert set(load_procedure(tmp_path, "pcr_curve").param_defaults()) == {"bias", "readout"}
 
 
 def test_a_new_measurement_gets_its_params_without_touching_the_generator(tmp_path):
