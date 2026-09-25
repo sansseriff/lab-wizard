@@ -2,7 +2,7 @@
 
 The proof for procedure plan Phases 1-3: a PCR sweep written as a procedure
 definition — no Python — generates a project that runs against the simulated
-rack and measures the detector model's curve, exactly as the hand-written
+bench and measures the detector model's curve, exactly as the hand-written
 ``pcr_curve`` does. And none of it required a line of generator code specific
 to this procedure.
 """
@@ -18,23 +18,16 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-import pytest
 from ruamel.yaml import YAML
 
 from lab_procedure import Point, ProcedureRunner, Status
 
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
-from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
-from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
+from lab_sim import SnspdModel, SnspdParams
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.storage import list_presets, load_procedure, save_preset, save_procedure
 from lab_wizard.lib.utilities.config_io import (
     assign_missing_leaf_attribute_names,
-    instrument_hash,
     save_instruments_to_config,
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
@@ -43,21 +36,9 @@ from lab_wizard.wizard.backend.procedure_generation import (
     generate_procedure_project,
     refresh_procedure_source,
 )
-from lab_wizard.wizard.backend.project_generation import (
-    GenerateProjectRequest,
-    SelectedNodeRef,
-    SelectedResource,
-)
+from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest, SelectedResource
 
-PORT = "sim://composed-rack"
-COUNTER_ADDRESS = "sim://composed-counter"
-DETECTOR = "snspd-composed"
-GPIB_KEY = instrument_hash("fakegpib", PORT)
-MAINFRAME_KEY = instrument_hash("fake900", "5")
-SOURCE_KEY = instrument_hash("fake928", "1")
-COUNTER_KEY = instrument_hash("fake_counter", f"{COUNTER_ADDRESS}:5025")
-
-DEVICE = SnspdModelParams()
+DEVICE = SnspdParams()
 SWEEP_V = [0.0, 0.012, 0.02, 0.024, 0.028]
 GATE_S = 0.05
 THRESHOLD_MV = -50.0
@@ -104,60 +85,21 @@ PCR_DEFINITION: dict[str, Any] = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _cold_lab() -> None:
-    reset_detectors()
-
-
-def _write_instruments(config_dir: Path) -> None:
-    instruments = {
-        GPIB_KEY: FakeGpibParams(
-            port=PORT,
-            children={
-                MAINFRAME_KEY: Fake900Params(
-                    gpib_address="5",
-                    device=DEVICE,
-                    detector_name=DETECTOR,
-                    children={SOURCE_KEY: Fake928Params(slot="1")},
-                )
-            },
-        ),
-        COUNTER_KEY: FakeCounterParams(
-            ip_address=COUNTER_ADDRESS,
-            detector_name=DETECTOR,
-            device=DEVICE,
-            channels={0: Keysight53220AChannelParams(threshold_mV=400.0)},  # wrong on purpose
-        ),
-    }
+def _write_instruments(config_dir: Path, rig) -> None:
+    counter = rig.counter_params()
+    counter.channels = {0: Keysight53220AChannelParams(threshold_mV=400.0)}  # wrong on purpose
+    instruments = {**rig.instruments(("source",)), rig.counter: counter}
     assign_missing_leaf_attribute_names(instruments)
     save_instruments_to_config(instruments, config_dir)
 
 
-def _selections() -> list[SelectedResource]:
-    return [
-        SelectedResource(
-            variable_name="voltage_source",
-            type="fake928",
-            key=SOURCE_KEY,
-            path=[
-                SelectedNodeRef(type="fake928", key=SOURCE_KEY),
-                SelectedNodeRef(type="fake900", key=MAINFRAME_KEY),
-                SelectedNodeRef(type="fakegpib", key=GPIB_KEY),
-            ],
-        ),
-        SelectedResource(
-            variable_name="counter",
-            type="fake_counter",
-            key=COUNTER_KEY,
-            channel_index=0,
-            path=[SelectedNodeRef(type="fake_counter", key=COUNTER_KEY)],
-        ),
-    ]
+def _selections(rig) -> list[SelectedResource]:
+    return [rig.select("voltage_source", "source"), rig.select("counter", "counter")]
 
 
-def _generate(tmp_path: Path, preset: str | None = "bench_sweep") -> dict[str, Any]:
+def _generate(tmp_path: Path, rig, preset: str | None = "bench_sweep") -> dict[str, Any]:
     config_dir, projects_dir = tmp_path / "config", tmp_path / "projects"
-    _write_instruments(config_dir)
+    _write_instruments(config_dir, rig)
     definition = ProcedureDefinition.model_validate(PCR_DEFINITION)
     save_procedure(config_dir, definition)
     save_preset(
@@ -175,7 +117,7 @@ def _generate(tmp_path: Path, preset: str | None = "bench_sweep") -> dict[str, A
         projects_dir=projects_dir,
         req=GenerateProjectRequest(
             measurement_name="composed_pcr",
-            selected_resources=_selections(),
+            selected_resources=_selections(rig),
             project_prefix="composed",
             params_preset=preset,
         ),
@@ -204,8 +146,8 @@ def _expected_counts(bias_v: float) -> float:
     return model.count_rate(THRESHOLD_MV) * GATE_S
 
 
-def test_the_generated_project_carries_the_preset_and_the_procedure(tmp_path: Path):
-    out = _generate(tmp_path)
+def test_the_generated_project_carries_the_preset_and_the_procedure(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
     assert payload["project"]["measurement_type"] == "composed_pcr"
     assert payload["measurement"]["params"]["bias"]["sweep"] == {"mode": "explicit", "values": SWEEP_V}
@@ -221,8 +163,8 @@ def test_the_generated_project_carries_the_preset_and_the_procedure(tmp_path: Pa
     assert set(payload["resources"]["instrument_sources"].values()) == {"local"}
 
 
-def test_the_composed_procedure_measures_the_detectors_curve(tmp_path: Path):
-    out = _generate(tmp_path)
+def test_the_composed_procedure_measures_the_detectors_curve(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
     setup, measurement = _load_setup(out)
     project = load_project_config(Path(out["yaml_file"]))
     resources = setup.create_instrument_resources(
@@ -244,8 +186,8 @@ def test_the_composed_procedure_measures_the_detectors_curve(tmp_path: Path):
     assert resources.voltage_source is not None
 
 
-def test_the_generated_setup_runs_as_a_script(tmp_path: Path):
-    out = _generate(tmp_path)
+def test_the_generated_setup_runs_as_a_script(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
     setup_path = Path(out["setup_file"])
     result = subprocess.run(
         [sys.executable, str(setup_path)], capture_output=True, text=True, timeout=300, cwd=str(setup_path.parent)
@@ -254,23 +196,23 @@ def test_the_generated_setup_runs_as_a_script(tmp_path: Path):
     assert "Traceback" not in result.stderr
 
 
-def test_without_a_preset_the_definitions_defaults_are_used(tmp_path: Path):
-    out = _generate(tmp_path, preset=None)
+def test_without_a_preset_the_definitions_defaults_are_used(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig, preset=None)
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
     assert payload["measurement"]["params"]["readout"] == {"gate_time_s": 1.0, "threshold_mV": -50.0}
 
 
-def test_the_generated_params_model_matches_the_definitions(tmp_path: Path):
+def test_the_generated_params_model_matches_the_definitions(tmp_path: Path, rig):
     """The setup file declares the params as source; storage validates with a model
     built at run time. They must agree, or a preset could pass one and fail the other."""
-    out = _generate(tmp_path)
+    out = _generate(tmp_path, rig)
     setup, _measurement = _load_setup(out)
     definition = ProcedureDefinition.model_validate(PCR_DEFINITION)
     assert setup.ComposedPcrParams().model_dump(mode="json") == definition.param_defaults()
 
 
-def test_refreshing_replaces_the_tree_and_keeps_edits_outside_it(tmp_path: Path):
-    out = _generate(tmp_path)
+def test_refreshing_replaces_the_tree_and_keeps_edits_outside_it(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
     project_dir = Path(out["project_dir"])
     module_path = Path(out["measurement_file"])
     module_path.write_text(
@@ -301,9 +243,9 @@ def test_refreshing_replaces_the_tree_and_keeps_edits_outside_it(tmp_path: Path)
     assert ProcedureDefinition.model_validate(measurement.DEFINITION) == ProcedureDefinition.model_validate(changed)
 
 
-def test_the_built_in_pcr_curve_takes_a_preset(tmp_path: Path):
+def test_the_built_in_pcr_curve_takes_a_preset(tmp_path: Path, rig):
     config_dir = tmp_path / "config"
-    _write_instruments(config_dir)
+    _write_instruments(config_dir, rig)
     model = load_procedure(config_dir, "pcr_curve").params_model()
     save_preset(config_dir, "pcr_curve", "short", {"readout": {"gate_time_s": 0.25}}, model)
     assert list_presets(config_dir, "pcr_curve") == ["short"]
@@ -312,7 +254,7 @@ def test_the_built_in_pcr_curve_takes_a_preset(tmp_path: Path):
         config_dir=config_dir,
         projects_dir=tmp_path / "projects",
         req=GenerateProjectRequest(
-            measurement_name="pcr_curve", kind="procedure", selected_resources=_selections(), params_preset="short"
+            measurement_name="pcr_curve", kind="procedure", selected_resources=_selections(rig), params_preset="short"
         ),
     )
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))

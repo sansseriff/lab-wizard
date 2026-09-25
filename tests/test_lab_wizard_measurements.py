@@ -32,7 +32,7 @@ class StubCounter(Counter):
 
     A stub, not a simulation: it exists to check what the procedure does with a
     count. The simulated counter that produces counts from detector physics is
-    ``fake_rack.fake_counter.FakeCounter``.
+    the ``keysight53220A`` driver against ``lab_sim``'s simulated bench.
     """
 
     def __init__(self, counts: int) -> None:

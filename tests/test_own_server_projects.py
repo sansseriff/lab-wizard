@@ -24,31 +24,12 @@ from fastapi.testclient import TestClient
 from ruamel.yaml import YAML
 
 from lab_wizard.lib.client.session import Session
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuatorParams
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
-from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
 from lab_wizard.lib.procedures.storage import load_procedure, save_preset
 from lab_wizard.lib.savers.file_saver import FileSaverParams
 from lab_wizard.lib.utilities.flat_resource_io import save_resource
-from lab_wizard.lib.utilities.config_io import (
-    assign_missing_leaf_attribute_names,
-    instrument_hash,
-    save_instruments_to_config,
-)
 from lab_wizard.wizard.backend.main import app
 from lab_wizard.wizard.backend.server_control import set_server_bind, start_server, stop_server
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
-
-RACK = instrument_hash("fakegpib", "sim://own-rack")
-MAINFRAME = instrument_hash("fake900", "5")
-SOURCE = instrument_hash("fake928", "1")
-METER = instrument_hash("fake970", "2")
-COUNTER = instrument_hash("fake_counter", "sim://own-counter:5025")
-ATTENUATOR = instrument_hash("fake_attenuator", "sim://own-attenuator")
-
 
 def _free_port() -> int:
     s = socket.socket()
@@ -59,26 +40,11 @@ def _free_port() -> int:
 
 
 @pytest.fixture
-def served(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[Any, TestClient]]:
+def served(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rig) -> Iterator[tuple[Any, TestClient]]:
     monkeypatch.setenv("LAB_WIZARD_SERVER_REGISTRY", str(tmp_path / "registry"))
     ws, _ = initialize_workspace(tmp_path / "workspace")
     monkeypatch.setenv(WORKSPACE_ENV, str(ws.root))
-    instruments: dict[str, Any] = {
-        RACK: FakeGpibParams(
-            port="sim://own-rack",
-            children={
-                MAINFRAME: Fake900Params(
-                    gpib_address="5",
-                    detector_name="own",
-                    children={SOURCE: Fake928Params(slot="1"), METER: Fake970Params(slot="2")},
-                )
-            },
-        ),
-        COUNTER: FakeCounterParams(ip_address="sim://own-counter", detector_name="own"),
-        ATTENUATOR: FakeAttenuatorParams(port="sim://own-attenuator", detector_name="own"),
-    }
-    assign_missing_leaf_attribute_names(instruments)
-    save_instruments_to_config(instruments, ws.config_dir)
+    rig.write(ws.config_dir)
     definition = load_procedure(ws.config_dir, "mcr_curve")
     save_preset(
         ws.config_dir,
@@ -184,7 +150,7 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
     # workspace's project carries no copy of it.
     configured = json.loads(run["instruments"])
     assert set(configured) == {"voltage_source", "voltage_sense", "counter", "attenuator"}
-    assert configured["attenuator"]["type"] == "fake_attenuator"
+    assert configured["attenuator"]["type"] == "yoko_attenuator"
 
     # Every step's execution, closed, and the facts the sidebar will filter by.
     steps = db.execute("select path, kind, status from steps").fetchall()
@@ -197,7 +163,7 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
         ("device", "A7"),
         ("operator", "andrew"),
         ("run.cryostat", "BlueFors1"),
-        ("instrument.attenuator.type", "fake_attenuator"),
+        ("instrument.attenuator.type", "yoko_attenuator"),
         ("param.readout.gate_time_s", "0.02"),
         ("column", "device_voltage"),
     } <= facets

@@ -15,27 +15,15 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuatorParams
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
-from lab_wizard.lib.utilities.config_io import (
-    assign_missing_leaf_attribute_names,
-    instrument_hash,
-    save_instruments_to_config,
-)
 from lab_wizard.wizard.backend.main import app
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 
 
 @pytest.fixture
-def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rig):
     ws, _ = initialize_workspace(tmp_path / "workspace")
     monkeypatch.setenv(WORKSPACE_ENV, str(ws.root))
-    instruments: dict[str, Any] = {
-        instrument_hash("fake_counter", "sim://p-counter:5025"): FakeCounterParams(ip_address="sim://p-counter"),
-        instrument_hash("fake_attenuator", "sim://p-att"): FakeAttenuatorParams(port="sim://p-att"),
-    }
-    assign_missing_leaf_attribute_names(instruments)
-    save_instruments_to_config(instruments, ws.config_dir)
+    rig.write(ws.config_dir, ("counter", "attenuator"))
     # See test_measurement_creation_api: no lifespan, and no cached workspace.
     monkeypatch.setattr(app.state, "env", None, raising=False)
     yield TestClient(app)
@@ -84,7 +72,7 @@ def test_the_catalog_describes_steps_behaviors_and_who_can_fill_them(client: Tes
 
     assert catalog["behaviors"]["Counter"]["bindable"] is True
     assert catalog["behaviors"]["ChannelProvider"]["bindable"] is False
-    # The fake counter has two inputs; one attenuator.
+    # The counter has two inputs; one attenuator.
     assert len(catalog["fillers"]["Counter"]) == 2
     assert len(catalog["fillers"]["Attenuator"]) == 1
     assert catalog["fillers"]["VSource"] == []

@@ -1,13 +1,14 @@
-"""A Keysight 53220A that exists only as SCPI strings over a fake VISA handle.
+"""A Keysight 53220A counter, answering SCPI on a TCP port.
 
-Same principle as :mod:`lab_wizard.lib.instruments.fake_rack.virtual_rack`: the
-substitution happens at the lowest possible layer, so everything above it is
-the production code path::
+The lab's own driver (``lab_wizard``'s ``Keysight53220A``) connects to this
+exactly as it connects to the real counter, a raw socket on port 5025, so the
+emulation sits below the whole driver::
 
     Keysight53220AChannel     real driver, real Counter behaviour
       Keysight53220A          real CONFigure/trigger/gate sequencing
-      FakeVisaDep             <- the only fake part
-      VirtualKeysightCounter  SCPI parsing, per-input state
+      pyvisa TCPIP SOCKET     real VISA session
+      ----------------------  TCP, 127.0.0.1
+      Keysight53220A (here)   SCPI parsing, per-input state
       SnspdModel              the physics
 
 Commands are *parsed*, not pattern-matched loosely, and an unrecognised one is
@@ -38,10 +39,9 @@ import logging
 import re
 from typing import Optional
 
-from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel
-from lab_wizard.lib.instruments.general.visa import VisaDep
+from lab_sim.snspd import SnspdModel
 
-logger = logging.getLogger("lab_wizard.lib.instruments.fake_rack.virtual_counter")
+logger = logging.getLogger("lab_sim.keysight53220a")
 
 # ``CONF:TOT:TIM <gate>,(@2)`` / ``CONF:TOT:CONT (@1)`` / ``CONF:FREQ (@1)``
 _CHANNEL_RE = re.compile(r"\(@(\d)\)")
@@ -52,7 +52,7 @@ _INPUT_RE = re.compile(r"^INP(?P<channel>[12])?:(?P<tail>[A-Z:]+)\s*(?P<argument
 NOT_A_NUMBER = "+9.91000000000000E+037"
 
 
-class VirtualCounterInput:
+class CounterInput:
     """Per-input state: everything the INPut subsystem can set on one channel."""
 
     def __init__(self) -> None:
@@ -69,7 +69,7 @@ class VirtualCounterInput:
         self.protection_tripped = False
 
 
-class VirtualKeysightCounter:
+class Keysight53220A:
     """Stands in for a 53220A wired to a simulated detector.
 
     Both inputs read the same detector, which is what a real two-channel
@@ -77,7 +77,7 @@ class VirtualKeysightCounter:
     channel is whichever one ``CONFigure`` selected.
     """
 
-    idn = "Lab_Wizard_Simulation,FAKE53220A,s/n053220,ver1.0"
+    idn = "Agilent Technologies,53220A,SIMULATED,lab_sim"
 
     def __init__(self, model: SnspdModel):
         self.model = model
@@ -89,7 +89,7 @@ class VirtualKeysightCounter:
 
     def _reset_state(self) -> None:
         """Factory defaults — what ``*RST`` and ``SYSTem:PRESet`` return to."""
-        self.inputs = {1: VirtualCounterInput(), 2: VirtualCounterInput()}
+        self.inputs = {1: CounterInput(), 2: CounterInput()}
 
         # Measurement configuration, in the counter's own terms.
         self.function = "FREQ"
@@ -335,7 +335,7 @@ class VirtualKeysightCounter:
         threshold_mV = self._effective_threshold_v(channel) * 1000.0
         return self.model.count_events(gate_time, threshold_mV)
 
-    def _effective_threshold_v(self, channel: VirtualCounterInput) -> float:
+    def _effective_threshold_v(self, channel: CounterInput) -> float:
         """The level actually in force, auto-level included.
 
         Auto-level puts the threshold at a percentage of the pulse height, so a
@@ -357,59 +357,13 @@ class VirtualKeysightCounter:
 
     def _unrecognised(self, line: str) -> None:
         self.unrecognised.append(line)
-        logger.warning("FAKE53220A: unrecognised command %r", line)
+        logger.warning("53220A (simulated): unrecognised command %r", line)
         return None
-
-
-class FakeVisaDep(VisaDep):
-    """A :class:`VisaDep` whose instrument is a :class:`VirtualKeysightCounter`.
-
-    This is the substitution point. Writes are parsed by the virtual counter and
-    any reply is queued for the next read, so ``query`` keeps its real meaning
-    of "write, then read one message back". An empty queue reads as ``""`` —
-    the same empty parse a real read timeout produces, rather than a hang.
-    """
-
-    def __init__(self, counter: VirtualKeysightCounter):
-        self.counter = counter
-        self._pending: list[str] = []
-        self._open = True
-        self.timeouts: list[float] = []
-
-    @property
-    def is_open(self) -> bool:
-        return self._open
-
-    def write(self, cmd: str) -> None:
-        if not self._open:
-            raise RuntimeError("write to a closed fake VISA session")
-        reply = self.counter.handle(cmd)
-        if reply is not None:
-            self._pending.append(reply)
-
-    def read(self) -> str:
-        return self._pending.pop(0) if self._pending else ""
-
-    def read_bytes(self, n: int) -> bytes:
-        return self.read().encode()[:n]
-
-    def query(self, cmd: str) -> str:
-        self.write(cmd)
-        return self.read()
-
-    def clear(self) -> None:
-        self._pending.clear()
-
-    def set_timeout(self, s: float) -> None:
-        self.timeouts.append(s)
-
-    def close(self) -> None:
-        self._open = False
 
 
 def _number(text: str, default: float) -> float:
     try:
         return float(text)
     except (TypeError, ValueError):
-        logger.warning("FAKE53220A: unparseable number %r", text)
+        logger.warning("53220A (simulated): unparseable number %r", text)
         return default

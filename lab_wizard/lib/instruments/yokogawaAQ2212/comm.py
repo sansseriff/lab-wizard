@@ -10,7 +10,9 @@ class YokoAQ2212Dep(Dependency):
     def __init__(self, ip_address: str, ip_port: int, *, offline: bool = False):
         self.offline = offline
         resource = f"TCPIP0::{ip_address}::{ip_port}::SOCKET"
-        self._visa = LocalVisaDep(resource)  # lazy — connects on first use
+        # Lazy — connects on first use. A raw socket carries no message
+        # boundaries of its own; the AQ2212 ends each message with a newline.
+        self._visa = LocalVisaDep(resource, read_termination="\n", write_termination="\n")
 
     def write(self, cmd: str) -> None:
         if self.offline:

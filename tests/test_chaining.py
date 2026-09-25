@@ -37,7 +37,7 @@ def patch_serial(monkeypatch: pytest.MonkeyPatch):
     serial_mod.serial = fake_module
 
 
-def test_requested_chain_expression():
+def test_requested_chain_expression(rig):
     # Build params first with children pre-configured
     sim928_key = instrument_hash("sim928", "1")
     sim970_key = instrument_hash("sim970", "5")
@@ -51,7 +51,7 @@ def test_requested_chain_expression():
         },
     )
     controller_params = PrologixGPIBParams(
-        port="FAKE",
+        port=rig.port,
         children={sim900_key: sim900_params},
     )
 

@@ -6,7 +6,6 @@ the index under live hardware.
 """
 
 from pathlib import Path
-from typing import Any
 
 import pytest
 from pydantic import BaseModel, Field
@@ -357,7 +356,7 @@ def test_a_local_custom_resource_names_its_instrument_too(tmp_path):
     assert ".from_config(" not in code
 
 
-def test_a_generated_custom_resource_runs_against_the_simulated_rack(tmp_path):
+def test_a_generated_custom_resource_runs_against_the_simulated_rack(tmp_path, rig):
     """The file is meant to be run, and now resolves through the workspace.
 
     A custom resource used to read its own copy of the params; it now names its
@@ -367,46 +366,19 @@ def test_a_generated_custom_resource_runs_against_the_simulated_rack(tmp_path):
     import subprocess
     import sys
 
-    from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-    from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
-    from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-    from lab_wizard.wizard.backend._generation_common import SelectedNodeRef
-
     config_dir = tmp_path / "config"
     projects_dir = tmp_path / "projects"
     projects_dir.mkdir()
-    rack_key = instrument_hash("fakegpib", "sim://custom-rack")
-    mainframe_key = instrument_hash("fake900", "5")
-    source_key = instrument_hash("fake928", "1")
-    instruments: dict[str, Any] = {
-        rack_key: FakeGpibParams(
-            port="sim://custom-rack",
-            children={
-                mainframe_key: Fake900Params(
-                    gpib_address="5", children={source_key: Fake928Params(slot="1")}
-                )
-            },
-        )
-    }
-    assign_missing_leaf_attribute_names(instruments)
-    save_instruments_to_config(instruments, config_dir)
-    attribute = load_instruments(config_dir)[rack_key].children[mainframe_key].children[source_key].attribute_name
+    rig.write(config_dir, ("source",))
+    attribute = load_instruments(config_dir)[rig.gpib].children[rig.mainframe].children[rig.source].attribute_name
 
+    source = rig.select("bias", "source")
     out = generate_custom_resource_project(
         config_dir=config_dir,
         projects_dir=projects_dir,
         req=GenerateCustomResourceRequest(
             selections=[
-                CustomResourceSelection(
-                    variable_name="bias",
-                    type="fake928",
-                    key=source_key,
-                    path=[
-                        SelectedNodeRef(type="fake928", key=source_key),
-                        SelectedNodeRef(type="fake900", key=mainframe_key),
-                        SelectedNodeRef(type="fakegpib", key=rack_key),
-                    ],
-                )
+                CustomResourceSelection(variable_name="bias", type=source.type, key=source.key, path=source.path)
             ],
         ),
     )
@@ -421,4 +393,4 @@ def test_a_generated_custom_resource_runs_against_the_simulated_rack(tmp_path):
         cwd=str(setup_path.parent),
     )
     assert result.returncode == 0, result.stderr
-    assert "Fake928" in result.stdout, result.stdout
+    assert "Sim928" in result.stdout, result.stdout

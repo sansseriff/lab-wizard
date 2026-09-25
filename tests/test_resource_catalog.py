@@ -143,27 +143,27 @@ def test_runtime_catalog_uses_python_hierarchy_and_inherited_channel_class(
 
     metadata = resource_catalog.get_metadata("instrument")
 
-    assert metadata["fake970"]["parent_chain"] == ["fake900", "fakegpib"]
-    assert metadata["fake970"]["channel_behavior_abc"] == "VSense"
+    assert metadata["sim970"]["parent_chain"] == ["sim900", "prologix_gpib"]
+    assert metadata["sim970"]["channel_behavior_abc"] == "VSense"
 
 
 def test_parent_params_discriminate_raw_children_through_catalog():
-    from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-    from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
+    from lab_wizard.lib.instruments.sim900.modules.sim970 import Sim970Params
+    from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
 
-    rack = Fake900Params.model_validate({
-        "type": "fake900",
-        "children": {"meter": {"type": "fake970", "slot": 2}},
+    rack = Sim900Params.model_validate({
+        "type": "sim900",
+        "children": {"meter": {"type": "sim970", "slot": 2}},
     })
 
-    assert isinstance(rack.children["meter"], Fake970Params)
+    assert isinstance(rack.children["meter"], Sim970Params)
 
 
 def test_parent_params_reject_registered_child_from_wrong_nominal_family():
-    from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
+    from lab_wizard.lib.instruments.sim900.sim900 import Sim900Params
 
     with pytest.raises(ValueError):
-        Fake900Params.model_validate({
-            "type": "fake900",
-            "children": {"real_meter": {"type": "sim970", "slot": 2}},
+        Sim900Params.model_validate({
+            "type": "sim900",
+            "children": {"attenuator": {"type": "yoko_attenuator", "slot": 2}},
         })

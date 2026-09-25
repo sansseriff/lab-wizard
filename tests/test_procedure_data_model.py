@@ -15,7 +15,7 @@ import pytest
 
 from lab_procedure import Point, ProcedureRunner, Status, Sweep
 from lab_wizard.lib.data import ExpressionError, compile_expression, derive
-from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuatorParams
+from lab_wizard.lib.instruments.general.attenuator import StandInAttenuator
 from lab_wizard.lib.procedures.catalog import step_catalog
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.task_adapters.instrument_steps import SetAttenuation
@@ -81,8 +81,8 @@ def test_the_catalog_offers_record_as_a_column_a_setter_writes():
 # --------------------------- reading back what a setter reached ---------------------------
 
 
-def test_a_setter_records_what_the_instrument_reached_beside_what_was_asked():
-    attenuator = FakeAttenuatorParams(port="sim://record", detector_name="record").create_inst()
+def test_a_setter_records_what_the_instrument_reached_beside_what_was_asked(rig):
+    attenuator = rig.yoko_params().create_inst().make_child(rig.attenuator)
     rows: list[Point] = []
     runner = ProcedureRunner()
     runner.context.data_bus.subscribe(Point, rows.append)
@@ -97,7 +97,7 @@ def test_a_setter_records_what_the_instrument_reached_beside_what_was_asked():
 
 
 def test_a_setter_without_record_records_nothing():
-    attenuator = FakeAttenuatorParams(port="sim://record2", detector_name="record2").create_inst()
+    attenuator = StandInAttenuator()
     rows: list[Point] = []
     runner = ProcedureRunner()
     runner.context.data_bus.subscribe(Point, rows.append)

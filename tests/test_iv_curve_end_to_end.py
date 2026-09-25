@@ -1,10 +1,10 @@
-"""A generated IV-curve project, run against the simulated SNSPD rack.
+"""A generated IV-curve project, run against the simulated SNSPD bench.
 
 This is the full loop the wizard exists to produce, with no hardware and no
 mocks in it: a config tree is written, the wizard generates a project folder
 from it, the generated ``iv_curve_setup.py`` is executed as written, and the
-measurement runs through the real drivers onto the fake rack. What comes back
-is checked against the detector model's own physics.
+measurement runs through the real drivers onto lab_sim's simulated rack. What
+comes back is checked against the detector model's own physics.
 
 Two ways of running the generated file are covered, because they fail
 differently: importing it and driving the procedure directly (so the data
@@ -29,39 +29,16 @@ import polars as pl
 
 from lab_procedure import Status
 
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
-from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
+from lab_sim import SnspdModel, SnspdParams
 from lab_wizard.lib.data import find
-from lab_wizard.lib.utilities.config_io import (
-    load_instruments,
-    assign_missing_leaf_attribute_names,
-    instrument_hash,
-    save_instruments_to_config,
-)
+from lab_wizard.lib.utilities.config_io import load_instruments
 from lab_wizard.lib.utilities.model_tree import load_project_config
 from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
-from lab_wizard.wizard.backend.project_generation import (
-    GenerateProjectRequest,
-    SelectedNodeRef,
-    SelectedResource,
-)
-
-PORT = "sim://e2e-rack"
-GPIB_ADDRESS = "5"
-SOURCE_SLOT = "1"
-METER_SLOT = "2"
-
-GPIB_KEY = instrument_hash("fakegpib", PORT)
-MAINFRAME_KEY = instrument_hash("fake900", GPIB_ADDRESS)
-SOURCE_KEY = instrument_hash("fake928", SOURCE_SLOT)
-METER_KEY = instrument_hash("fake970", METER_SLOT)
+from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
 
 # The detector under test, and the sweep that walks across its transition.
-DEVICE = SnspdModelParams(
+DEVICE = SnspdParams(
     critical_current_a=3.0e-7,
     retrapping_current_a=1.5e-7,
     normal_resistance_ohm=5.0e4,
@@ -70,65 +47,17 @@ SWEEP_V = [round(0.005 * i, 3) for i in range(13)]  # 0.000 .. 0.060 V
 SWITCHING_BIAS_V = 0.03
 
 
-def _write_config(config_dir: Path) -> None:
-    """The config tree a user would build in Manage Instruments."""
-    instruments = {
-        GPIB_KEY: FakeGpibParams(
-            port=PORT,
-            children={
-                MAINFRAME_KEY: Fake900Params(
-                    gpib_address=GPIB_ADDRESS,
-                    device=DEVICE,
-                    children={
-                        SOURCE_KEY: Fake928Params(slot=SOURCE_SLOT),
-                        METER_KEY: Fake970Params(slot=METER_SLOT, device_channel=0),
-                    },
-                )
-            },
-        )
-    }
-    assign_missing_leaf_attribute_names(instruments)
-    save_instruments_to_config(instruments, config_dir)
-
-
-def _generate_project(tmp_path: Path) -> dict[str, Any]:
+def _generate_project(tmp_path: Path, rig) -> dict[str, Any]:
     config_dir = tmp_path / "config"
-    projects_dir = tmp_path / "projects"
-    _write_config(config_dir)
-
-    path_to_source = [
-        SelectedNodeRef(type="fake928", key=SOURCE_KEY),
-        SelectedNodeRef(type="fake900", key=MAINFRAME_KEY),
-        SelectedNodeRef(type="fakegpib", key=GPIB_KEY),
-    ]
-    path_to_meter = [
-        SelectedNodeRef(type="fake970", key=METER_KEY),
-        SelectedNodeRef(type="fake900", key=MAINFRAME_KEY),
-        SelectedNodeRef(type="fakegpib", key=GPIB_KEY),
-    ]
-
+    rig.write(config_dir, ("source", "meter"))
     out = generate_procedure_project(
         config_dir=config_dir,
-        projects_dir=projects_dir,
+        projects_dir=tmp_path / "projects",
         req=GenerateProjectRequest(
             measurement_name="iv_curve",
             kind="procedure",
-            selected_resources=[
-                SelectedResource(
-                    variable_name="voltage_source",
-                    type="fake928",
-                    key=SOURCE_KEY,
-                    path=path_to_source,
-                ),
-                SelectedResource(
-                    variable_name="voltage_sense",
-                    type="fake970",
-                    key=METER_KEY,
-                    channel_index=0,
-                    path=path_to_meter,
-                ),
-            ],
-            project_prefix="iv_fake",
+            selected_resources=[rig.select("voltage_source", "source"), rig.select("voltage_sense", "meter")],
+            project_prefix="iv_sim",
         ),
     )
     _set_measurement_params(Path(out["yaml_file"]))
@@ -138,8 +67,8 @@ def _generate_project(tmp_path: Path) -> dict[str, Any]:
 def _set_measurement_params(yaml_path: Path) -> None:
     """Edit the generated project YAML the way a user tunes a run.
 
-    The model's hardcoded resistor matches the IV measurement default. This
-    edit only chooses a short, fast sweep for the test.
+    The bench's bias resistor matches the IV measurement default. This edit
+    only chooses a short, fast sweep for the test.
     """
     yaml = YAML(typ="rt")
     io: Any = yaml
@@ -198,8 +127,8 @@ def _expected_curve() -> list[tuple[float, float]]:
 # ---------------------------------------------------------------------------
 
 
-def test_generated_setup_wires_the_simulated_rack(tmp_path: Path) -> None:
-    out = _generate_project(tmp_path)
+def test_generated_setup_wires_the_simulated_rack(tmp_path: Path, rig) -> None:
+    out = _generate_project(tmp_path, rig)
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
     measurement_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
     ast.parse(setup_text)
@@ -209,9 +138,9 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path) -> None:
     assert "class IvCurveMeasurement" in measurement_text
 
     config = load_instruments(tmp_path / "config")
-    mainframe_params = config[GPIB_KEY].children[MAINFRAME_KEY]
-    source_name = mainframe_params.children[SOURCE_KEY].attribute_name
-    meter_name = mainframe_params.children[METER_KEY].channels[0].attribute_name
+    mainframe_params = config[rig.gpib].children[rig.mainframe]
+    source_name = mainframe_params.children[rig.source].attribute_name
+    meter_name = mainframe_params.children[rig.meter].channels[0].attribute_name
     assert source_name and meter_name
 
     # Instruments are referenced by name, never by a hash of their address.
@@ -223,15 +152,15 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path) -> None:
         dict[str, Any],
         YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8")),
     )
-    # No copy of the rack: its params, detector constants included, stay in the
-    # workspace config, and the project says which instruments it uses.
+    # No copy of the rack: its params stay in the workspace config, and the
+    # project says which instruments it uses.
     assert "instruments" not in payload["resources"]
     assert payload["resources"]["instrument_sources"] == {source_name: "local", meter_name: "local"}
     assert payload["measurement"]["params"]["readout"]["bias_resistance_ohm"] == 100_000.0
 
 
-def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path) -> None:
-    rows = _run_and_read_back(_generate_project(tmp_path))
+def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path, rig) -> None:
+    rows = _run_and_read_back(_generate_project(tmp_path, rig))
     assert rows.height == len(SWEEP_V)
 
     expected = _expected_curve()
@@ -251,9 +180,7 @@ def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path) -> No
     assert all(a < b for a, b in zip(resistive, resistive[1:])), "monotonic above"
 
 
-def test_measured_current_matches_the_detectors_true_bias_current(
-    tmp_path: Path,
-) -> None:
+def test_measured_current_matches_the_detectors_true_bias_current(tmp_path: Path, rig) -> None:
     """The point of the whole exercise: the numbers mean what they claim.
 
     The measurement never sees a current — it is inferred, when the run is
@@ -262,14 +189,14 @@ def test_measured_current_matches_the_detectors_true_bias_current(
     that the inference is right, and it is only possible because the detector
     is simulated.
     """
-    rows = _run_and_read_back(_generate_project(tmp_path))
+    rows = _run_and_read_back(_generate_project(tmp_path, rig))
     switching = rows.filter(pl.col("bias_voltage") >= SWITCHING_BIAS_V).row(0, named=True)
     assert switching["current"] == pytest.approx(DEVICE.critical_current_a / 1.5, rel=1e-6)
 
 
-def test_generated_setup_runs_as_a_script(tmp_path: Path) -> None:
+def test_generated_setup_runs_as_a_script(tmp_path: Path, rig) -> None:
     """The generated file is meant to be run, not only imported."""
-    out = _generate_project(tmp_path)
+    out = _generate_project(tmp_path, rig)
     setup_path = Path(out["setup_file"])
 
     result = subprocess.run(

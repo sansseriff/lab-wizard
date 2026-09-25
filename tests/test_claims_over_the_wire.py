@@ -25,8 +25,6 @@ from lab_procedure import Status
 from lab_wizard.lib.client.claims import RemoteClaim, RoutedClaims
 from lab_wizard.lib.client.proxies.counter import RemoteCounter
 from lab_wizard.lib.client.session import ClaimDeniedError, Session
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
-from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
 from lab_wizard.lib.server.registry import InstrumentRegistry
 from lab_wizard.lib.utilities.config_io import save_instruments_to_config
@@ -56,18 +54,15 @@ def _free_port() -> int:
 
 
 class LiveServer:
-    def __init__(self) -> None:
-        reset_detectors()
-        params = FakeCounterParams(
-            ip_address="sim://wire-claims-counter",
-            detector_name="wire-claims",
-            channels={
+    def __init__(self, rig) -> None:
+        self.rig = rig
+        params = rig.counter_params()
+        params.channels = {
                 # Named, so the server lists them as attributes — which is how
                 # the wizard's picker sees them.
                 0: Keysight53220AChannelParams(attribute_name="counter_a"),
                 1: Keysight53220AChannelParams(attribute_name="counter_b"),
-            },
-        )
+        }
         # Written to a config dir as well, so the server serves the same tree the
         # wizard's picker reads.
         self.config_dir = Path(tempfile.mkdtemp()) / "config"
@@ -99,7 +94,7 @@ class LiveServer:
         return s
 
     def bias_the_detector(self) -> None:
-        model = self.registry.resolve(COUNTER).virtual.model
+        model = self.rig.model
         model.set_output_enabled(True)
         model.set_bias_voltage(0.026)  # on the plateau, below switching
 
@@ -111,8 +106,8 @@ class LiveServer:
 
 
 @pytest.fixture
-def live() -> Iterator[LiveServer]:
-    server = LiveServer()
+def live(rig) -> Iterator[LiveServer]:
+    server = LiveServer(rig)
     try:
         yield server
     finally:

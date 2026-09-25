@@ -48,8 +48,7 @@ class ResourceConfig(BaseModel):
 
     # Instruments already built, by hash-key path from the root. Two attributes
     # under one rack must share the rack: building it twice would open its
-    # serial port twice, and on a simulated rack would split one detector into
-    # two that disagree.
+    # serial port twice, and the port admits one holder.
     _built: dict[tuple[str, ...], Any] = PrivateAttr(default_factory=dict)
 
     @model_validator(mode="before")

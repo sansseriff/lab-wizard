@@ -1,9 +1,9 @@
-"""A one-detector SNSPD circuit model — the physics the fake rack reports.
+"""A one-detector SNSPD circuit model — the physics the simulated bench reports.
 
-The fake rack (:mod:`lab_wizard.lib.instruments.fake_rack.virtual_rack`) speaks
-the real SIM900 wire protocol; this module is what gives it something true to
-say back. Nothing here knows about serial ports, GPIB, or params trees: it is a
-pure circuit so it can be reasoned about and tested on its own.
+The simulated instruments speak their real wire protocols; this module is what
+gives them something true to say back. Nothing here knows about serial ports,
+GPIB, or sockets: it is a pure circuit so it can be reasoned about and tested
+on its own.
 
 The circuit is the usual SNSPD bias arrangement::
 
@@ -35,9 +35,8 @@ retraps the instant it switches and the model oscillates between branches on
 successive reads, exactly as real relaxation oscillations do. The defaults are
 comfortably inside the latching regime.
 
-This throwaway model fixes that resistor at 100 kΩ, matching the IV
-measurement's existing default, so it does not add simulation-only settings to
-experiment YAML. The default detector therefore switches at 0.03 V applied.
+The resistor defaults to 100 kΩ, matching the IV procedure's default
+``bias_resistance_ohm``, so the default detector switches at 0.03 V applied.
 
 **Photon counting.** The same detector also reports what a counter wired to its
 output would see, which is what makes a simulated PCR curve possible. Detection
@@ -76,16 +75,18 @@ import random
 from pydantic import BaseModel, Field
 
 
-BIAS_RESISTANCE_OHM = 100_000.0
-
 # Above this mean, a Poisson draw is indistinguishable from a Gaussian one and
 # the direct method costs a multiply per event.
 _POISSON_GAUSSIAN_THRESHOLD = 30.0
 
 
-class SnspdModelParams(BaseModel):
+class SnspdParams(BaseModel):
     """Device and circuit constants for one simulated detector."""
 
+    bias_resistance_ohm: float = Field(
+        default=1.0e5,
+        description="(ohm) series resistor between the voltage source and the detector",
+    )
     critical_current_a: float = Field(
         default=3.0e-7,
         description="(A) bias current at which superconductivity breaks",
@@ -146,14 +147,15 @@ class SnspdModelParams(BaseModel):
 class SnspdModel:
     """Live state of one simulated detector: bias in, voltages out.
 
-    A single instance is shared by every virtual module wired to it — the
-    voltage source writes ``bias_voltage``/``output_enabled``, the voltmeter
-    reads :meth:`device_voltage`. That shared object *is* the wiring between
-    them, which is why the fake mainframe owns it rather than the modules.
+    A single instance is shared by every simulated instrument on the bench —
+    the voltage source writes ``bias_voltage``/``output_enabled``, the
+    voltmeter reads :meth:`device_voltage`, the counter counts its pulses and
+    the attenuator dims its light. That shared object *is* the wiring between
+    them.
     """
 
-    def __init__(self, params: SnspdModelParams | None = None):
-        self.params = params or SnspdModelParams()
+    def __init__(self, params: SnspdParams | None = None):
+        self.params = params or SnspdParams()
         self.bias_voltage = 0.0
         self.output_enabled = False
         # Fraction of the incident light that reaches the detector, set by
@@ -198,17 +200,17 @@ class SnspdModel:
         if not self._normal:
             # Superconducting: the detector is a short, so the bias resistor
             # alone sets the current.
-            if abs(applied / BIAS_RESISTANCE_OHM) >= p.critical_current_a:
+            if abs(applied / p.bias_resistance_ohm) >= p.critical_current_a:
                 self._normal = True
 
         if self._normal:
-            current = applied / (BIAS_RESISTANCE_OHM + p.normal_resistance_ohm)
+            current = applied / (p.bias_resistance_ohm + p.normal_resistance_ohm)
             if abs(current) < p.retrapping_current_a:
                 self._normal = False
             else:
                 return current, current * p.normal_resistance_ohm
 
-        return applied / BIAS_RESISTANCE_OHM, 0.0
+        return applied / p.bias_resistance_ohm, 0.0
 
     def device_voltage(self) -> float:
         """Voltage across the detector, as a voltmeter wired to it would read."""
@@ -216,8 +218,8 @@ class SnspdModel:
         return voltage + self._noise()
 
     def bias_current(self) -> float:
-        """Current through the detector. Not something the rack reports —
-        provided so tests can state the expected physics directly."""
+        """Current through the detector. No instrument reports it — provided
+        so tests can state the expected physics directly."""
         current, _ = self.solve()
         return current
 

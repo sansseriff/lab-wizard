@@ -2,8 +2,8 @@
 
 Procedure plan 6.4. The definition ships with lab_wizard
 (``lib/procedures/library/mcr_curve.yml``); nothing about it is hand-written
-Python. These tests generate a project from it against a simulated rack with a
-simulated attenuator in the light path, and check the measured curve against
+Python. These tests generate a project from it against the simulated bench,
+with its attenuator in the light path, and check the measured curve against
 the detector model: count rate falling as ``10 ** (-dB / 10)``, over a
 background taken with the shutter closed.
 """
@@ -25,15 +25,7 @@ import pytest
 
 from lab_procedure import Point, ProcedureRunner, Status
 
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuator, FakeAttenuatorParams
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
-from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
-from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
-from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
-from lab_wizard.lib.instruments.general.behavior import behavior_name_for
+from lab_sim import SnspdModel, SnspdParams
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.storage import (
     delete_procedure,
@@ -43,65 +35,19 @@ from lab_wizard.lib.procedures.storage import (
     save_preset,
     save_procedure,
 )
-from lab_wizard.lib.utilities.config_io import (
-    assign_missing_leaf_attribute_names,
-    instrument_hash,
-    save_instruments_to_config,
-)
 from lab_wizard.lib.utilities.model_tree import load_project_config
 from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
-from lab_wizard.wizard.backend.project_generation import (
-    GenerateProjectRequest,
-    SelectedNodeRef,
-    SelectedResource,
-)
+from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
 
-PORT, DETECTOR = "sim://mcr-rack", "snspd-mcr"
-COUNTER_ADDRESS, ATTENUATOR_ADDRESS = "sim://mcr-counter", "sim://mcr-attenuator"
-GPIB_KEY = instrument_hash("fakegpib", PORT)
-MAINFRAME_KEY = instrument_hash("fake900", "5")
-SOURCE_KEY = instrument_hash("fake928", "1")
-METER_KEY = instrument_hash("fake970", "2")
-COUNTER_KEY = instrument_hash("fake_counter", f"{COUNTER_ADDRESS}:5025")
-ATTENUATOR_KEY = instrument_hash("fake_attenuator", ATTENUATOR_ADDRESS)
-
-DEVICE = SnspdModelParams()
+DEVICE = SnspdParams()
 BIAS_V = 0.026  # on the plateau, below switching
 ATTENUATIONS = [20.0, 10.0, 5.0, 0.0]
 GATE_S = 0.05
 THRESHOLD_MV = -50.0
 
 
-@pytest.fixture(autouse=True)
-def _cold_lab() -> None:
-    reset_detectors()
-
-
-# --------------------------- the simulated attenuator ---------------------------
-
-
-def test_the_simulated_attenuator_is_an_attenuator_that_dims_the_detector():
-    attenuator = FakeAttenuatorParams(port="sim://unit", detector_name="unit-test").create_inst()
-    assert isinstance(attenuator, FakeAttenuator)
-    assert behavior_name_for(FakeAttenuator, is_class=True) == "Attenuator"
-
-    attenuator.set_attenuation(10.0)
-    assert attenuator.model.optical_transmission == pytest.approx(0.1)
-    attenuator.close_shutter()
-    assert attenuator.model.optical_transmission == 0.0
-    attenuator.open_shutter()
-    assert attenuator.model.optical_transmission == pytest.approx(0.1)
-
-
-def test_the_simulated_attenuator_clamps_and_quantizes_like_hardware():
-    attenuator = FakeAttenuatorParams(port="sim://unit", detector_name="unit-test", max_attenuation=40.0).create_inst()
-    attenuator.set_attenuation(12.34567)
-    assert attenuator.get_attenuation() == pytest.approx(12.346)
-    attenuator.set_attenuation(99.0)
-    assert attenuator.get_attenuation() == 40.0
-    assert attenuator.enter_safe_state() is True
-    assert attenuator.model.optical_transmission == 0.0
+# --------------------------- the detector ---------------------------
 
 
 def test_attenuation_leaves_dark_counts_alone():
@@ -140,51 +86,18 @@ def test_a_workspace_procedure_overrides_a_built_in_and_deleting_it_restores_it(
 # --------------------------- the measurement, end to end ---------------------------
 
 
-def _write_instruments(config_dir: Path) -> None:
-    instruments = {
-        GPIB_KEY: FakeGpibParams(
-            port=PORT,
-            children={
-                MAINFRAME_KEY: Fake900Params(
-                    gpib_address="5",
-                    device=DEVICE,
-                    detector_name=DETECTOR,
-                    children={SOURCE_KEY: Fake928Params(slot="1"), METER_KEY: Fake970Params(slot="2")},
-                )
-            },
-        ),
-        COUNTER_KEY: FakeCounterParams(ip_address=COUNTER_ADDRESS, detector_name=DETECTOR, device=DEVICE),
-        ATTENUATOR_KEY: FakeAttenuatorParams(port=ATTENUATOR_ADDRESS, detector_name=DETECTOR, device=DEVICE),
-    }
-    assign_missing_leaf_attribute_names(instruments)
-    save_instruments_to_config(instruments, config_dir)
-
-
-def _selections() -> list[SelectedResource]:
-    rack = [SelectedNodeRef(type="fake900", key=MAINFRAME_KEY), SelectedNodeRef(type="fakegpib", key=GPIB_KEY)]
+def _selections(rig) -> list:
     return [
-        SelectedResource(
-            variable_name="voltage_source", type="fake928", key=SOURCE_KEY,
-            path=[SelectedNodeRef(type="fake928", key=SOURCE_KEY), *rack],
-        ),
-        SelectedResource(
-            variable_name="voltage_sense", type="fake970", key=METER_KEY, channel_index=0,
-            path=[SelectedNodeRef(type="fake970", key=METER_KEY), *rack],
-        ),
-        SelectedResource(
-            variable_name="counter", type="fake_counter", key=COUNTER_KEY, channel_index=0,
-            path=[SelectedNodeRef(type="fake_counter", key=COUNTER_KEY)],
-        ),
-        SelectedResource(
-            variable_name="attenuator", type="fake_attenuator", key=ATTENUATOR_KEY,
-            path=[SelectedNodeRef(type="fake_attenuator", key=ATTENUATOR_KEY)],
-        ),
+        rig.select("voltage_source", "source"),
+        rig.select("voltage_sense", "meter"),
+        rig.select("counter", "counter"),
+        rig.select("attenuator", "attenuator"),
     ]
 
 
-def _generate(tmp_path: Path, style: str = "production") -> dict[str, Any]:
+def _generate(tmp_path: Path, rig, style: str = "production") -> dict[str, Any]:
     config_dir = tmp_path / "config"
-    _write_instruments(config_dir)
+    rig.write(config_dir)
     definition = load_procedure(config_dir, "mcr_curve")
     save_preset(
         config_dir,
@@ -202,7 +115,7 @@ def _generate(tmp_path: Path, style: str = "production") -> dict[str, Any]:
         projects_dir=tmp_path / "projects",
         req=GenerateProjectRequest(
             measurement_name="mcr_curve",
-            selected_resources=_selections(),
+            selected_resources=_selections(rig),
             params_preset="quick",
             generation_style=style,
         ),
@@ -231,8 +144,8 @@ def _expected_rate(transmission: float) -> float:
     return model.count_rate(THRESHOLD_MV)
 
 
-def test_the_measured_mcr_curve_follows_the_attenuation(tmp_path: Path):
-    out = _generate(tmp_path)
+def test_the_measured_mcr_curve_follows_the_attenuation(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
     setup, measurement = _load(out)
     resources = setup.create_instrument_resources(
         project := load_project_config(Path(out["yaml_file"])),
@@ -266,12 +179,12 @@ def test_the_measured_mcr_curve_follows_the_attenuation(tmp_path: Path):
     assert all(abs(row["device_voltage"]) < 1e-3 for row in voltages)
 
     # The run ended in the attenuator's safe state: shutter closed, fully attenuated.
-    assert resources.attenuator.shutter_open is False
+    assert resources.attenuator.is_shutter_open() is False
     assert resources.attenuator.get_attenuation() == resources.attenuator.get_max_attenuation()
 
 
-def test_the_generated_mcr_project_runs_as_a_script(tmp_path: Path):
-    out = _generate(tmp_path)
+def test_the_generated_mcr_project_runs_as_a_script(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
     setup_path = Path(out["setup_file"])
     result = subprocess.run(
         [sys.executable, str(setup_path)], capture_output=True, text=True, timeout=300, cwd=str(setup_path.parent)
@@ -306,16 +219,9 @@ def test_the_generated_mcr_project_runs_as_a_script(tmp_path: Path):
     assert signal["attenuation_db_reached"].to_list() == pytest.approx(ATTENUATIONS)
 
 
-def test_an_embedded_mcr_project_runs_outside_any_workspace(tmp_path: Path):
-    """The escape hatch's reason to exist: the project folder is all it needs.
-
-    Two things this caught. The generator guessed a channel class as
-    ``<Instrument>Channel``, which does not exist for a provider reusing another
-    driver's channels (``FakeCounter``). And the simulated rack only wired
-    modules declared as config children, which the embedded style — building
-    each level from its own params — never passes, so nothing answered.
-    """
-    out = _generate(tmp_path, style="pedagogical_embedded")
+def test_an_embedded_mcr_project_runs_outside_any_workspace(tmp_path: Path, rig):
+    """The escape hatch's reason to exist: the project folder is all it needs."""
+    out = _generate(tmp_path, rig, style="pedagogical_embedded")
     moved = tmp_path / "elsewhere" / Path(out["project_dir"]).name
     shutil.copytree(out["project_dir"], moved)
     setup_path = moved / Path(out["setup_file"]).name

@@ -11,8 +11,8 @@ Four layers, each checked where it can fail:
 * the wire protocol — that the real ``Keysight53220A`` driver, unmodified,
   produces SCPI the simulated counter understands, and that what a
   ``CONFigure`` discards is put back;
-* the wiring — that a ``fake900`` and a ``fake_counter`` naming the same
-  detector really do share one;
+* the wiring — that the rack and the counter on the simulated bench really do
+  watch one detector;
 * the whole loop — a wizard-generated PCR project run against the simulation,
   with the measured curve checked against the model's own physics.
 """
@@ -32,45 +32,23 @@ from ruamel.yaml import YAML
 
 from lab_procedure import Point, ProcedureRunner, RunStarted, Status
 
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-from lab_wizard.lib.instruments.fake_rack.fake_counter import (
-    FakeCounter,
-    FakeCounterParams,
-)
-from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpib, FakeGpibParams
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928, Fake928Params
-from lab_wizard.lib.instruments.fake_rack.snspd import SnspdModel, SnspdModelParams
-from lab_wizard.lib.instruments.fake_rack.wiring import reset_detectors
+from lab_sim import SnspdModel, SnspdParams
 from lab_wizard.lib.instruments.general.counter import Counter
+from lab_wizard.lib.instruments.keysight53220A import Keysight53220A, Keysight53220AChannelParams
+from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928
 from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     assign_missing_leaf_attribute_names,
-    instrument_hash,
     save_instruments_to_config,
 )
 from lab_wizard.lib.utilities.model_tree import load_project_config
 from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
-from lab_wizard.wizard.backend.project_generation import (
-    GenerateProjectRequest,
-    SelectedNodeRef,
-    SelectedResource,
-)
+from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
 
-PORT = "sim://pcr-rack"
-COUNTER_ADDRESS = "sim://pcr-counter"
-GPIB_ADDRESS = "5"
-SOURCE_SLOT = "1"
-DETECTOR = "snspd-pcr"
-
-GPIB_KEY = instrument_hash("fakegpib", PORT)
-MAINFRAME_KEY = instrument_hash("fake900", GPIB_ADDRESS)
-SOURCE_KEY = instrument_hash("fake928", SOURCE_SLOT)
-COUNTER_KEY = instrument_hash("fake_counter", f"{COUNTER_ADDRESS}:5025")
-
-# A detector whose turn-on sits well inside its switching current, so the sweep
-# crosses the whole error function before the device latches.
-DEVICE = SnspdModelParams(
+# The bench's standard detector: its turn-on sits well inside its switching
+# current, so the sweep crosses the whole error function before it latches.
+DEVICE = SnspdParams(
     critical_current_a=3.0e-7,
     retrapping_current_a=1.5e-7,
     incident_photon_rate_hz=1.0e6,
@@ -88,18 +66,12 @@ GATE_TIME_S = 0.1
 THRESHOLD_MV = -50.0
 
 
-@pytest.fixture(autouse=True)
-def _cold_lab() -> None:
-    """Every test gets an untouched detector, so counts are reproducible."""
-    reset_detectors()
-
-
 # ---------------------------------------------------------------------------
 # The detector's counting physics
 # ---------------------------------------------------------------------------
 
 
-def _biased_model(bias_v: float, params: SnspdModelParams | None = None) -> SnspdModel:
+def _biased_model(bias_v: float, params: SnspdParams | None = None) -> SnspdModel:
     model = SnspdModel(params or DEVICE)
     model.set_output_enabled(True)
     model.set_bias_voltage(bias_v)
@@ -180,37 +152,39 @@ def test_the_discriminator_cuts_counts_off_above_the_pulse_height() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _counter_params(**overrides: Any) -> FakeCounterParams:
-    from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
-
-    fields: dict[str, Any] = {
-        "ip_address": COUNTER_ADDRESS,
-        "detector_name": DETECTOR,
-        "device": DEVICE,
-        "channels": {
-            0: Keysight53220AChannelParams(
-                threshold_mV=THRESHOLD_MV, coupling="DC", gate_time_s=GATE_TIME_S
-            )
-        },
+def _counter_params(rig) -> Any:
+    params = rig.counter_params()
+    params.channels = {
+        0: Keysight53220AChannelParams(threshold_mV=THRESHOLD_MV, coupling="DC", gate_time_s=GATE_TIME_S)
     }
-    return FakeCounterParams(**{**fields, **overrides})
+    return params
 
 
-def test_the_driver_speaks_scpi_the_simulated_counter_understands() -> None:
-    counter = cast(FakeCounter, _counter_params().create_inst())
-    counter.virtual.model.set_output_enabled(True)
-    counter.virtual.model.set_bias_voltage(0.029)
+def _counter(rig) -> Keysight53220A:
+    return cast(Keysight53220A, _counter_params(rig).create_inst())
+
+
+def _bias(rig, volts: float) -> None:
+    """Bias the detector directly, as if a source were already set."""
+    rig.model.set_output_enabled(True)
+    rig.model.set_bias_voltage(volts)
+
+
+def test_the_driver_speaks_scpi_the_simulated_counter_understands(rig) -> None:
+    counter = _counter(rig)
+    _bias(rig, 0.029)
 
     assert isinstance(counter[0], Counter)
     counts = counter[0].count(GATE_TIME_S)
 
+    simulated = rig.bench.counter
     assert counts > 0
-    assert counter.virtual.unrecognised == [], "the driver sent SCPI the counter rejected"
-    assert counter.virtual.function == "TOT"
-    assert counter.virtual.measured_channel == 1
+    assert simulated.unrecognised == [], "the driver sent SCPI the counter rejected"
+    assert simulated.function == "TOT"
+    assert simulated.measured_channel == 1
 
 
-def test_the_configured_threshold_survives_the_drivers_own_configure() -> None:
+def test_the_configured_threshold_survives_the_drivers_own_configure(rig) -> None:
     """The failure this whole arrangement exists to catch.
 
     ``CONFigure`` re-enables auto-level on the real instrument, and the
@@ -218,19 +192,18 @@ def test_the_configured_threshold_survives_the_drivers_own_configure() -> None:
     conditioning afterwards, the counter would be triggering at 50% of the
     pulse height with nothing to say so.
     """
-    counter = cast(FakeCounter, _counter_params().create_inst())
+    counter = _counter(rig)
     counter[0].count(GATE_TIME_S)
 
-    channel = counter.virtual.inputs[1]
+    channel = rig.bench.counter.inputs[1]
     assert channel.auto_level is False
     assert channel.threshold_v == pytest.approx(THRESHOLD_MV / 1000.0)
     assert counter[0].get_threshold() == pytest.approx(THRESHOLD_MV)
 
 
-def test_raising_the_threshold_past_the_pulse_height_stops_the_counts() -> None:
-    counter = cast(FakeCounter, _counter_params().create_inst())
-    counter.virtual.model.set_output_enabled(True)
-    counter.virtual.model.set_bias_voltage(0.029)
+def test_raising_the_threshold_past_the_pulse_height_stops_the_counts(rig) -> None:
+    counter = _counter(rig)
+    _bias(rig, 0.029)
 
     counting = counter[0].count(GATE_TIME_S)
     counter[0].set_threshold(DEVICE.pulse_amplitude_mV * 2)
@@ -240,10 +213,9 @@ def test_raising_the_threshold_past_the_pulse_height_stops_the_counts() -> None:
     assert silent == 0
 
 
-def test_a_multi_reading_trigger_cycle_comes_back_reading_by_reading() -> None:
-    counter = cast(FakeCounter, _counter_params().create_inst())
-    counter.virtual.model.set_output_enabled(True)
-    counter.virtual.model.set_bias_voltage(0.029)
+def test_a_multi_reading_trigger_cycle_comes_back_reading_by_reading(rig) -> None:
+    counter = _counter(rig)
+    _bias(rig, 0.029)
     counter.configure_trigger(trigger_count=2, sample_count=3)
 
     readings = counter[0].read_counts(0.01)
@@ -258,33 +230,14 @@ def test_a_multi_reading_trigger_cycle_comes_back_reading_by_reading() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Wiring: one detector, two roots
+# Wiring: one detector, two transports
 # ---------------------------------------------------------------------------
 
 
-def _rack_and_counter() -> tuple[Fake928, FakeCounter]:
-    rack_params = FakeGpibParams(
-        port=PORT,
-        children={
-            MAINFRAME_KEY: Fake900Params(
-                gpib_address=GPIB_ADDRESS,
-                device=DEVICE,
-                detector_name=DETECTOR,
-                children={SOURCE_KEY: Fake928Params(slot=SOURCE_SLOT)},
-            )
-        },
-    )
-    gpib = FakeGpib.from_params(rack_params)
-    from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900
-
-    mainframe = Fake900.from_config(gpib, key=MAINFRAME_KEY)
-    source = cast(Fake928, Fake928.from_config(mainframe, key=SOURCE_KEY))
-    counter = cast(FakeCounter, _counter_params().create_inst())
-    return source, counter
-
-
-def test_the_source_and_the_counter_share_one_detector() -> None:
-    source, counter = _rack_and_counter()
+def test_the_source_and_the_counter_share_one_detector(rig) -> None:
+    gpib = rig.gpib_params(("source",)).create_inst()
+    source = cast(Sim928, gpib.make_child(rig.mainframe).make_child(rig.source))
+    counter = _counter(rig)
     source.turn_on()
 
     source.set_voltage(0.005)
@@ -299,81 +252,25 @@ def test_the_source_and_the_counter_share_one_detector() -> None:
     assert latched == 0, "a switched detector stops clicking"
 
 
-def test_an_unnamed_detector_is_private_and_says_so(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The default must never wire two instruments together by accident.
-
-    It must also not fail silently: an unwired counter reads zero at every
-    bias, which looks exactly like a dead detector.
-    """
-    source, _ = _rack_and_counter()
-    with caplog.at_level("WARNING"):
-        lonely = cast(FakeCounter, _counter_params(detector_name="").create_inst())
-
-    source.turn_on()
-    source.set_voltage(0.029)
-
-    assert lonely[0].count(GATE_TIME_S) == 0, "an unbiased detector emits nothing"
-    assert "no detector_name" in caplog.text
-
-
 # ---------------------------------------------------------------------------
 # The generated project, end to end
 # ---------------------------------------------------------------------------
 
 
-def _write_config(config_dir: Path) -> None:
-    """The config tree a user would build in Manage Instruments."""
-    instruments = {
-        GPIB_KEY: FakeGpibParams(
-            port=PORT,
-            children={
-                MAINFRAME_KEY: Fake900Params(
-                    gpib_address=GPIB_ADDRESS,
-                    device=DEVICE,
-                    detector_name=DETECTOR,
-                    children={SOURCE_KEY: Fake928Params(slot=SOURCE_SLOT)},
-                )
-            },
-        ),
-        COUNTER_KEY: _counter_params(),
-    }
+def _generate_project(tmp_path: Path, rig) -> dict[str, Any]:
+    config_dir = tmp_path / "config"
+    instruments = {**rig.instruments(("source",)), rig.counter: _counter_params(rig)}
     assign_missing_leaf_attribute_names(instruments)
     save_instruments_to_config(instruments, config_dir)
 
-
-def _generate_project(tmp_path: Path) -> dict[str, Any]:
-    config_dir = tmp_path / "config"
-    projects_dir = tmp_path / "projects"
-    _write_config(config_dir)
-
     out = generate_procedure_project(
         config_dir=config_dir,
-        projects_dir=projects_dir,
+        projects_dir=tmp_path / "projects",
         req=GenerateProjectRequest(
             measurement_name="pcr_curve",
             kind="procedure",
-            selected_resources=[
-                SelectedResource(
-                    variable_name="voltage_source",
-                    type="fake928",
-                    key=SOURCE_KEY,
-                    path=[
-                        SelectedNodeRef(type="fake928", key=SOURCE_KEY),
-                        SelectedNodeRef(type="fake900", key=MAINFRAME_KEY),
-                        SelectedNodeRef(type="fakegpib", key=GPIB_KEY),
-                    ],
-                ),
-                SelectedResource(
-                    variable_name="counter",
-                    type="fake_counter",
-                    key=COUNTER_KEY,
-                    channel_index=0,
-                    path=[SelectedNodeRef(type="fake_counter", key=COUNTER_KEY)],
-                ),
-            ],
-            project_prefix="pcr_fake",
+            selected_resources=[rig.select("voltage_source", "source"), rig.select("counter", "counter")],
+            project_prefix="pcr_sim",
         ),
     )
     _set_measurement_params(Path(out["yaml_file"]))
@@ -420,8 +317,8 @@ def _expected_counts(bias_v: float) -> float:
     return model.count_rate(THRESHOLD_MV) * GATE_TIME_S
 
 
-def test_generated_setup_wires_the_simulated_counter(tmp_path: Path) -> None:
-    out = _generate_project(tmp_path)
+def test_generated_setup_wires_the_simulated_counter(tmp_path: Path, rig) -> None:
+    out = _generate_project(tmp_path, rig)
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
     measurement_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
     ast.parse(setup_text)
@@ -430,8 +327,8 @@ def test_generated_setup_wires_the_simulated_counter(tmp_path: Path) -> None:
     assert "from pcr_curve import PcrCurveMeasurement" in setup_text
     assert "class PcrCurveMeasurement" in measurement_text
     config = load_instruments(tmp_path / "config")
-    counter_name = config[COUNTER_KEY].channels[0].attribute_name
-    source_name = config[GPIB_KEY].children[MAINFRAME_KEY].children[SOURCE_KEY].attribute_name
+    counter_name = config[rig.counter].channels[0].attribute_name
+    source_name = config[rig.gpib].children[rig.mainframe].children[rig.source].attribute_name
     assert f"resources.from_attribute({counter_name!r})" in setup_text
     assert f"resources.from_attribute({source_name!r})" in setup_text
     assert ".from_config(resources, key=" not in setup_text
@@ -442,13 +339,10 @@ def test_generated_setup_wires_the_simulated_counter(tmp_path: Path) -> None:
     )
     assert "instruments" not in payload["resources"]
     assert payload["resources"]["instrument_sources"] == {counter_name: "local", source_name: "local"}
-    # The wiring lives in the workspace config, where the rack and counter are
-    # defined, rather than in a copy per project.
-    assert config[COUNTER_KEY].detector_name == config[GPIB_KEY].children[MAINFRAME_KEY].detector_name == DETECTOR
 
 
-def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> None:
-    out = _generate_project(tmp_path)
+def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path, rig) -> None:
+    out = _generate_project(tmp_path, rig)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
     resources = module.create_instrument_resources(
@@ -480,7 +374,7 @@ def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path) -> N
         )
 
 
-def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Path) -> None:
+def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Path, rig) -> None:
     """The run sets its own threshold instead of inheriting the counter's.
 
     On a server-held counter, the current threshold is whatever the previous
@@ -488,7 +382,7 @@ def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Pa
     nothing — and the curve must still match the model at the project's own
     threshold.
     """
-    out = _generate_project(tmp_path)
+    out = _generate_project(tmp_path, rig)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
     resources = module.create_instrument_resources(
@@ -507,8 +401,8 @@ def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Pa
     assert abs(top["counts"] - expected) <= 5.0 * math.sqrt(expected) + 5.0
 
 
-def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path) -> None:
-    out = _generate_project(tmp_path)
+def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path, rig) -> None:
+    out = _generate_project(tmp_path, rig)
     module = _load_setup_module(Path(out["setup_file"]))
     project = load_project_config(Path(out["yaml_file"]))
     resources = module.create_instrument_resources(
@@ -534,9 +428,9 @@ def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path) -> None
     assert all(a < b for a, b in zip(turn_on, turn_on[1:])), "monotonic through the knee"
 
 
-def test_generated_setup_runs_as_a_script(tmp_path: Path) -> None:
+def test_generated_setup_runs_as_a_script(tmp_path: Path, rig) -> None:
     """The generated file is meant to be run, not only imported."""
-    out = _generate_project(tmp_path)
+    out = _generate_project(tmp_path, rig)
     setup_path = Path(out["setup_file"])
 
     result = subprocess.run(
@@ -550,7 +444,7 @@ def test_generated_setup_runs_as_a_script(tmp_path: Path) -> None:
     assert "Traceback" not in result.stderr
 
 
-def test_generated_setup_refuses_a_counter_another_process_has_claimed(tmp_path: Path) -> None:
+def test_generated_setup_refuses_a_counter_another_process_has_claimed(tmp_path: Path, rig) -> None:
     """The script claims its transports before opening anything.
 
     This test process holds the counter's lease, and it is alive and is not the
@@ -559,9 +453,9 @@ def test_generated_setup_refuses_a_counter_another_process_has_claimed(tmp_path:
     """
     from lab_wizard.lib.client import leases
 
-    out = _generate_project(tmp_path)
+    out = _generate_project(tmp_path, rig)
     setup_path = Path(out["setup_file"])
-    counter_key = _counter_params().transport_key()
+    counter_key = _counter_params(rig).transport_key()
     assert counter_key
     leases.acquire(counter_key, owner="a measurement already running")
     try:

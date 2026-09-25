@@ -8,11 +8,6 @@ import pytest
 
 from pyleco.json_utils.errors import JSONRPCError
 
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
-from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
 from lab_wizard.lib.server.claims import ClaimTable
 from lab_wizard.lib.server.peer import LocalOnlyError, Peer, reset_current_peer, set_current_peer
@@ -32,23 +27,17 @@ class Clock:
         return self.now
 
 
-def _registry() -> InstrumentRegistry:
-    counter = FakeCounterParams(
-        ip_address="sim://claims-counter",
-        channels={
-            0: Keysight53220AChannelParams(threshold_mV=-50.0),
-            1: Keysight53220AChannelParams(threshold_mV=-50.0),
-        },
-    )
-    rack = FakeGpibParams(
-        port="sim://claims-rack",
-        children={
-            "mainframe": Fake900Params(
-                gpib_address="5",
-                children={"source": Fake928Params(slot="1"), "voltmeter": Fake970Params(slot="2")},
-            )
-        },
-    )
+def _registry(rig) -> InstrumentRegistry:
+    counter = rig.counter_params()
+    counter.channels = {
+        0: Keysight53220AChannelParams(threshold_mV=-50.0),
+        1: Keysight53220AChannelParams(threshold_mV=-50.0),
+    }
+    rack = rig.gpib_params()
+    # Readable paths rather than the wizard's hashed keys.
+    (mainframe,) = rack.children.values()
+    mainframe.children = {"source": mainframe.children[rig.source], "voltmeter": mainframe.children[rig.meter]}
+    rack.children = {"mainframe": mainframe}
     return InstrumentRegistry.from_instruments({"counter": counter, "rack": rack})
 
 
@@ -58,8 +47,8 @@ def clock() -> Clock:
 
 
 @pytest.fixture
-def server(clock: Clock) -> WireServer:
-    return WireServer(bind="inproc://claims", registry=_registry(), claims=ClaimTable(clock=clock))
+def server(clock: Clock, rig) -> WireServer:
+    return WireServer(bind="inproc://claims", registry=_registry(rig), claims=ClaimTable(clock=clock))
 
 
 def _denied(fn, *args: Any, **kwargs: Any) -> JSONRPCError:
@@ -81,8 +70,8 @@ def _denied(fn, *args: Any, **kwargs: Any) -> JSONRPCError:
         ("inst://rack/mainframe/voltmeter/channel/3", "inst://rack/mainframe/voltmeter"),  # SIM970 declares nothing
     ],
 )
-def test_paths_widen_to_their_declared_claim_unit(path, unit):
-    assert _registry().claim_unit_for(path) == unit
+def test_paths_widen_to_their_declared_claim_unit(path, unit, rig):
+    assert _registry(rig).claim_unit_for(path) == unit
 
 
 def test_claiming_a_voltmeter_channel_claims_the_whole_voltmeter(server: WireServer):

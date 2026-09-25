@@ -15,50 +15,17 @@ import pytest
 from fastapi.testclient import TestClient
 from ruamel.yaml import YAML
 
-from lab_wizard.lib.instruments.fake_rack.fake900 import Fake900Params
-from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuatorParams
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounterParams
-from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
-from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
-from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
 from lab_wizard.lib.procedures.storage import load_procedure, save_preset
-from lab_wizard.lib.utilities.config_io import (
-    assign_missing_leaf_attribute_names,
-    instrument_hash,
-    load_instruments,
-    save_instruments_to_config,
-)
+from lab_wizard.lib.utilities.config_io import load_instruments
 from lab_wizard.wizard.backend.main import app
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 
-RACK = instrument_hash("fakegpib", "sim://api-rack")
-MAINFRAME = instrument_hash("fake900", "5")
-SOURCE = instrument_hash("fake928", "1")
-METER = instrument_hash("fake970", "2")
-COUNTER = instrument_hash("fake_counter", "sim://api-counter:5025")
-ATTENUATOR = instrument_hash("fake_attenuator", "sim://api-attenuator")
-
 
 @pytest.fixture
-def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rig):
     ws, _ = initialize_workspace(tmp_path / "workspace")
     monkeypatch.setenv(WORKSPACE_ENV, str(ws.root))
-    instruments: dict[str, Any] = {
-        RACK: FakeGpibParams(
-            port="sim://api-rack",
-            children={
-                MAINFRAME: Fake900Params(
-                    gpib_address="5",
-                    detector_name="api",
-                    children={SOURCE: Fake928Params(slot="1"), METER: Fake970Params(slot="2")},
-                )
-            },
-        ),
-        COUNTER: FakeCounterParams(ip_address="sim://api-counter", detector_name="api"),
-        ATTENUATOR: FakeAttenuatorParams(port="sim://api-attenuator", detector_name="api"),
-    }
-    assign_missing_leaf_attribute_names(instruments)
-    save_instruments_to_config(instruments, ws.config_dir)
+    rig.write(ws.config_dir)
     # Not entered as a context manager: that runs the app's startup, which
     # configures logging and tries to start a server for the workspace — both
     # of which leak into every test that runs after this file. The app caches
@@ -67,18 +34,14 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     yield ws, TestClient(app)
 
 
-def _mcr_selections() -> list[dict[str, Any]]:
-    rack = [{"type": "fake900", "key": MAINFRAME}, {"type": "fakegpib", "key": RACK}]
-    return [
-        {"variable_name": "voltage_source", "type": "fake928", "key": SOURCE,
-         "path": [{"type": "fake928", "key": SOURCE}, *rack]},
-        {"variable_name": "voltage_sense", "type": "fake970", "key": METER, "channel_index": 0,
-         "path": [{"type": "fake970", "key": METER}, *rack]},
-        {"variable_name": "counter", "type": "fake_counter", "key": COUNTER, "channel_index": 0,
-         "path": [{"type": "fake_counter", "key": COUNTER}]},
-        {"variable_name": "attenuator", "type": "fake_attenuator", "key": ATTENUATOR,
-         "path": [{"type": "fake_attenuator", "key": ATTENUATOR}]},
+def _mcr_selections(rig) -> list[dict[str, Any]]:
+    selections = [
+        rig.select("voltage_source", "source"),
+        rig.select("voltage_sense", "meter"),
+        rig.select("counter", "counter"),
+        rig.select("attenuator", "attenuator"),
     ]
+    return [selection.model_dump(mode="json") for selection in selections]
 
 
 def test_procedures_are_offered_with_their_presets(workspace):
@@ -99,11 +62,11 @@ def test_a_procedures_roles_are_its_requirements(workspace):
     reqs = {r["variable_name"]: r for r in client.get("/api/get-resources/mcr_curve?kind=procedure").json()}
     assert set(reqs) == {"voltage_source", "voltage_sense", "counter", "attenuator", "savers", "plotters"}
     matched = {m["class_name"] for m in reqs["attenuator"]["matching_instruments"]}
-    assert "FakeAttenuator" in matched
+    assert "YokoAttenuator" in matched
     assert client.get("/api/get-resources/nothing?kind=procedure").status_code == 404
 
 
-def test_a_project_is_created_from_a_procedure_with_a_preset(workspace):
+def test_a_project_is_created_from_a_procedure_with_a_preset(workspace, rig):
     ws, client = workspace
     definition = load_procedure(ws.config_dir, "mcr_curve")
     save_preset(ws.config_dir, "mcr_curve", "bench", {"bias": {"voltage": 0.02}}, definition.params_model())
@@ -114,7 +77,7 @@ def test_a_project_is_created_from_a_procedure_with_a_preset(workspace):
             "measurement_name": "mcr_curve",
             "kind": "procedure",
             "params_preset": "bench",
-            "selected_resources": _mcr_selections(),
+            "selected_resources": _mcr_selections(rig),
         },
     )
     assert response.status_code == 200, response.text
@@ -124,7 +87,7 @@ def test_a_project_is_created_from_a_procedure_with_a_preset(workspace):
     assert len(payload["resources"]["instrument_sources"]) == 4
 
 
-def test_the_retired_style_is_refused_with_its_reason(workspace):
+def test_the_retired_style_is_refused_with_its_reason(workspace, rig):
     _ws, client = workspace
     response = client.post(
         "/api/create-measurement-project",
@@ -132,30 +95,30 @@ def test_the_retired_style_is_refused_with_its_reason(workspace):
             "measurement_name": "mcr_curve",
             "kind": "procedure",
             "generation_style": "pedagogical_yaml_expanded",
-            "selected_resources": _mcr_selections(),
+            "selected_resources": _mcr_selections(rig),
         },
     )
     assert response.status_code == 400
     assert "retired" in response.json()["detail"]
 
 
-def test_removing_an_instrument_lists_the_projects_that_use_it(workspace):
+def test_removing_an_instrument_lists_the_projects_that_use_it(workspace, rig):
     ws, client = workspace
     created = client.post(
         "/api/create-measurement-project",
-        json={"measurement_name": "mcr_curve", "kind": "procedure", "selected_resources": _mcr_selections()},
+        json={"measurement_name": "mcr_curve", "kind": "procedure", "selected_resources": _mcr_selections(rig)},
     ).json()
-    counter_name = load_instruments(ws.config_dir)[COUNTER].channels[0].attribute_name
+    counter_name = load_instruments(ws.config_dir)[rig.counter].channels[0].attribute_name
 
     impact = client.post(
-        "/api/manage-instruments/removal-impact", json={"type": "fake_counter", "key": COUNTER}
+        "/api/manage-instruments/removal-impact", json={"type": "keysight53220A", "key": rig.counter}
     ).json()
     assert [p["name"] for p in impact["projects"]] == [created["project_name"]]
     assert impact["projects"][0]["attributes"] == [counter_name]
 
     # An instrument inside a rack is found too, not only a top-level one.
     meter = client.post(
-        "/api/manage-instruments/removal-impact", json={"type": "fake970", "key": METER}
+        "/api/manage-instruments/removal-impact", json={"type": "sim970", "key": rig.meter}
     ).json()
     assert [p["name"] for p in meter["projects"]] == [created["project_name"]]
     projects = client.get("/api/projects").json()["projects"]

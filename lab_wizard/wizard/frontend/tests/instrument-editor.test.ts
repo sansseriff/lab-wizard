@@ -16,22 +16,22 @@ const leaf = (): TreeItem => ({
 	children: {}
 });
 
-test('adding fake928 advances from root choices to fake900 only in the chosen rack', () => {
+test('adding sim928 advances from root choices to sim900 only in the chosen rack', () => {
 	const racks: TreeItem[] = ['gpib-a', 'gpib-b'].map((key) => ({
-		type: 'fakegpib', key, fields: {}, children: {
-			'same-gpib-address': { type: 'fake900', key: 'same-gpib-address', fields: {}, children: {} }
+		type: 'prologix_gpib', key, fields: {}, children: {
+			'same-gpib-address': { type: 'sim900', key: 'same-gpib-address', fields: {}, children: {} }
 		}
 	}));
-	expect(parentCandidates(racks, 'fakegpib', []).map((node) => node.key)).toEqual(['gpib-a', 'gpib-b']);
+	expect(parentCandidates(racks, 'prologix_gpib', []).map((node) => node.key)).toEqual(['gpib-a', 'gpib-b']);
 	for (const rack of racks) {
-		const candidates = parentCandidates(racks, 'fake900', [{ type: rack.type, key: rack.key }]);
+		const candidates = parentCandidates(racks, 'sim900', [{ type: rack.type, key: rack.key }]);
 		expect(candidates).toHaveLength(1);
 		expect(candidates[0]).toBe(rack.children['same-gpib-address']);
-		expect(candidates[0].type).toBe('fake900');
+		expect(candidates[0].type).toBe('sim900');
 		expect(candidates.some((node) => node.key === rack.key)).toBe(false);
 	}
-	expect(parentCandidates(racks, 'fake900', [{ type: 'fakegpib', key: '' }])).toEqual([]);
-	expect(parentCandidates(racks, 'fake900', [{ type: 'fakegpib', key: 'removed' }])).toEqual([]);
+	expect(parentCandidates(racks, 'sim900', [{ type: 'prologix_gpib', key: '' }])).toEqual([]);
+	expect(parentCandidates(racks, 'sim900', [{ type: 'prologix_gpib', key: 'removed' }])).toEqual([]);
 });
 const tree: TreeItem[] = ['rack-a', 'rack-b'].map((key) => ({
 	type: 'rack',

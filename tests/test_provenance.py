@@ -16,8 +16,9 @@ from typing import Any, cast
 
 from lab_wizard.lib.client.proxies.attenuator import RemoteAttenuator
 from lab_wizard.lib.client.session import Session
-from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuator, FakeAttenuatorParams
 from lab_wizard.lib.instruments.general.attenuator import StandInAttenuator
+from lab_wizard.lib.instruments.yokogawaAQ2212.comm import YokoAQ2212Dep
+from lab_wizard.lib.instruments.yokogawaAQ2212.modules.attenuator import YokoAttenuator, YokoAttenuatorParams
 from lab_wizard.lib.task_adapters.provenance import baseline_snapshot, instrument_params
 
 
@@ -33,9 +34,10 @@ class RecordingSession:
         return self.params
 
 
-def _local_attenuator(**kwargs) -> FakeAttenuator:
-    params = FakeAttenuatorParams(port="sim://prov-att", attribute_name="bench_att", **kwargs)
-    return params.create_inst()
+def _local_attenuator(**kwargs) -> YokoAttenuator:
+    """An attenuator module built from params; offline, since only its params are read."""
+    params = YokoAttenuatorParams(slot="3", attribute_name="bench_att", **kwargs)
+    return YokoAttenuator(YokoAQ2212Dep("10.0.0.9", 50000, offline=True).slot(3), params)
 
 
 # --------------------------- the snapshot ---------------------------
@@ -47,7 +49,7 @@ def test_a_local_instrument_reports_the_params_it_was_built_from():
 
     assert params is not None
     assert params["wavelength_nm"] == 1310.0
-    assert params["type"] == "fake_attenuator"
+    assert params["type"] == "yoko_attenuator"
     # Each instrument answers for itself; a rack does not carry its modules.
     assert "children" not in params
 
@@ -93,10 +95,10 @@ def test_the_snapshot_is_keyed_by_role():
 
     assert list(snapshot) == ["attenuator"]
     entry = snapshot["attenuator"]
-    assert entry["class"] == "FakeAttenuator"
-    assert entry["type"] == "fake_attenuator"
+    assert entry["class"] == "YokoAttenuator"
+    assert entry["type"] == "yoko_attenuator"
     assert entry["attribute_name"] == "bench_att"
-    assert entry["params"]["port"] == "sim://prov-att"
+    assert entry["params"]["slot"] == "3"
     json.dumps(snapshot)  # it has to survive the trip to the database
 
 

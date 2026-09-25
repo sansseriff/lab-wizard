@@ -298,8 +298,9 @@ def _channel_class_ref(leaf: _NodeRef) -> tuple[str, str]:
     """Module and name of the class a channel provider's channels are.
 
     Read off the provider's ``channel_class`` rather than guessed from its name:
-    a provider can reuse another driver's channels (``FakeCounter`` has
-    ``Keysight53220AChannel``), and that class lives in the other driver's module.
+    a provider can reuse another driver's channels (a subclass of
+    ``Keysight53220A`` has ``Keysight53220AChannel``), and that class lives in
+    the other driver's module.
     """
     module, params_cls = _type_info(leaf.type)
     provider = getattr(importlib.import_module(module), _runtime_class_name(params_cls))

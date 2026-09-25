@@ -10,7 +10,7 @@ from lab_wizard.lib.instruments.sim900.sim900 import Sim900
 from lab_wizard.lib.utilities.model_tree import ResourceConfig
 
 
-def _resources_with_sim_and_counter() -> ResourceConfig:
+def _resources_with_sim_and_counter(port: str = "/dev/ttyUSB0") -> ResourceConfig:
     return ResourceConfig.model_validate(
         {
             "saver": {
@@ -25,7 +25,7 @@ def _resources_with_sim_and_counter() -> ResourceConfig:
             "instruments": {
                 "/dev/ttyUSB0": {
                     "type": "prologix_gpib",
-                    "port": "/dev/ttyUSB0",
+                    "port": port,
                     "baudrate": 9600,
                     "timeout": 1,
                     "children": {
@@ -84,8 +84,8 @@ def _resources_with_dbay() -> ResourceConfig:
     )
 
 
-def test_sim_from_config_reuses_existing_instances() -> None:
-    resources = _resources_with_sim_and_counter()
+def test_sim_from_config_reuses_existing_instances(rig) -> None:
+    resources = _resources_with_sim_and_counter(rig.port)
 
     prologix = PrologixGPIB.from_config(resources, key="/dev/ttyUSB0")
     sim900_a = Sim900.from_config(prologix, key="3")
@@ -97,8 +97,8 @@ def test_sim_from_config_reuses_existing_instances() -> None:
     assert sim928_a is sim928_b
 
 
-def test_sim970_channels_keep_module_slot_transport() -> None:
-    resources = _resources_with_sim_and_counter()
+def test_sim970_channels_keep_module_slot_transport(rig) -> None:
+    resources = _resources_with_sim_and_counter(rig.port)
 
     prologix = PrologixGPIB.from_config(resources, key="/dev/ttyUSB0")
     sim900 = Sim900.from_config(prologix, key="3")

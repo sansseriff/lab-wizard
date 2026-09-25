@@ -24,14 +24,13 @@ from lab_wizard.lib.instruments.andoAQ8201A.modules.attenuator31 import (
     Attenuator31,
     Attenuator31Params,
 )
-from lab_wizard.lib.instruments.fake_rack.fake_counter import FakeCounter, FakeCounterParams
 from lab_wizard.lib.instruments.general.attenuator import Attenuator, StandInAttenuator
 from lab_wizard.lib.instruments.general.behavior import InstrumentBehavior
 from lab_wizard.lib.instruments.general.counter import Counter, StandInCounter
 from lab_wizard.lib.instruments.general.state_effects import collect_query_methods
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import StandInVSource, VSource
-from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
+from lab_wizard.lib.instruments.keysight53220A import Keysight53220A, Keysight53220AChannelParams
 from lab_wizard.lib.instruments.yokogawaAQ2212.comm import YokoAQ2212SlotDep
 from lab_wizard.lib.instruments.yokogawaAQ2212.modules.attenuator import (
     YokoAttenuator,
@@ -43,11 +42,9 @@ from lab_wizard.lib.task_adapters.instrument_steps import SafeGuard, SourceGuard
 # --------------------------- apply_baseline ---------------------------
 
 
-def _counter() -> FakeCounter:
-    params = FakeCounterParams(
-        ip_address="sim://baseline-counter",
-        channels={0: Keysight53220AChannelParams(threshold_mV=-50.0, coupling="DC")},
-    )
+def _counter(rig) -> Keysight53220A:
+    params = rig.counter_params()
+    params.channels = {0: Keysight53220AChannelParams(threshold_mV=-50.0, coupling="DC")}
     return params.create_inst()
 
 
@@ -56,8 +53,8 @@ def test_the_default_baseline_is_a_successful_no_op():
     assert StandInVSource().apply_baseline() is True
 
 
-def test_a_counter_input_baseline_undoes_a_previous_callers_changes():
-    counter = _counter()
+def test_a_counter_input_baseline_undoes_a_previous_callers_changes(rig):
+    counter = _counter(rig)
     channel = counter[0]
     channel.set_threshold(400.0)
     channel.set_coupling("AC")
@@ -65,22 +62,23 @@ def test_a_counter_input_baseline_undoes_a_previous_callers_changes():
     assert channel.apply_baseline() is True
 
     assert channel.get_threshold() == pytest.approx(-50.0)
-    hardware = counter.virtual.inputs[1]
+    counter.query("*OPC?")  # every write before it has reached the counter
+    hardware = rig.bench.counter.inputs[1]
     assert hardware.coupling == "DC"
     assert hardware.auto_level is False
     assert hardware.threshold_v == pytest.approx(-0.050)
 
 
-def test_an_input_baseline_leaves_the_counters_shared_trigger_alone():
+def test_an_input_baseline_leaves_the_counters_shared_trigger_alone(rig):
     """A run bound to one input has no claim on the box-level trigger."""
-    counter = _counter()
+    counter = _counter(rig)
     counter.configure_trigger(source="external")
     counter[0].apply_baseline()
     assert counter.settings.trigger_source == "external"
 
 
-def test_the_whole_counter_baseline_restores_trigger_gate_and_every_input():
-    counter = _counter()
+def test_the_whole_counter_baseline_restores_trigger_gate_and_every_input(rig):
+    counter = _counter(rig)
     counter.configure_trigger(source="external")
     counter.configure_gate(source="input2")
     counter[0].set_threshold(400.0)
@@ -90,13 +88,14 @@ def test_the_whole_counter_baseline_restores_trigger_gate_and_every_input():
 
     assert counter.settings.trigger_source == "immediate"
     assert counter.settings.gate_source == "time"
-    assert counter.virtual.trigger_source == "IMM"
+    counter.query("*OPC?")  # every write before it has reached the counter
+    assert rig.bench.counter.trigger_source == "IMM"
     assert counter[0].get_threshold() == pytest.approx(-50.0)
     assert counter._armed is None, "the gate is re-written at the next arm"
 
 
-def test_the_old_restore_name_still_works():
-    counter = _counter()
+def test_the_old_restore_name_still_works(rig):
+    counter = _counter(rig)
     counter[0].set_threshold(400.0)
     assert counter[0].restore_configured_settings() is True
     assert counter[0].get_threshold() == pytest.approx(-50.0)
@@ -251,7 +250,7 @@ def test_source_guard_honours_a_deliberately_partial_exit():
 
 @pytest.mark.parametrize(
     "cls",
-    [VSense, Counter, Attenuator, YokoAttenuator, Attenuator31, FakeCounter.channel_class],
+    [VSense, Counter, Attenuator, YokoAttenuator, Attenuator31, Keysight53220A.channel_class],
 )
 def test_every_declared_query_names_a_real_method(cls):
     """A typo in the allowlist would silently leave a real query counted as a write."""

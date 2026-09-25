@@ -84,17 +84,24 @@ laptop.
 ## A first measurement, with no hardware
 
 The fastest way to see the whole loop is to run it against the
-[simulated rack](concepts/simulated-instruments.md) — real drivers, real
+[simulated bench](concepts/simulated-instruments.md) — real drivers, real
 generated code, a simulated detector at the end of the wire. Nothing needs to be
 plugged in.
 
-1. **Instruments** → add a `fakegpib` controller, a `fake900` mainframe under it,
-   and a `fake928` source and `fake970` voltmeter in its slots. Give the
-   mainframe a `detector_name` so a `fake_counter` and a `fake_attenuator` can
-   see the same simulated device. See [Instruments](wizard/instruments.md).
-2. **Measurements → Create** → pick `iv_curve`, bind each role to one of those
+1. In a second terminal, start the bench and leave it running:
+
+    ```bash
+    uv run lab-sim
+    ```
+
+    It prints the address of each simulated instrument.
+2. **Instruments** → add a `prologix_gpib` controller whose port is the path
+   `lab-sim` printed, a `sim900` mainframe under it at GPIB address 5, and a
+   `sim928` source in slot 1 and a `sim970` voltmeter in slot 2. See
+   [Instruments](wizard/instruments.md).
+3. **Measurements → Create** → pick `iv_curve`, bind each role to one of those
    instruments, and generate the project.
-3. Run it:
+4. Run it:
 
     ```bash
     cd projects/<your_project_folder>
@@ -105,9 +112,11 @@ You should get a curve that is flat until the detector switches and rises after
 — because the simulation solves the detector's actual IV relation, not a
 lookup table.
 
-Then try the same with `mcr_curve`, which is a [procedure](wizard/procedures.md)
-rather than hand-written Python: same binding flow, but you can open it in the
-composer afterwards and see the step tree it ran.
+Then try `mcr_curve`. Add the bench's `keysight53220A` counter and its
+`yokogawa_aq2212` with the `yoko_attenuator` module first; the curve it
+measures is the count rate falling as the attenuator dims the light. Both are
+[procedures](wizard/procedures.md), so you can open either in the composer and
+see the step tree it ran.
 
 ## The sections, briefly
 
