@@ -2,16 +2,51 @@
 icon: lucide/database
 ---
 
-# The measurement database
+# The lab database
 
-!!! note "Two databases, for now"
-    Every run started from a project is now recorded in the workspace's lab
-    database, `data/lab.db` ([`lib/data/`](../../lab_wizard/lib/data/)), with
-    one row per point, every step the run executed, and the filters the Data
-    page will offer. See [Every run is recorded](../wizard/measurements.md#every-run-is-recorded).
-    The `database_saver` below is the older, per-project database; it still
-    works if a project selects it, and is being replaced
-    (`plans/semantic_data_plan.md`).
+Every run started from a project is recorded in one SQLite file per workspace,
+**`data/lab.db`**. It needs no configuring and no saver: a project that runs is
+recorded. A project outside any workspace records into its own `data/lab.db`.
+Code: [`lib/data/`](../../lab_wizard/lib/data/).
+
+## What a run records
+
+- **The run**: its procedure, status (`running`, `success`, `failed`,
+  `aborted`), start and end times, and what the project's `run:` block said:
+  the device under test, the operator, notes, and any other metadata.
+- **One row per point.** A row is everything recorded while the same parameter
+  values were in force (see
+  [How readings become rows](../concepts/procedures.md#how-readings-become-rows)),
+  so an MCR point's count and device voltage share a row, and the order of a
+  procedure's loops does not change the rows.
+- **Every step it executed**, with start and end times, status, and the error
+  that ended it, if any: the run's timeline.
+- **The params it ran with, and what each instrument was configured with**,
+  keyed by role, because the config those came from is edited between runs.
+- **The procedure definition it ran**, including its plots and derived columns,
+  so a run explains itself after the procedure is edited or deleted.
+- **Its columns, with units**, from the procedure's sweeps and steps.
+
+## The tables
+
+| Table | One row per | Holds |
+|---|---|---|
+| `runs` | run | `procedure`, `status`, `started_at`, `ended_at`, `device_id`, `operator`, `notes`, `project`, and JSON `metadata`, `definition`, `params`, `instruments`, `columns` |
+| `points` | point of a run | `run_id`, `seq` (recording order), `t`, the `steps` that recorded it, and JSON `values`: the parameters in force and every reading |
+| `steps` | step execution | `run_id`, `path`, `kind`, `started_at`, `ended_at`, `status`, `error` |
+| `devices` | device | `name`, and JSON `properties` (type, wafer, width …) that apply to every run on it |
+| `run_facets` | filter a run matches | `key`, `value`, `num`: derived from the rest, for the Data page's sidebar |
+| `meta` | setting | the schema version |
+
+**A procedure adds no columns.** Everything it records is a key in a point's
+`values`, so the schema never changes when a procedure is written, and a column
+cannot outlive the runs that recorded it.
+
+`run_facets` flattens each run's facts into filters when it ends: `procedure`,
+`device`, `device.<property>`, `operator`, `date`, `run.<metadata key>`,
+`instrument.<role>.type`, `instrument.<role>.<param>`, `param.<path>`, and
+`column` for each column it recorded. A filter finds only what was recorded, so
+name the device in the `run:` block before a run.
 
 ## Reading runs back
 
@@ -69,129 +104,24 @@ df = load_plot({
 whole run. `notebook_source(spec, db)` writes the Python that reproduces a
 plot, which is what the Data page's "Open in notebook" will give you.
 
-The `database_saver` persists measurement data to **SQLite** via SQLAlchemy. It
-is the one fully-implemented saver. Schema:
-[`savers/schema.py`](../../lab_wizard/lib/savers/schema.py); runtime:
-[`savers/database_saver.py`](../../lab_wizard/lib/savers/database_saver.py).
+## Saving runs as files too
 
-## The core idea: flat data, decoupled from execution
-
-Measurement *execution* is naturally hierarchical (sweep thermal powers, and at
-each, sweep trigger levels). But the *data* is fundamentally flat: each
-integration produces **one observation**, tagged with every condition under which
-it was taken. Whether the inner loop was `thermal_power` or `trigger_level` is
-invisible in the data — which is exactly what lets you slice the dataset
-arbitrarily after the fact.
-
-So: **one row per integration.** A "PCR curve" sweeping 20 trigger levels at 5
-thermal powers is 100 rows. The curve doesn't exist as a stored object — it's a
-query result.
-
-## Schema
-
-Six tables forming a hierarchy, with `cryostats` hanging off `runs`:
-
-```mermaid
-graph TD
-    W[wafers] --> D[devices]
-    D --> R[runs]
-    C[cryostats] --> R
-    R --> M[measurements]
-    M --> MD[measurement_details]
-```
-
-| Table | One row = | Key columns |
-|---|---|---|
-| `wafers` | a fabricated wafer | `name`, `material` |
-| `devices` | a device on a wafer | `wafer_id`, `name`, `pixel_geometry`, `width_nm` |
-| `cryostats` | a cryostat | `name`, `location` |
-| `runs` | one measurement program invocation | `cryostat_id`, `device_id`, `run_type`, `started_at`, `config` (JSON), `instruments` (JSON) |
-| `measurements` | one row of a run: the readings taken at one set of parameter values | `run_id`, `timestamp`, `counts`, `int_time`, `temperature`, `data` (JSON), `metadata` (JSON) |
-| `measurement_details` | sub-structure of one integration (histogram bins, time windows) | `measurement_id`, `detail_type`, `bin_index`, `value` |
-
-Design principles baked into the schema:
-
-- **Each fact lives in one place.** A run is one device, so `device_id` lives on
-  `runs`, not on each measurement. "All measurements on device A7" is a join.
-- **Real columns for what you query often** (`counts`, `temperature`,
-  `int_time`); **JSON `metadata`** for the varying parameters that differ per
-  run type (`bias_current`, `trigger_level`, `thermal_power`). A JSON field can be
-  promoted to a real indexed column later if you query it constantly.
-- **`config` is the measurement's own parameters** — the sweep, the gate time —
-  and **`instruments` is what each instrument was configured with** when the run
-  started, by name. The second exists because a project carries no copy of
-  instrument settings: it names them and reads a config tree that is edited
-  between runs, so without the snapshot nothing says which calibration a curve
-  was taken at.
-- **`run_type` is an Enum** (`pcr_curve`, `iv_curve`, `mcr_curve`,
-  `extended_pcr`, `other`), which catches typos but also *loses information*:
-  any composed procedure is stored as `other`. See the
-  [Roadmap](../roadmap.md#savers-and-data).
-
-Indexes exist on `runs(cryostat, started_at)`, `runs(run_type)`, and
-`measurements(timestamp)`.
-
-## What a procedure writes
-
-**A procedure adds no columns.** The schema is fixed; a run's rows land in
-`measurements.data` as JSON keys. A row is everything recorded while the same
-parameter values were in force (see
-[Procedures](../concepts/procedures.md#how-readings-become-rows)), so an
-`mcr_curve` run over three attenuations writes four rows (abbreviated):
-
-```json
-{"phase": "background", "counts": 1, "int_time": 0.05, "count_rate": 20.0}
-{"phase": "signal", "attenuation_db": 20.0, "counts": 387, "count_rate": 7740.0, "device_voltage": 0.0}
-{"phase": "signal", "attenuation_db": 10.0, "counts": 4004, "count_rate": 80080.0, "device_voltage": 0.0}
-{"phase": "signal", "attenuation_db": 0.0, "counts": 39165, "count_rate": 783300.0, "device_voltage": 0.0}
-```
-
-The swept value is on every row, so the loop nesting is invisible in the data,
-which is the whole point. `measurements.metadata` holds the row's position in
-the run (`seq`) and the steps that recorded into it (`steps`).
-
-## Using it
-
-Configure a `database_saver` instance on the [Data → Savers](../wizard/data.md)
-page (`db_path`, `cryostat_name`), then select it when creating a measurement.
-The runtime API:
-
-```python
-saver.start_run(run_type="pcr_curve", device="A7", cryostat="BlueFors-1",
-                operator="me", config={"git_sha": "...", "bias": 12.5})
-# ... per integration:
-saver.write_measurement(
-    counts=14823, int_time=1.0, delta_time=1.02, temperature=2.13,
-    metadata={"thermal_power": 3.0, "trigger_level": 0.034, "bias_current": 12.5},
-    details=[{"detail_type": "histogram_bin", "bin_index": i,
-              "bin_value": centers[i], "value": hist[i]} for i in ...],
-)
-saver.end_run()
-```
-
-[`DatabaseSaver`](../../lab_wizard/lib/savers/database_saver.py) auto-creates the
-cryostat and device by name on first reference, opens one `runs` row on
-`start_run`, and commits **one `measurements` row per `write_measurement`** — so
-each completed integration is durable on disk before the next starts (a real
-liability mitigation against power blips and Ctrl-C). `end_run` stamps
-`ended_at`.
+A **file saver** writes each run as a folder of CSV and YAML as well, for
+people who work with files; see [Savers](../wizard/data.md#savers). The folder
+is a complete copy of the run's rows here, and `export_run(db, run_id, root)`
+in `lab_wizard.lib.data.run_folder` writes the same folder for any recorded run.
 
 ## Why SQLite
 
-For a dozen runs/day across a few cryostats: one file means trivial backups
-(`cp measurements.db backup.db`), no server to maintain, fine concurrent reads,
-and incremental durable writes during long measurements. SQLAlchemy abstracts the
-backend, so moving to Postgres later (if many machines need concurrent writes)
-is mostly a connection-string change.
+For a dozen runs a day across a few cryostats, one file means trivial backups
+(`cp data/lab.db backup.db`), no server to maintain, fine concurrent reads, and
+durable writes during long measurements: each point and each step is its own
+transaction, in WAL mode, so a crash loses at most the point being recorded.
+Two runs on one machine can record at once.
 
 ## Schema changes
 
-There is no migration framework. New **nullable** columns are added to an
-existing database in place, by `add_missing_columns` when the saver opens it —
-which is how a database written last month keeps working when a column like
-`instruments` appears. Anything else (a type change, a non-null column) needs a
-real migration and is deliberately not attempted.
-
-!!! note "Reading the data"
-    The old database has no read helpers; query it with `sqlite3` and
-    `json_extract`. The lab database is read with `lab_wizard.lib.data`, above.
+`meta.schema_version` is checked whenever the database is opened. A file from
+another version, or one that is not a lab database at all, is refused with a
+message naming both, and left untouched. There are no migrations yet; the first
+change that needs one will add them.

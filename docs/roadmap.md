@@ -18,27 +18,20 @@ the current source. Look here before assuming a feature works end to end.
 
 ## Savers and data
 
-- ✅ **`DatabaseSaver`** (SQLite) works: a `runs` row per run, a `measurements`
-  row per point of the run, the measurement's parameters and the instruments'
-  configured params both recorded. See [Measurement database](data/database.md).
-- ❌ **No file saver.** No CSV / HDF5 / Parquet. A
-  `FileSaverParams`/`FileSaver` pair dropped into `lib/savers/` would be
-  discovered automatically.
-- ⚠️ **The stored data does not say what it means.** Nothing records which
-  columns are axes and which are readings, so every consumer guesses from
-  names. Related: `runs.run_type` is a five-value enum that
-  stores any composed procedure as `OTHER`, and `runs.device_id` is always NULL
-  because no measurement passes a device. Designed in
-  `plans/semantic_data_plan.md`; not built.
-- ❌ **No database browser in the GUI.** `/data/database` lists the configured
-  savers and says so.
+- ✅ **Every run is recorded** in the workspace's `data/lab.db`: one row per
+  point, every step, the device and run metadata, the instruments' settings, and
+  the procedure it ran, with its plots and derived columns. See
+  [The lab database](data/database.md).
+- ✅ **File saver.** Each run as a folder of CSV and YAML, laid out by a path
+  template of filter keys. See [Savers](wizard/data.md#savers).
+- ❌ **No database browser in the GUI.** `/data/database` says where runs are
+  recorded and how to read them.
 - ⚠️ **Reading runs back is Python only.** `lab_wizard.lib.data` finds runs by
   any filter, loads their points as polars frames, computes derived columns,
   evaluates plot specs and exports them to a notebook; the Data page that uses
   it is not built. See [Reading runs back](data/database.md#reading-runs-back).
 - ❌ **No migrations.** The lab database refuses a file from another schema
-  version rather than altering it; the old `database_saver` still adds nullable
-  columns in place with `schema.add_missing_columns`.
+  version rather than altering it.
 
 ## Procedures
 

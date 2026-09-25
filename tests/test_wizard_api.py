@@ -168,8 +168,8 @@ class TestManageSaversMeta:
         data = response.json()
         assert "tree" in data
         assert "metadata" in data
-        # database_saver is the bundled implementation
-        assert "database_saver" in data["metadata"]
+        # file_saver is the bundled implementation; the lab database is not a saver
+        assert "file_saver" in data["metadata"]
 
 
 class TestManagePlottersMeta:

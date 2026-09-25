@@ -20,8 +20,8 @@ from lab_procedure import Point, ProcedureRunner, RunEnded, RunStarted, Status, 
 from lab_wizard.lib.data import DATABASE_NAME, DatabaseRecorder
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.task_adapters.plotters import PlotterSink
+from lab_wizard.lib.savers.saver import SaverContext
 from lab_wizard.lib.task_adapters.provenance import baseline_snapshot
-from lab_wizard.lib.task_adapters.savers import SaverSink
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
 from lab_wizard.lib.workspace import find_workspace
 
@@ -77,14 +77,16 @@ def attach_sinks(runner: ProcedureRunner, resources: Any, *, project_dir: Path |
     """Subscribe everything that consumes a run: the database, then savers and plotters.
 
     The recorder is subscribed first, so it has the run's database id before
-    any other sink sees the run start.
+    any saver sees the run start.
     """
     recorder = None
     if project_dir is not None:
         recorder = DatabaseRecorder(database_path(project_dir))
         recorder.attach(runner.context.data_bus, runner.context.status_bus)
+    context = SaverContext(project_dir=project_dir, recorder=recorder)
+    for saver in getattr(resources, "savers", []):
+        saver.attach(runner.context.data_bus, runner.context.status_bus, context)
     messages = (RunStarted, Point, RunEnded)
-    runner.context.data_bus.subscribe(messages, SaverSink(getattr(resources, "savers", [])).handle)
     runner.context.data_bus.subscribe(messages, PlotterSink(getattr(resources, "plotters", [])).handle)
     return recorder
 

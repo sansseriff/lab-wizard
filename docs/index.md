@@ -53,7 +53,7 @@ graph TD
 | Configure the hardware this machine drives | [Instruments](wizard/instruments.md) |
 | Share this machine's instruments, or use another's | [Servers](wizard/servers.md), then [Remote control](remote/architecture.md) |
 | Set up safety interlocks | [Permissions](remote/permissions.md) |
-| Store and query measurement data | [Data](wizard/data.md), [Measurement database](data/database.md) |
+| Store and query measurement data | [Data](wizard/data.md), [The lab database](data/database.md) |
 | Understand the overall design | [Architecture](concepts/architecture.md) |
 | Understand how an instrument is modelled | [Instrument model](concepts/instrument-model.md) |
 | Understand the on-disk config tree | [Config & discovery](concepts/config-and-discovery.md) |

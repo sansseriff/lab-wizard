@@ -162,7 +162,7 @@ lab_wizard_repo/
 │   │   ├── procedures/      #   procedure definitions, step schemas, codegen
 │   │   ├── task_adapters/   #   steps, run lifecycle, the run entry point, sinks
 │   │   ├── data/            #   the lab database: schema, recorder, facets
-│   │   ├── savers/          #   data persistence (DatabaseSaver, schema)
+│   │   ├── savers/          #   optional extra outputs (FileSaver)
 │   │   ├── plotters/        #   plotting (scaffolding — see Roadmap)
 │   │   ├── server/          #   remote-control server (ZMQ + JSON-RPC)
 │   │   ├── client/          #   remote-control client (RemoteResources + proxies)

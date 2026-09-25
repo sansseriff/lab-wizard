@@ -103,9 +103,9 @@ def test_iv_curve_records_one_row_per_point_and_shuts_down(tmp_path: Path) -> No
 
     assert status is Status.SUCCESS
     saver = resources.savers[0]
-    assert saver.started and saver.ended
-    assert saver.run_info is not None and saver.run_info["run_type"] == "iv_curve"
-    assert [(r["data"]["bias_voltage"], r["data"]["sense_voltage"]) for r in saver.measurements] == [
+    assert saver.run_started is not None and saver.run_started.procedure == "iv_curve"
+    assert saver.run_ended is not None and saver.run_ended.status == "success"
+    assert [(p.values["bias_voltage"], p.values["sense_voltage"]) for p in saver.points] == [
         (bias, 0.05) for bias in points
     ]
 
@@ -152,17 +152,12 @@ def test_pcr_curve_records_a_count_rate_per_point(tmp_path: Path) -> None:
 
     assert status is Status.SUCCESS
     assert resources.counter.threshold_mV == -40.0  # set by the run, not inherited
-    rows = resources.savers[0].measurements
+    rows = resources.savers[0].points
     assert len(rows) == len(points)
     for row, bias in zip(rows, points):
-        data = row["data"]
-        assert data["bias_voltage"] == bias
-        assert data["counts"] == counts
-        assert data["int_time"] == gate_time
-        assert data["count_rate"] == counts / gate_time
-        # SaverSink maps counts/int_time into the dedicated saver columns too.
-        assert row["counts"] == counts
-        assert row["int_time"] == gate_time
+        assert row.values == {
+            "bias_voltage": bias, "counts": counts, "int_time": gate_time, "count_rate": counts / gate_time,
+        }
 
     assert resources.voltage_source.voltage == 0.0
     assert resources.voltage_source.output_enabled is False

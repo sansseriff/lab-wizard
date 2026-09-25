@@ -24,10 +24,10 @@ remember. An attribute with no entry defaults to ``local``, which keeps every
 existing project working untouched.
 
 **Savers and plotters never route.** Only instruments have a location; a saver
-writes to this machine's database and a plotter draws on this machine's screen,
+writes to this machine's disk and a plotter draws on this machine's screen,
 so both are served from the local project regardless of where the instruments
 live. They are exposed here as passthroughs because generated setup code says
-``DatabaseSaver.from_config(resources, key=...)`` against whatever resource
+``FileSaver.from_config(resources, key=...)`` against whatever resource
 source it was handed — without them, every project that routes an instrument
 anywhere would die on ``exp.savers[key]``.
 """

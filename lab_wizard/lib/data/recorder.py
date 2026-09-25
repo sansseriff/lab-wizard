@@ -137,6 +137,13 @@ class DatabaseRecorder:
 
     # ------------------------------------------------------------------
 
+    def device(self, name: str) -> dict[str, Any]:
+        """``{"name", "properties"}`` for a device, as recorded (empty properties if new)."""
+        row = self.connection.execute("SELECT name, properties FROM devices WHERE name = ?", (name,)).fetchone()
+        if row is None:
+            return {"name": name, "properties": {}}
+        return {"name": row["name"], "properties": json.loads(row["properties"] or "{}")}
+
     def run_row(self) -> dict[str, Any] | None:
         """The current run's ``runs`` row, JSON columns decoded. For tests and tools."""
         if self.run_id is None:

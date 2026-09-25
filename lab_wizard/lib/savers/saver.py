@@ -1,149 +1,134 @@
+"""Savers: optional extra outputs of a run, beside the lab database.
+
+Every run of a project is recorded in the lab database whether or not it has a
+saver (``lab_wizard.lib.data``). A saver is something more a project asks for,
+such as a folder of CSV files for people who work with files.
+
+A saver is a sink on the run's message stream, like the database recorder. It
+sees ``RunStarted``, every ``Point``, every step's start and end, and
+``RunEnded`` (``plans/semantic_data_plan.md`` §4), and handles them in
+:meth:`GenericSaver.handle`. The database is the record, so a saver that fails
+must never fail the run: :meth:`GenericSaver.attach` logs the error and stops
+feeding that saver.
+"""
+
 from __future__ import annotations
 
-"""
-saver.py
-
-Abstract lifecycle-aware base class for savers and a stand-in implementation.
-
-Each measurement run looks like:
-
-    saver.start_run(run_type="iv_curve", device="A7", cryostat="BlueFors-1")
-    for integration in ...:
-        saver.write_measurement(counts=..., int_time=..., metadata={...})
-    saver.end_run()
-
-A simple file-based saver may implement these as open/append/close, while a
-DB-backed saver writes a row to ``runs`` on start and a row to ``measurements``
-per integration.
-"""
-
-from typing import Any, TYPE_CHECKING
+import logging
 from abc import ABC, abstractmethod
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from lab_procedure import MessageBus, Point, RunEnded, RunStarted, StepBegan, StepEnded
 
 if TYPE_CHECKING:
+    from lab_wizard.lib.data.recorder import DatabaseRecorder
     from lab_wizard.lib.savers.base import SaverParams
+
+__all__ = ["GenericSaver", "SaverContext", "StandInSaver"]
+
+logger = logging.getLogger(__name__)
+
+RUN_MESSAGES = (RunStarted, Point, RunEnded)
+STEP_MESSAGES = (StepBegan, StepEnded)
+
+
+class SaverContext:
+    """Where a run is happening, for a saver that needs to know.
+
+    ``project_dir`` is the project's folder, or ``None`` for a step tree run on
+    its own; ``recorder`` is what records the run in the lab database, or
+    ``None``. The recorder handles each message before any saver does, so while
+    a saver handles ``RunStarted`` the run already has its database id.
+    """
+
+    def __init__(self, project_dir: Path | None = None, recorder: "DatabaseRecorder | None" = None) -> None:
+        self.project_dir = project_dir
+        self.recorder = recorder
+
+    @property
+    def database(self) -> Path | None:
+        return self.recorder.path if self.recorder is not None else None
+
+    @property
+    def run_id(self) -> int | None:
+        return self.recorder.run_id if self.recorder is not None else None
+
+    def device(self, name: str | None) -> dict[str, Any] | None:
+        """The device's name and properties, as the lab database knows them."""
+        if not name:
+            return None
+        if self.recorder is None:
+            return {"name": name, "properties": {}}
+        return self.recorder.device(name)
 
 
 class GenericSaver(ABC):
-    """Abstract lifecycle-aware base class for all savers."""
+    """Base class for savers: a sink on a run's messages."""
+
+    def attach(self, data_bus: MessageBus, status_bus: MessageBus, context: SaverContext | None = None) -> None:
+        """Start receiving a run's messages."""
+        self.context = context or SaverContext()
+        self._failed = False
+
+        def guarded(message: object) -> None:
+            if self._failed:
+                return
+            try:
+                self.handle(message)
+            except Exception:  # noqa: BLE001 - reported, and the run carries on
+                self._failed = True
+                logger.exception(
+                    "%s failed and has stopped saving; the run continues and is still "
+                    "recorded in the lab database",
+                    type(self).__name__,
+                )
+
+        data_bus.subscribe(RUN_MESSAGES, guarded)
+        status_bus.subscribe(STEP_MESSAGES, guarded)
 
     @abstractmethod
-    def start_run(
-        self,
-        *,
-        run_type: str,
-        device: str | None = None,
-        cryostat: str | None = None,
-        operator: str | None = None,
-        description: str | None = None,
-        config: dict[str, Any] | None = None,
-        instruments: dict[str, Any] | None = None,
-    ) -> None:
-        """Open a new run.  Called once per measurement program invocation.
-
-        ``config`` is the measurement's params; ``instruments`` is what each
-        instrument was configured with when the run started.
-        """
-        ...
-
-    @abstractmethod
-    def write_measurement(
-        self,
-        *,
-        data: dict[str, Any] | None = None,
-        counts: int | None = None,
-        int_time: float | None = None,
-        delta_time: float | None = None,
-        temperature: float | None = None,
-        metadata: dict[str, Any] | None = None,
-        details: list[dict[str, Any]] | None = None,
-    ) -> None:
-        """Persist one integration's worth of data."""
-        ...
-
-    @abstractmethod
-    def end_run(self) -> None:
-        """Mark the run finished and flush state."""
-        ...
+    def handle(self, message: Any) -> None:
+        """Handle one ``RunStarted``, ``Point``, ``StepBegan``, ``StepEnded`` or ``RunEnded``."""
 
     @classmethod
     @abstractmethod
     def from_params(cls, params: "SaverParams") -> "GenericSaver":
         """Construct a runtime saver from its Params object."""
-        ...
 
     @classmethod
     def from_config(cls, exp: Any, *, key: str) -> "GenericSaver":
         """Look up a saver Params on ``exp.savers`` by name and construct it.
 
-        Uses ``params.create_inst()`` for polymorphic dispatch so callers can
-        say ``DatabaseSaver.from_config(...)`` (concrete class) or
-        ``GenericSaver.from_config(...)`` (base class) and get the right type.
+        Uses ``params.create_inst()`` for polymorphic dispatch, so
+        ``GenericSaver.from_config(...)`` gets the configured type.
         """
         params = exp.savers[key]
         return params.create_inst()
 
 
 class StandInSaver(GenericSaver):
-    """A no-op saver. Records lifecycle calls in memory; useful for tests."""
+    """Keeps every message in memory. Useful for tests."""
 
     ignore_in_cli = True
 
     def __init__(self) -> None:
-        self.started: bool = False
-        self.ended: bool = False
-        self.run_info: dict[str, Any] | None = None
-        self.measurements: list[dict[str, Any]] = []
-        print("Stand-in saver initialized.")
+        self.messages: list[Any] = []
 
-    def start_run(
-        self,
-        *,
-        run_type: str,
-        device: str | None = None,
-        cryostat: str | None = None,
-        operator: str | None = None,
-        description: str | None = None,
-        config: dict[str, Any] | None = None,
-        instruments: dict[str, Any] | None = None,
-    ) -> None:
-        self.started = True
-        self.run_info = {
-            "run_type": run_type,
-            "device": device,
-            "cryostat": cryostat,
-            "operator": operator,
-            "description": description,
-            "config": config,
-        }
-        print(f"Stand-in: start_run {self.run_info}")
+    def handle(self, message: Any) -> None:
+        self.messages.append(message)
 
-    def write_measurement(
-        self,
-        *,
-        data: dict[str, Any] | None = None,
-        counts: int | None = None,
-        int_time: float | None = None,
-        delta_time: float | None = None,
-        temperature: float | None = None,
-        metadata: dict[str, Any] | None = None,
-        details: list[dict[str, Any]] | None = None,
-    ) -> None:
-        row = {
-            "data": data or {},
-            "counts": counts,
-            "int_time": int_time,
-            "delta_time": delta_time,
-            "temperature": temperature,
-            "metadata": metadata or {},
-            "details": details or [],
-        }
-        self.measurements.append(row)
-        print(f"Stand-in: write_measurement #{len(self.measurements)} keys={list((metadata or {}).keys())}")
+    @property
+    def run_started(self) -> RunStarted | None:
+        return next((m for m in self.messages if isinstance(m, RunStarted)), None)
 
-    def end_run(self) -> None:
-        self.ended = True
-        print(f"Stand-in: end_run ({len(self.measurements)} measurements written)")
+    @property
+    def run_ended(self) -> RunEnded | None:
+        return next((m for m in self.messages if isinstance(m, RunEnded)), None)
+
+    @property
+    def points(self) -> list[Point]:
+        return [m for m in self.messages if isinstance(m, Point)]
 
     @classmethod
     def from_params(cls, params: "SaverParams") -> "StandInSaver":

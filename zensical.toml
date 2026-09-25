@@ -69,7 +69,7 @@ nav = [
     { "Running & consuming servers" = "remote/operations.md" },
   ] },
   { "Reference" = [
-    { "Measurement database" = "data/database.md" },
+    { "The lab database" = "data/database.md" },
     { "Roadmap" = "roadmap.md" },
     { "Releasing" = "releasing.md" },
   ] },

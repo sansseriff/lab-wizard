@@ -3,16 +3,14 @@
 A project names its instruments and reads their settings from a config tree it
 does not own. That tree is edited between runs, so without a snapshot taken at
 run start nothing says which calibration a curve was taken at. These tests pin
-the snapshot, the read that makes it possible through a server, and the column
-it lands in — including for a database written before that column existed.
+the snapshot and the read that makes it possible through a server; that it lands
+in the lab database is tested in ``test_own_server_projects.py``.
 """
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, cast
 
 
@@ -20,7 +18,6 @@ from lab_wizard.lib.client.proxies.attenuator import RemoteAttenuator
 from lab_wizard.lib.client.session import Session
 from lab_wizard.lib.instruments.fake_rack.fake_attenuator import FakeAttenuator, FakeAttenuatorParams
 from lab_wizard.lib.instruments.general.attenuator import StandInAttenuator
-from lab_wizard.lib.savers.database_saver import DatabaseSaver
 from lab_wizard.lib.task_adapters.provenance import baseline_snapshot, instrument_params
 
 
@@ -119,43 +116,3 @@ def test_an_instrument_whose_params_cannot_be_read_is_still_listed():
         "params": {},
     }
     assert list(snapshot) == ["attenuator", "spares[0]", "spares[1]"]
-
-
-# --------------------------- into the database ---------------------------
-
-
-def test_the_run_row_carries_the_snapshot_beside_the_measurement_params(tmp_path: Path):
-    saver = DatabaseSaver(str(tmp_path / "m.db"))
-    saver.start_run(
-        run_type="mcr_curve",
-        config={"attenuation": {"settle_s": 0.2}},
-        instruments={"bench_att": {"wavelength_nm": 1310.0}},
-    )
-    saver.end_run()
-    saver.close()
-
-    row = sqlite3.connect(tmp_path / "m.db").execute("select config, instruments from runs").fetchone()
-    assert json.loads(row[0]) == {"attenuation": {"settle_s": 0.2}}
-    assert json.loads(row[1]) == {"bench_att": {"wavelength_nm": 1310.0}}
-
-
-def test_a_database_written_before_the_column_existed_still_opens(tmp_path: Path):
-    """There are no migrations here, and last month's database must still work."""
-    db_path = tmp_path / "old.db"
-    saver = DatabaseSaver(str(db_path))
-    saver.start_run(run_type="iv_curve", config={"old": True})
-    saver.end_run()
-    saver.close()
-
-    with sqlite3.connect(db_path) as db:
-        db.execute("alter table runs drop column instruments")  # an older schema
-        assert "instruments" not in {c[1] for c in db.execute("pragma table_info(runs)")}
-
-    reopened = DatabaseSaver(str(db_path))
-    reopened.start_run(run_type="mcr_curve", instruments={"bench_att": {"wavelength_nm": 1550.0}})
-    reopened.end_run()
-    reopened.close()
-
-    rows = sqlite3.connect(db_path).execute("select run_type, instruments from runs order by id").fetchall()
-    assert rows[0] == ("IV_CURVE", None)  # the old run keeps its data
-    assert json.loads(rows[1][1]) == {"bench_att": {"wavelength_nm": 1550.0}}

@@ -12,8 +12,7 @@ On-disk layout::
 
     config/
       savers/
-        database_saver_key_main_db.yml
-        file_saver_key_csv_backup.yml
+        file_saver_key_run_folders.yml
       plotters/
         mpl_plotter_key_iv_window.yml
 """

@@ -1,6 +1,6 @@
 # The lab data system: recording runs, saving files, and the viewer
 
-> **Status: Phases 1–4 built (2026-09-24); Phases 5–8 not started.** Decisions
+> **Status: Phases 1–5 built (2026-09-24); Phases 6–8 not started.** Decisions
 > still marked **(open)** in §14 need an answer; everything else was settled
 > in review.
 >
@@ -755,13 +755,41 @@ As built:
   in memory and runs it on stand-ins; generation tests call
   `generate_procedure_project`. New: `tests/test_procedure_data_model.py`.
 
-### Phase 5: the file saver (`lab_wizard/lib/savers/file_saver.py`)
+### Phase 5: the file saver (`lab_wizard/lib/savers/file_saver.py`) — built
 
 - `FileSaverParams` (§7) as the saver resource type; `DatabaseSaver` and its
   params are deleted.
 - The run-folder writer, shared with Export run.
 - Tests: a run folder round-trips everything on its database rows; the path
   template; crash mid-run leaves a readable folder.
+
+As built:
+
+- **Savers are sinks.** `GenericSaver.attach(data_bus, status_bus, context)`
+  subscribes `handle` to every run and step message; a saver that raises is
+  logged and stopped, and the run carries on. `SaverContext` gives the project
+  folder and the recorder (for the run id and a device's properties).
+  `SaverSink` is deleted along with `DatabaseSaver` and `savers/schema.py`
+  (§13 Phase 8 had them later; nothing used them once savers were sinks).
+  `StandInSaver` keeps the messages.
+- `lib/data/run_folder.py`: `RunFolder` (the format), `folder_name` (the
+  template), `export_run(db, run_id, root)`. The file saver and the export use
+  the same writer, and `tests/test_file_saver.py` checks that a run saved live
+  and the same run exported from the database give identical `run.yaml`,
+  `procedure.yaml`, `points.csv`, `steps.csv` and array files.
+- `points.csv` ends with a `steps` column (the paths, `;`-separated), so the
+  folder holds everything on the `points` rows. Array columns get their own
+  `<name>.csv`, headed by bin values when `columns` gives bins.
+- A template field the run lacks is `none`; `/` and other unsafe characters in
+  a value become `_`, and a segment cannot climb out of the root. A folder name
+  already taken gets `_2`.
+- `plot.png` is the run's default plot (`plot.default_plot`: the first of the
+  procedure's `plots:`, else its first recorded column against its innermost
+  sweep), drawn with matplotlib's Agg canvas, so no display is needed.
+- The Database page no longer lists database savers; it says where runs are
+  recorded and how to read them until the viewer replaces it.
+- Old configs of type `database_saver` are skipped with a warning when savers
+  load (existing behavior for an unknown type), not errors.
 
 ### Phase 6: backend API (`lab_wizard/wizard/backend/data_api.py`, new)
 

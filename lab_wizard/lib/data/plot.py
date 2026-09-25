@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from lab_wizard.lib.data.expressions import ExpressionError, Params, compile_expression, derive
 
-__all__ = ["PlotSpec", "evaluate_plot", "load_plot", "notebook_source", "to_series"]
+__all__ = ["PlotSpec", "default_plot", "evaluate_plot", "load_plot", "notebook_source", "to_series"]
 
 _PER_RUN = {"min", "max", "first", "last"}
 
@@ -90,6 +90,45 @@ def _where(spec: PlotSpec, columns: list[str], params: Params | None) -> pl.Expr
         else:
             keep &= expr == wanted
     return keep.fill_null(False)
+
+
+_BINDING_STEPS = {"sweep": "parameter", "repeat": "parameter", "with_parameter": "parameter"}
+
+
+def _bindings(step: Any, depth: int = 0) -> list[tuple[int, str, str]]:
+    """``(depth, step type, name)`` for every parameter a definition's steps bind."""
+    out: list[tuple[int, str, str]] = []
+    if isinstance(step, dict):
+        name_field = _BINDING_STEPS.get(step.get("type", ""))
+        if name_field and isinstance(step.get(name_field), str):
+            out.append((depth, step["type"], step[name_field]))
+        for value in step.values():
+            out.extend(_bindings(value, depth + 1))
+    elif isinstance(step, list):
+        for item in step:
+            out.extend(_bindings(item, depth))
+    return out
+
+
+def default_plot(definition: dict[str, Any] | None, columns: list[str]) -> PlotSpec | None:
+    """What a run is drawn as when nobody chose: the procedure's first plot, or else
+    its first recorded column against its innermost sweep.
+
+    ``definition`` is a run's recorded definition (``None`` for a run without
+    one); ``columns`` are the run's columns, in order.
+    """
+    plots = (definition or {}).get("plots") or []
+    if plots:
+        return PlotSpec.model_validate(plots[0])
+    bound = _bindings((definition or {}).get("body"))
+    sweeps = [(depth, name) for depth, kind, name in bound if kind == "sweep" and name in columns]
+    bound_names = {name for _depth, _kind, name in bound}
+    recorded = [c for c in columns if c not in bound_names]
+    x = max(sweeps)[1] if sweeps else (columns[0] if columns else None)
+    y = next((c for c in recorded if c != x), None)
+    if x is None or y is None:
+        return None
+    return PlotSpec(x=x, y=[y], series=None)
 
 
 def _labels(spec: PlotSpec, run_labels: dict[int, str] | None) -> pl.Expr:

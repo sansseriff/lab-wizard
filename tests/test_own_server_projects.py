@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from ruamel.yaml import YAML
 
@@ -30,7 +31,7 @@ from lab_wizard.lib.instruments.fake_rack.fakegpib import FakeGpibParams
 from lab_wizard.lib.instruments.fake_rack.modules.fake928 import Fake928Params
 from lab_wizard.lib.instruments.fake_rack.modules.fake970 import Fake970Params
 from lab_wizard.lib.procedures.storage import load_procedure, save_preset
-from lab_wizard.lib.savers.database_saver import DatabaseSaverParams
+from lab_wizard.lib.savers.file_saver import FileSaverParams
 from lab_wizard.lib.utilities.flat_resource_io import save_resource
 from lab_wizard.lib.utilities.config_io import (
     assign_missing_leaf_attribute_names,
@@ -91,7 +92,7 @@ def served(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[An
         definition.params_model(),
     )
 
-    save_resource(ws.config_dir, "saver", "db", DatabaseSaverParams())
+    save_resource(ws.config_dir, "saver", "files", FileSaverParams(path="{device}/{procedure}"))
 
     set_server_bind(ws.config_dir, f"tcp://127.0.0.1:{_free_port()}")
     start_server(ws.config_dir, detached=False)
@@ -139,7 +140,7 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
             "params_preset": "quick",
             "selected_resources": [
                 *selections,
-                {"variable_name": "savers", "resource_kind": "saver", "type": "database_saver", "key": "db"},
+                {"variable_name": "savers", "resource_kind": "saver", "type": "file_saver", "key": "files"},
             ],
         },
     )
@@ -201,6 +202,12 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
         ("column", "device_voltage"),
     } <= facets
     db.close()
+
+    # The project also asked for files: the same run as a folder, under the
+    # workspace's data/files, laid out by the saver's template.
+    folder = ws.data_dir / "files" / "A7" / "mcr_curve"
+    assert yaml.safe_load((folder / "run.yaml").read_text())["status"] == "success"
+    assert len((folder / "points.csv").read_text().splitlines()) == 1 + len(rows)
 
     # The run handed everything back: no claims left, and the attenuator the
     # procedure closed and fully attenuated is what the server now reports.
