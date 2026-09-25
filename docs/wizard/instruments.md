@@ -23,10 +23,11 @@ those under [Servers → Remote servers](servers.md#remote-servers).
 
 - **`tree`** — the configured instrument tree (`get_configured_tree`), a list of
   top-level instruments each with nested `children`, each node carrying its
-  `type`, `key` (hash), and `fields`.
+  `type`, `key` (hash), `fields`, and a node-only `yaml` preview.
 - **`metadata`** — for every discoverable instrument type
   ([`get_instrument_metadata`](../concepts/config-and-discovery.md#type-discovery)):
-  defaults, `key_hint`, parent chain, child types, and discovery-action specs.
+  defaults, `key_hint`, parent chain, child types, discovery-action specs,
+  `params_schema` (Pydantic JSON Schema), and `read_only_fields`.
 
 The metadata drives the "add instrument" UI: it knows which types are top-level
 vs children, what each type's parent chain is, and what default field values to
@@ -34,13 +35,29 @@ seed a new node with.
 
 ## Adding an instrument
 
+Use **Add** beside a controller or mainframe (or **Add child** in its inspector)
+to add a compatible module. The picker only offers its direct child types and
+preselects the entire existing ancestor chain. **Add instrument** in the tree
+header still supports creating a new controller or building a complete chain.
+
 Because a child may need parents that don't exist yet, the GUI builds a
-leaf-first **chain** and posts it to `POST /api/manage-instruments/add`
-(→ [`add_instrument_chain`](../concepts/config-and-discovery.md)). Each step is
+leaf-first **chain** in a backend draft. Each step is
 either:
 
 - `use_existing` — reuse a node already in the config, or
 - `create_new` — create it from defaults (plus any `extra` field overrides).
+
+The wizard stages the chain with `PUT /api/manage-instruments/drafts/{id}`.
+Staging and canceling write no instrument YAML. Drafts expire after an hour of
+inactivity; closing the wizard deletes its draft. The final
+`POST /api/manage-instruments/drafts/{id}/commit` validates against the current
+configuration and saves the complete chain, including discovered children. A
+repeated commit returns the original result while that draft remains available.
+
+The underlying `add_instrument_chain` operation also serves the direct `/add`
+endpoint and server RPC. It rejects duplicate addresses instead of replacing
+existing parameters or children. Config edits retain disabled roots and children,
+although those instruments remain excluded from the runtime tree.
 
 The chain is processed root-first; the raw key value you supply (port, slot,
 GPIB address) is written into the params and the node is stored under its
@@ -58,19 +75,54 @@ Depending on the result type the GUI will:
 
 - list serial-port candidates for you to pick (`ProbeResult`),
 - list instances found on a bus for you to pick (`SelfCandidatesResult`), or
-- auto-apply discovered sub-modules (`ChildrenResult`), via
-  `POST /api/manage-instruments/apply-children`.
+- include discovered sub-modules (`ChildrenResult`) in the final draft commit.
+
+`POST /api/manage-instruments/apply-children` also supports scanning an existing
+parent. It takes the exact root-first parent path, preserves already-configured
+children, and uses the server's held/claimed-rack guards, registry reload, and audit.
 
 If a child's discovery action needs a live parent (e.g. scan a GPIB bus through
 the Prologix controller), the backend walks and initializes the resolved parent
-chain first, then disconnects it when done.
+chain first, then releases the root transport when done. Unsaved parents are
+instantiated from the draft in memory, through the owning server when available.
+The wizard waits for a scan or save to finish before allowing dismissal.
 
 ## Editing, resetting, removing
 
+Select a row to open its right-hand inspector. The tree can be searched by name,
+type, address, or hash; matching children keep their ancestors visible. On a
+narrow screen the inspector appears below the tree.
+
+The **Parameters** tab renders typed inputs from the owning server's Python
+parameter schema, including collapsible channel settings, descriptions, and
+nullable values. Changes stay in a draft until **Save changes**; **Discard**
+restores the saved values. Switching instruments or workspaces asks before
+abandoning a draft. Use **Reload saved instruments** in the tree header after a
+conflict with another editor.
+
+**Saved YAML** is a read-only, normalized preview of the selected instrument's
+saved parameters. It uses the same field order and description comments as the
+Python YAML writer; children have separate previews. It does not include an
+unsaved form draft. Type, address, and availability fields are read-only in the
+inspector; address changes require adding an instrument at its new address.
+
+The update endpoint accepts a root-first `path`, `fields`, and `expected_fields`.
+It validates through the actual Params class, rejects unknown fields and
+duplicate attribute names, and compares the saved values before writing to
+prevent stale drafts overwriting another editor. Only the selected YAML file is
+written, preserving child references (including disabled children). The same
+`tree_update` RPC serves this workspace and other local-server tabs: held or
+claimed hardware refuses edits, successful writes reload the registry and record
+an audit event. These are saved configuration changes, not live hardware commands.
+
 | Action | Endpoint | Effect |
 |---|---|---|
+| Save parameters | `POST /api/manage-instruments/update` | Validate and save the selected node, preserving its identity and children |
 | Reset | `POST /api/manage-instruments/reset` | `reinitialize_instrument` — restore default field values, **preserve children** and the key field (so the hash is stable) |
 | Remove | `POST /api/manage-instruments/remove` | `remove_instrument` — delete the node and clean up orphaned files/empty folders |
+
+Reset and remove requests also carry the selected ancestor path, so identical
+slot hashes under different racks target the correct instrument.
 
 ## `attribute_name` — the stable handle
 

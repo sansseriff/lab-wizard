@@ -1,21 +1,20 @@
 <script lang="ts">
-	/** This workspace's own instrument config: the full tree, and the only add
-	 * flow that can build a whole parent chain in one go.
-	 *
-	 * The chain-building is possible here precisely because the config is ours —
-	 * a partially-saved parent left behind by an abandoned wizard is our own mess
-	 * to clean up. `ServerTree` deliberately refuses the same trick on someone
-	 * else's config.
-	 */
-	import TreeNode from '$lib/components/TreeNode.svelte';
+	/** Build a complete instrument chain in a backend draft, then save it once. */
+	import InstrumentWorkbench from './InstrumentWorkbench.svelte';
+	import {
+		existingParentChain,
+		parentCandidates,
+		nodeAddress,
+		type NodePath,
+		type ParamUpdate,
+		type ParamResult
+	} from '$lib/instruments/model';
 	import type { TreeItem as TreeNodeItem } from '$lib/components/TreeNode.svelte';
-	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import { workstation } from '$lib/stores/workstation.svelte';
-	import PlusIcon from 'phosphor-svelte/lib/PlusIcon';
 	import type {
 		TreeItem,
 		InstrumentMeta,
@@ -27,7 +26,13 @@
 	import { untrack } from 'svelte';
 	import type { TransportBadge } from '$lib/components/TreeNode.svelte';
 
-	let { data, autoOpenAdd = false }: { data: any; autoOpenAdd?: boolean } = $props();
+	let {
+		data,
+		autoOpenAdd = false,
+		dirty = $bindable(false),
+		busy = $bindable(false)
+	}: { data: any; autoOpenAdd?: boolean; dirty?: boolean; busy?: boolean } = $props();
+	let addParent = $state<{ node: TreeItem; path: NodePath } | null>(null);
 	// Seeded from the page's load, then refetched in place after each edit, so
 	// only the initial value is wanted here.
 	let tree: TreeItem[] = $state(untrack(() => data.tree ?? []));
@@ -52,12 +57,14 @@
 	// Confirmation dialog state
 	let confirmAction: 'reset' | 'remove' | null = $state(null);
 	let confirmTarget: TreeNodeItem | null = $state(null);
+	let confirmPath = $state<NodePath>([]);
 	let actionLoading = $state(false);
 	let statusMessage: { text: string; ok: boolean } | null = $state(null);
 
 	// Add wizard state
 	let showAddWizard = $state(false);
-	let addStep = $state(0);
+	type AddStep = 'choose-type' | 'choose-parent' | 'parent-key' | 'discover' | 'leaf-key' | 'confirm';
+	let addStep = $state<AddStep>('choose-type');
 	let selectedType: string | null = $state(null);
 	let chainSteps: ChainStep[] = $state([]);
 	let currentChainIndex = $state(0);
@@ -71,8 +78,22 @@
 	let discoveryLoading = $state(false);
 	let discoveryTargetType: string | null = $state(null); // which type discovery is currently for (leaf or parent)
 
-	// Optimistically saved parent keys (for cleanup on cancel)
-	let savedParentKeys: string[] = $state([]);
+	let draftId = $state<string | null>(null);
+	let draftTree = $state<TreeItem[] | null>(null);
+	let draftPath = $state<NodePath>([]);
+	let draftReadyToCommit = $state(false);
+
+	async function stageDraft(chain: ChainStep[]) {
+		if (!draftId) {
+			const draft = await fetchWithConfig<{ id: string }>('/api/manage-instruments/drafts', 'POST');
+			draftId = draft.id;
+		}
+		const result = await fetchWithConfig<{ tree: TreeItem[]; path: NodePath }>(
+			`/api/manage-instruments/drafts/${draftId}`, 'PUT', { chain }
+		);
+		draftTree = result.tree;
+		draftPath = result.path;
+	}
 
 	async function refetchData() {
 		const d = await fetchWithConfig<{ tree: TreeItem[]; metadata: Record<string, InstrumentMeta> }>(
@@ -83,8 +104,20 @@
 		metadata = d.metadata ?? {};
 	}
 
+	async function saveParams(update: ParamUpdate): Promise<ParamResult> {
+		const result = await fetchWithConfig<ParamResult>(
+			'/api/manage-instruments/update',
+			'POST',
+			update
+		);
+		await refetchData();
+		statusMessage = { text: 'Instrument parameters saved.', ok: true };
+		return result;
+	}
+
 	// Reset / Remove actions
-	function onReset(node: TreeNodeItem) {
+	function onReset(node: TreeNodeItem, path: NodePath) {
+		confirmPath = path;
 		confirmAction = 'reset';
 		confirmTarget = node;
 	}
@@ -106,14 +139,16 @@
 	let removalImpact: RemovalImpact | null = $state(null);
 	let impactLoading = $state(false);
 
-	function onRemove(node: TreeNodeItem) {
+	function onRemove(node: TreeNodeItem, path: NodePath) {
+		confirmPath = path;
 		confirmAction = 'remove';
 		confirmTarget = node;
 		removalImpact = null;
 		impactLoading = true;
 		fetchWithConfig<RemovalImpact>('/api/manage-instruments/removal-impact', 'POST', {
 			type: node.type,
-			key: node.key
+			key: node.key,
+			path
 		})
 			.then((res) => {
 				// Ignore a reply for a dialog the user already dismissed.
@@ -130,7 +165,7 @@
 		actionLoading = true;
 		statusMessage = null;
 		try {
-			const body = { type: confirmTarget.type, key: confirmTarget.key };
+			const body = { type: confirmTarget.type, key: confirmTarget.key, path: confirmPath };
 			const endpoint =
 				confirmAction === 'reset'
 					? '/api/manage-instruments/reset'
@@ -165,7 +200,9 @@
 
 	let typeQuery = $state('');
 
-	const allTypes = $derived(Object.values(metadata));
+	const allTypes = $derived(
+		Object.values(metadata).filter((m) => !addParent || m.parent_type === addParent.node.type)
+	);
 
 	function matchesQuery(m: InstrumentMeta): boolean {
 		const q = typeQuery.trim().toLowerCase();
@@ -200,9 +237,11 @@
 		return findExistingInstances(typeStr).length;
 	}
 
-	function startAddWizard() {
+	function startAddWizard(parent: { node: TreeItem; path: NodePath } | null = null) {
+		addParent = parent;
+		tempKey = '';
 		showAddWizard = true;
-		addStep = 0;
+		addStep = 'choose-type';
 		typeQuery = '';
 		selectedType = null;
 		chainSteps = [];
@@ -212,40 +251,14 @@
 		discoveryInputs = {};
 		discoveryResult = null;
 		discoveryTargetType = null;
-		savedParentKeys = [];
+		draftId = null;
+		draftTree = null;
+		draftPath = [];
+		draftReadyToCommit = false;
 	}
 
-	async function saveResolvedParent(stepIndex: number) {
-		const step = chainSteps[stepIndex];
-		if (step.action !== 'create_new' || !step.key) return;
-
-		// Build a mini-chain for just this parent and its ancestors above it
-		const miniChain: ChainStep[] = [];
-		// The current step being saved
-		miniChain.push({ ...step });
-		// All ancestors above this step (higher indices = further up)
-		for (let i = stepIndex + 1; i < chainSteps.length; i++) {
-			miniChain.push({ ...chainSteps[i] });
-		}
-
-		const response = await fetchWithConfig<{ saved_keys: { type: string; key: string }[] }>(
-			'/api/manage-instruments/add',
-			'POST',
-			{ chain: miniChain }
-		);
-
-		// The backend stores instruments under a hash key, not the raw port/address.
-		// Replace the chainStep key with the real hash so subsequent discovery calls
-		// (which send parent_chain) can find the parent in the config.
-		const savedForThisStep = response.saved_keys?.find((s) => s.type === step.type);
-		if (savedForThisStep) {
-			chainSteps[stepIndex].key = savedForThisStep.key;
-		}
-		// Switch step to use_existing now that it's saved
-		chainSteps[stepIndex].action = 'use_existing';
-		// Track for cleanup on cancel
-		savedParentKeys.push(chainSteps[stepIndex].key);
-		await refetchData();
+	async function stageResolvedParent(stepIndex: number) {
+		await stageDraft(chainSteps.slice(stepIndex));
 	}
 
 	function selectTypeForAdd(typeStr: string) {
@@ -270,30 +283,45 @@
 			discoveryInputs = inputs;
 		}
 
+		if (addParent) {
+			chainSteps = [
+				{ type: typeStr, key: '', action: 'create_new', resolved: false },
+				...existingParentChain(addParent.path)
+			];
+			currentChainIndex = 1;
+			advanceChain();
+			return;
+		}
+
 		const chain = meta.parent_chain;
 		if (chain.length === 0) {
 			chainSteps = [{ type: typeStr, key: '', action: 'create_new', resolved: false }];
 			if (discoveryActions.length > 0) {
 				// Has discovery support — show discovery step
-				addStep = 20;
+				addStep = 'discover';
 				// Auto-run discovery immediately (no need to wait for user)
 				if (discoveryActions.length > 0) {
 					runDiscovery(discoveryActions[0].name);
 				}
 			} else if (meta.key_hint) {
-				addStep = 2;
+				addStep = 'leaf-key';
 			} else {
 				chainSteps[0].key = typeStr;
-				addStep = 3;
+				addStep = 'confirm';
 			}
 		} else {
 			// Build chain bottom-up: leaf first, then parents
 			chainSteps = [
 				{ type: typeStr, key: '', action: 'create_new', resolved: false },
-				...chain.map((pt) => ({ type: pt, key: '', action: 'use_existing' as const, resolved: false }))
+				...chain.map((pt) => ({
+					type: pt,
+					key: '',
+					action: 'use_existing' as const,
+					resolved: false
+				}))
 			];
 			currentChainIndex = chain.length;
-			addStep = 1;
+			addStep = 'choose-parent';
 		}
 	}
 
@@ -309,7 +337,10 @@
 		return results;
 	}
 
-	async function selectExistingParent(key: string) {
+	function selectExistingParent(key: string) {
+		// Ignore a stale click from a previous step rather than assigning its
+		// controller key to a mainframe or module.
+		if (!currentExisting.some((candidate) => candidate.key === key)) return;
 		chainSteps[currentChainIndex].action = 'use_existing';
 		chainSteps[currentChainIndex].key = key;
 		chainSteps[currentChainIndex].resolved = true;
@@ -335,10 +366,10 @@
 				}
 			}
 			discoveryInputs = inputs;
-			addStep = 20;
+			addStep = 'discover';
 			runDiscovery(parentDiscovery[0].name);
 		} else {
-			addStep = 10; // manual key entry for new parent
+			addStep = 'parent-key'; // manual key entry for new parent
 		}
 	}
 
@@ -350,7 +381,7 @@
 		addLoading = true;
 		statusMessage = null;
 		try {
-			await saveResolvedParent(stepIndex);
+			await stageResolvedParent(stepIndex);
 			advanceChain();
 			return true;
 		} catch (e: any) {
@@ -366,10 +397,15 @@
 	}
 
 	function advanceChain() {
+		// Results belong to one step; a parent's discovered children must never
+		// be applied to the leaf when its address is entered manually.
+		discoveryResult = null;
+		discoveryTargetType = null;
+		discoveryActions = [];
 		currentChainIndex--;
 		if (currentChainIndex < 0) {
 			// all parents resolved, but we still need the leaf key if it's a child
-			addStep = 2;
+			addStep = 'leaf-key';
 			return;
 		}
 		if (currentChainIndex === 0) {
@@ -379,7 +415,7 @@
 			const leafDiscovery = leafMeta?.discovery_actions ?? [];
 
 			if (leafDiscovery.length > 0) {
-				// Leaf has discovery — go to step 20
+				// Leaf has discovery — scan before choosing an address
 				discoveryTargetType = leafType;
 				discoveryActions = leafDiscovery;
 				discoveryResult = null;
@@ -394,64 +430,56 @@
 				}
 				discoveryInputs = inputs;
 
-				addStep = 20;
+				addStep = 'discover';
 				runDiscovery(leafDiscovery[0].name);
 			} else {
-				addStep = 2; // Manual key entry
+				addStep = 'leaf-key'; // Manual key entry
 			}
 		} else {
-			addStep = 1; // next parent in chain
+			addStep = 'choose-parent'; // next parent in chain
 		}
 	}
 
-	const isParentDiscovery = $derived(discoveryTargetType !== null && discoveryTargetType !== selectedType);
+	const isParentDiscovery = $derived(
+		discoveryTargetType !== null && discoveryTargetType !== selectedType
+	);
 
 	async function resolveDiscoverySelection(key: string) {
+		if (addLoading || discoveryLoading) return;
 		if (isParentDiscovery) {
-			// Resolve the current parent chain step and advance
-			chainSteps[currentChainIndex].key = key;
-			chainSteps[currentChainIndex].resolved = true;
-			await saveResolvedParent(currentChainIndex);
-			advanceChain();
+			if (discoveryResult?.result_type === 'children') {
+				chainSteps[currentChainIndex].children = discoveryResult.children;
+			}
+			await confirmNewParentKey(key);
 		} else {
-			// Leaf discovery — set leaf key and execute
 			chainSteps[0].key = key;
-			executeAdd();
+			await executeAdd();
 		}
 	}
 
 	function setLeafKey(key: string) {
 		chainSteps[0].key = key;
-		addStep = 3; // confirm
+		addStep = 'confirm'; // confirm
 	}
-
 
 	async function runDiscovery(actionName: string) {
 		const targetType = discoveryTargetType ?? selectedType;
 		if (!targetType) return;
 		discoveryLoading = true;
 		discoveryResult = null;
+		statusMessage = null;
 		try {
-			// Build resolved ancestor chain (root-first) from chainSteps
-			// chainSteps is leaf-first: [leaf, parent, grandparent, ...]
-			const targetIndex = chainSteps.findIndex(s => s.type === targetType);
-			const parentChain: {type: string, key: string}[] = [];
-			if (targetIndex >= 0) {
-				for (let i = chainSteps.length - 1; i > targetIndex; i--) {
-					const step = chainSteps[i];
-					if (step.resolved && step.key) {
-						parentChain.push({ type: step.type, key: step.key });
-					}
-				}
-			}
-
+			const targetIndex = chainSteps.findIndex((s) => s.type === targetType);
+			const ancestors = chainSteps.slice(targetIndex + 1);
+			if (ancestors.length) await stageDraft(ancestors);
 			const response = await fetchWithConfig('/api/manage-instruments/discover', 'POST', {
 				type: targetType,
 				action: actionName,
 				params: discoveryInputs,
-				...(parentChain.length > 0 ? { parent_chain: parentChain } : {})
+				...(ancestors.length ? { draft_id: draftId } : {})
 			});
 			discoveryResult = response;
+			discoveryInputsHaveChanged = false;
 		} catch (e: any) {
 			statusMessage = { text: `Discovery failed: ${e.message ?? e}`, ok: false };
 		} finally {
@@ -460,6 +488,7 @@
 	}
 
 	async function executeAdd() {
+		if (addLoading || discoveryLoading) return;
 		addLoading = true;
 		statusMessage = null;
 		try {
@@ -472,25 +501,17 @@
 				chainSteps[0].key = discoveryResult.parent_key;
 			}
 
-			// Add the parent first
-			await fetchWithConfig('/api/manage-instruments/add', 'POST', { chain: chainSteps });
-
-			// If discovery found children, apply them
-			if (
-				discoveryResult?.result_type === 'children' &&
-				discoveryResult.children.length > 0 &&
-				selectedType
-			) {
-				const parentKey = chainSteps[0].key;
-				await fetchWithConfig('/api/manage-instruments/apply-children', 'POST', {
-					parent_type: selectedType,
-					parent_key: parentKey,
-					children: discoveryResult.children
-				});
+			if (!draftReadyToCommit) {
+				if (discoveryResult?.result_type === 'children') {
+					chainSteps[0].children = discoveryResult.children;
+				}
+				await stageDraft(chainSteps);
+				draftReadyToCommit = true;
 			}
+			await fetchWithConfig(`/api/manage-instruments/drafts/${draftId}/commit`, 'POST');
 
 			statusMessage = { text: `Added ${selectedType}`, ok: true };
-			savedParentKeys = []; // parents are now permanent
+			draftReadyToCommit = true;
 			await refetchData();
 			showAddWizard = false;
 		} catch (e: any) {
@@ -506,27 +527,31 @@
 			? chainSteps[currentChainIndex].type
 			: null
 	);
-	const currentExisting = $derived(currentStepType ? findExistingInstances(currentStepType) : []);
+	const currentExisting = $derived(
+		currentStepType
+			? parentCandidates(draftTree ?? tree, currentStepType,
+				chainSteps.slice(currentChainIndex + 1).reverse().map((step) => ({
+					type: step.type,
+					key: step.action === 'create_new'
+						? (draftPath.find((p) => p.type === step.type)?.key ?? step.key) : step.key
+				})))
+					.filter((node) => node.fields?.enabled !== false)
+					.map((node) => ({ key: node.key, node }))
+			: []
+	);
 
 	async function cancelAddWizard() {
-		// Clean up optimistically saved parents (children first = reverse order)
-		for (let i = savedParentKeys.length - 1; i >= 0; i--) {
-			const key = savedParentKeys[i];
-			// Find the type from chainSteps
-			const step = chainSteps.find(s => s.key === key);
-			if (step) {
-				try {
-					await fetchWithConfig('/api/manage-instruments/remove', 'POST', {
-						type: step.type, key
-					});
-				} catch {
-					// fire-and-forget cleanup
-				}
-			}
+		if (addLoading || discoveryLoading) return;
+		addLoading = true;
+		try {
+			if (draftId) await fetchWithConfig(`/api/manage-instruments/drafts/${draftId}`, 'DELETE');
+			draftId = null;
+			showAddWizard = false;
+		} catch (e: any) {
+			statusMessage = { text: e.message ?? 'Could not close the draft. Please retry.', ok: false };
+		} finally {
+			addLoading = false;
 		}
-		savedParentKeys = [];
-		showAddWizard = false;
-		await refetchData();
 	}
 
 	// Temp key input
@@ -567,25 +592,19 @@
 		</div>
 	{/if}
 
-	<!-- No heading here: the page already says "Configured instruments", and the
-	     tab row above says which workspace's. -->
-	<div>
-		<div class="rounded border border-line bg-surface p-3">
-			{#if tree.length === 0}
-				<p class="px-2 py-3 text-sm text-muted">No instruments configured yet.</p>
-			{:else}
-				{#each tree as node}
-					<TreeNode {node} {onReset} {onRemove} {transportBadge} />
-				{/each}
-			{/if}
-		</div>
-	</div>
-
-	<!-- Add button -->
-	<button class="lw-btn lw-btn-primary" onclick={startAddWizard}>
-		<PlusIcon size={14} weight="bold" />
-		Add instrument
-	</button>
+	<InstrumentWorkbench
+		{tree}
+		{metadata}
+		{transportBadge}
+		bind:dirty
+		bind:busy
+		onadd={() => startAddWizard()}
+		onaddparent={(node, path) => startAddWizard({ node, path })}
+		onreset={onReset}
+		onremove={onRemove}
+		onsave={saveParams}
+		onrefresh={refetchData}
+	/>
 </section>
 
 <!-- Add wizard. In a dialog rather than inline: the tree above is routinely
@@ -593,13 +612,18 @@
      scrolling to find the step you are already on. -->
 {#if showAddWizard}
 	<Modal
-		title="Add instrument"
-		subtitle={addStep === 0
-			? 'Pick what to add. Modules list the parent they attach to.'
+		title={addParent ? `Add under ${addParent.node.type}` : 'Add instrument'}
+		subtitle={addStep === 'choose-type'
+			? addParent
+				? `${nodeAddress(addParent.node)} · Choose a compatible module. Its parent is already selected.`
+				: 'Pick what to add. Modules list the parent they attach to.'
 			: (selectedType ?? undefined)}
 		onclose={cancelAddWizard}
-		width={addStep === 0 ? 'max-w-3xl' : 'max-w-2xl'}
+		width={addStep === 'choose-type' ? 'max-w-3xl' : 'max-w-2xl'}
 	>
+		{#if statusMessage && !statusMessage.ok}
+			<Callout tone="crit">{statusMessage.text}</Callout>
+		{/if}
 		<!-- Dependency chain — only meaningful once a type with parents is chosen. -->
 		{#if chainSteps.length > 1}
 			<div class="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
@@ -625,11 +649,11 @@
 			</div>
 		{/if}
 
-		<!-- Step 0: pick a type.
+		<!-- Choose type: pick a type.
 		     Filtered rather than paged, and grouped by where a type can attach —
 		     a rack you add on its own, a module you add under one. That grouping
 		     is the same order you would build a chain in. -->
-		{#if addStep === 0}
+		{#if addStep === 'choose-type'}
 			<div class="space-y-3">
 				<input
 					type="text"
@@ -699,10 +723,10 @@
 		{/if}
 
 			<!-- Step 1: Parent selection (use existing or create new) -->
-			{#if addStep === 1 && currentStepType}
+			{#if addStep === 'choose-parent' && currentStepType}
 				<p class="mb-3 text-[12.5px] text-ink-2">
-					<span class="mono font-semibold">{chainSteps[0].type}</span> attaches to a
-					<span class="mono font-semibold">{currentStepType}</span>. Pick the one it sits under.
+					Choose the <span class="mono font-semibold">{currentStepType}</span> for this
+					<span class="mono font-semibold">{chainSteps[0].type}</span> instrument chain.
 				</p>
 
 				{#if currentExisting.length > 0}
@@ -716,6 +740,7 @@
 								onclick={() => selectExistingParent(inst.key)}
 							>
 								<span class="text-[12.5px] font-semibold">{inst.node.type}</span>
+								<span class="text-[11.5px] text-muted">{nodeAddress(inst.node)}</span>
 								<span class="mono text-[11.5px] text-muted">{inst.key}</span>
 							</button>
 						{/each}
@@ -730,8 +755,8 @@
 				</button>
 			{/if}
 
-			<!-- Step 10: Key entry for a new parent being created -->
-			{#if addStep === 10 && currentStepType}
+			<!-- Parent address: Key entry for a new parent being created -->
+			{#if addStep === 'parent-key' && currentStepType}
 				<p class="mb-3 text-[12.5px] text-ink-2">
 					<span class="mono font-semibold">{chainSteps[0].type}</span> needs a new
 					<span class="mono font-semibold">{currentStepType}</span> above it. Enter its
@@ -751,17 +776,16 @@
 							if (await confirmNewParentKey(tempKey.trim())) tempKey = '';
 						}}
 					>
-						{addLoading ? 'Saving…' : 'Next'}
+						{addLoading ? 'Checking…' : 'Next'}
 					</button>
 				</div>
 				<p class="mt-2 text-[11px] text-muted">
-					This parent is written to the config as soon as you continue, so its hash key exists for
-					the next step. Cancelling the wizard removes it again.
+				This parent stays in your draft. The complete chain is saved when you finish adding the instrument.
 				</p>
 			{/if}
 
-			<!-- Step 20: Discovery — ask the hardware instead of typing an address. -->
-			{#if addStep === 20 && discoveryActions.length > 0}
+			<!-- Discover: Discovery — ask the hardware instead of typing an address. -->
+			{#if addStep === 'discover' && discoveryActions.length > 0}
 				{@const currentAction = discoveryActions[0]}
 				<p class="mb-3 text-[12.5px] text-ink-2">{currentAction.description}</p>
 
@@ -834,7 +858,8 @@
 							<div class="mt-3">
 								<Callout
 									tone="warn"
-									title="{discoveryResult.warnings.length} module{discoveryResult.warnings.length === 1
+								title="{discoveryResult.warnings.length} module{discoveryResult.warnings.length ===
+								1
 										? ''
 										: 's'} this build cannot drive. "
 								>
@@ -904,8 +929,8 @@
 				{/if}
 			{/if}
 
-			<!-- Step 2: Key entry for the target leaf/child instrument -->
-			{#if addStep === 2}
+			<!-- Leaf address: Key entry for the target leaf/child instrument -->
+			{#if addStep === 'leaf-key'}
 				<p class="mb-3 text-[12.5px] text-ink-2">
 					Enter the key for the new <span class="mono font-semibold">{chainSteps[0].type}</span>.
 				</p>
@@ -929,9 +954,9 @@
 				</div>
 			{/if}
 
-			<!-- Step 3: Confirm. The chain is shown root-first, which is the order
+			<!-- Confirm: Confirm. The chain is shown root-first, which is the order
 			     it will appear in the tree. -->
-			{#if addStep === 3}
+			{#if addStep === 'confirm'}
 				<p class="mb-2 text-[12.5px] text-ink-2">This is what will be written:</p>
 				<ul class="divide-y divide-line rounded border border-line bg-surface">
 					{#each [...chainSteps].reverse() as step, i (step.type + i)}
@@ -949,12 +974,16 @@
 			{/if}
 
 		{#snippet footer()}
-			{#if addStep === 20 && discoveryActions.length > 0}
+			{#if addStep === 'discover' && discoveryActions.length > 0}
 				{@const currentAction = discoveryActions[0]}
 				<button
 					class="lw-btn mr-auto"
-					onclick={() => (addStep = isParentDiscovery ? 10 : 2)}
-					disabled={discoveryLoading}
+					onclick={() => {
+						addStep = isParentDiscovery ? 'parent-key' : 'leaf-key';
+						discoveryResult = null;
+						statusMessage = null;
+					}}
+					disabled={discoveryLoading || addLoading}
 				>
 					Enter it manually
 				</button>
@@ -962,7 +991,7 @@
 					<button
 						class="lw-btn"
 						onclick={() => runDiscovery(currentAction.name)}
-						disabled={discoveryLoading}
+						disabled={discoveryLoading || addLoading}
 					>
 						{discoveryLoading ? 'Scanning…' : 'Re-scan'}
 					</button>
@@ -990,7 +1019,14 @@
 								: `Add ${selectedType} and its modules`}
 					</button>
 				{/if}
-			{:else if addStep === 3}
+			{:else if addStep === 'confirm'}
+				{#if !draftReadyToCommit}
+					<button class="lw-btn mr-auto" disabled={addLoading} onclick={() => {
+						tempKey = chainSteps[0].key;
+						addStep = 'leaf-key';
+						statusMessage = null;
+					}}>Edit address</button>
+				{/if}
 				<button class="lw-btn" onclick={cancelAddWizard} disabled={addLoading}>Cancel</button>
 				<button class="lw-btn lw-btn-primary" onclick={executeAdd} disabled={addLoading}>
 					{addLoading ? 'Adding…' : 'Add instrument'}
@@ -1005,9 +1041,7 @@
 <!-- Confirmation Dialog -->
 {#if confirmAction && confirmTarget}
 	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-		<div
-			class="w-full max-w-sm rounded border border-line bg-surface p-5 shadow-2xl"
-		>
+		<div class="w-full max-w-sm rounded border border-line bg-surface p-5 shadow-2xl">
 			<h3 class="text-lg font-semibold">
 				{confirmAction === 'reset' ? 'Reset to defaults?' : 'Remove instrument?'}
 			</h3>
@@ -1045,9 +1079,7 @@
 					</div>
 				{/if}
 				{#if !impactLoading && removalImpact && removalImpact.rules.length > 0}
-					<div
-						class="mt-3 rounded-md border border-warn/30 bg-warn-wash p-2.5 text-xs"
-					>
+					<div class="mt-3 rounded-md border border-warn/30 bg-warn-wash p-2.5 text-xs">
 						<div class="font-medium text-warn">
 							{removalImpact.rules.length} permission rule(s) reference this instrument
 						</div>
@@ -1062,8 +1094,8 @@
 							{/each}
 						</ul>
 						<div class="mt-1.5 text-warn">
-							A rule whose instrument no longer exists fails closed: it denies every call it
-							covers, which may block instruments you did not remove. Edit these rules on
+							A rule whose instrument no longer exists fails closed: it denies every call it covers,
+							which may block instruments you did not remove. Edit these rules on
 							<a class="underline" href="/servers/permissions">Server &amp; Permissions</a> first.
 						</div>
 					</div>

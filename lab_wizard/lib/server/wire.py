@@ -62,7 +62,18 @@ MAX_CLAIM_TTL_S = 3600.0
 # Methods that may block on hardware. They run on their own worker pool so that
 # fast requests — above all claim renewals — are never stuck behind a long
 # ``count()``, or a claim would expire while its holder was only waiting.
-HARDWARE_RPC = frozenset({"call", "discover", "release", "tree_add", "tree_remove", "tree_reset"})
+HARDWARE_RPC = frozenset(
+    {
+        "call",
+        "discover",
+        "release",
+        "tree_add",
+        "tree_remove",
+        "tree_reset",
+        "tree_update",
+        "tree_apply_children",
+    }
+)
 
 log = logging.getLogger(__name__)
 
@@ -93,6 +104,7 @@ class WireServer:
         self._ipc_binds = [b for b in self._binds if b.startswith("ipc://")]
         self._tcp_binds = [b for b in self._binds if not b.startswith("ipc://")]
         self._registry = registry
+        self._configuration_lock = threading.RLock()
         self._gate = gate
         # Present only in config-dir hosting mode. Single-project hosting has no
         # editable tree, so tree_get() refuses rather than inventing one.
@@ -128,6 +140,8 @@ class WireServer:
         self._rpc.method()(self.tree_add)
         self._rpc.method()(self.tree_remove)
         self._rpc.method()(self.tree_reset)
+        self._rpc.method()(self.tree_update)
+        self._rpc.method()(self.tree_apply_children)
         self._rpc.method()(self.events_recent)
         self._rpc.method()(self.list_attributes)
         self._rpc.method()(self.describe_path)
@@ -237,6 +251,7 @@ class WireServer:
         action: str,
         params: Optional[dict[str, Any]] = None,
         parent_chain: Optional[list[dict[str, Any]]] = None,
+        draft_chain: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         """Run an instrument's discovery action here, where the hardware is.
 
@@ -251,6 +266,28 @@ class WireServer:
         an ordinary call on the same bus.
         """
         from lab_wizard.lib.utilities.resource_catalog import load_params_class
+
+        if draft_chain:
+            require_local("Discovering unsaved instruments")
+            if all(step.get("action") == "use_existing" for step in draft_chain):
+                parent_chain = list(reversed(draft_chain))
+            else:
+                from lab_wizard.lib.utilities.instrument_discovery import (
+                    draft_discovery_tree,
+                    discover_with_registry,
+                )
+
+                with self._tree_write_lock():
+                    registry, path = draft_discovery_tree(
+                        self._require_config_dir(), draft_chain
+                    )
+                    key = path[0]["key"]
+                    self._refuse_if_held(key, "discover under")
+                    self._refuse_if_claimed(key, "discover under")
+                    self._refuse_if_leased(PATH_PREFIX + key, registry=registry)
+                    return discover_with_registry(
+                        registry, path, type, action, params or {}
+                    )
 
         cls = load_params_class(type)
         actions = {a.name: a for a in cls.discovery_actions()}
@@ -405,12 +442,19 @@ class WireServer:
         peer = require_local("Adding instruments")
         config_dir = self._require_config_dir()
 
-        from lab_wizard.lib.utilities.config_io import add_instrument_chain
+        from lab_wizard.lib.utilities.config_io import (
+            add_instrument_chain,
+            load_instruments,
+            prepare_instrument_chain,
+        )
 
         with self._tree_write_lock():
-            for step in chain:
-                self._refuse_if_held(step.get("key"), "reconfigure")
-                self._refuse_if_claimed(step.get("key"), "reconfigure")
+            prepared = prepare_instrument_chain(
+                load_instruments(config_dir, include_disabled=True), chain
+            )
+            root_key = prepared["path"][0]["key"]
+            self._refuse_if_held(root_key, "reconfigure")
+            self._refuse_if_claimed(root_key, "reconfigure")
             result = add_instrument_chain(config_dir, chain)
             self._reload_tree("tree_add")
         self._events.record(
@@ -423,7 +467,36 @@ class WireServer:
         )
         return result
 
-    def tree_remove(self, type: str, key: str) -> dict[str, Any]:
+    def tree_apply_children(
+        self,
+        parent_type: str,
+        parent_key: str,
+        children: list[dict],
+        path: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        peer = require_local("Adding discovered instruments")
+        from lab_wizard.lib.utilities.config_io import apply_discovered_children
+
+        with self._tree_write_lock():
+            key = path[0]["key"] if path else parent_key
+            self._refuse_if_held(key, "reconfigure")
+            self._refuse_if_claimed(key, "reconfigure")
+            result = apply_discovered_children(
+                self._require_config_dir(), parent_type, parent_key, children, path
+            )
+            self._reload_tree("tree_apply_children")
+        self._events.record(
+            "tree.apply_children",
+            f"Added discovered children to {parent_type}",
+            actor=peer.describe(),
+            path=path,
+            key=parent_key,
+        )
+        return result
+
+    def tree_remove(
+        self, type: str, key: str, path: list[dict[str, str]] | None = None
+    ) -> dict[str, Any]:
         """Remove an instrument and its children. Same-machine callers only."""
         peer = require_local("Removing instruments")
         config_dir = self._require_config_dir()
@@ -431,9 +504,9 @@ class WireServer:
         from lab_wizard.lib.utilities.config_io import remove_instrument
 
         with self._tree_write_lock():
-            self._refuse_if_held(key, "remove")
-            self._refuse_if_claimed(key, "remove")
-            result = remove_instrument(config_dir, type, key)
+            self._refuse_if_held(path[0]["key"] if path else key, "remove")
+            self._refuse_if_claimed(path[0]["key"] if path else key, "remove")
+            result = remove_instrument(config_dir, type, key, path=path)
             self._reload_tree("tree_remove")
         self._events.record(
             "tree.remove",
@@ -444,7 +517,9 @@ class WireServer:
         )
         return result
 
-    def tree_reset(self, type: str, key: str) -> dict[str, Any]:
+    def tree_reset(
+        self, type: str, key: str, path: list[dict[str, str]] | None = None
+    ) -> dict[str, Any]:
         """Reset an instrument to defaults, preserving children."""
         peer = require_local("Resetting instruments")
         config_dir = self._require_config_dir()
@@ -452,9 +527,9 @@ class WireServer:
         from lab_wizard.lib.utilities.config_io import reinitialize_instrument
 
         with self._tree_write_lock():
-            self._refuse_if_held(key, "reset")
-            self._refuse_if_claimed(key, "reset")
-            result = reinitialize_instrument(config_dir, type, key)
+            self._refuse_if_held(path[0]["key"] if path else key, "reset")
+            self._refuse_if_claimed(path[0]["key"] if path else key, "reset")
+            result = reinitialize_instrument(config_dir, type, key, path=path)
             self._reload_tree("tree_reset")
         self._events.record(
             "tree.reset",
@@ -462,6 +537,32 @@ class WireServer:
             actor=peer.describe(),
             type=type,
             key=key,
+        )
+        return result
+
+    def tree_update(
+        self,
+        path: list[dict[str, str]],
+        fields: dict[str, Any],
+        expected_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Update saved parameters under the same guards as other tree writes."""
+        peer = require_local("Editing instrument parameters")
+        config_dir = self._require_config_dir()
+        from lab_wizard.lib.utilities.config_io import update_instrument_params
+
+        if not path:
+            raise ValueError("An instrument path is required")
+        with self._tree_write_lock():
+            self._refuse_if_held(path[0]["key"], "reconfigure")
+            self._refuse_if_claimed(path[0]["key"], "reconfigure")
+            result = update_instrument_params(config_dir, path, fields, expected_fields)
+            self._reload_tree("tree_update")
+        self._events.record(
+            "tree.update",
+            f"Updated parameters for {path[-1]['type']}",
+            actor=peer.describe(),
+            path=path,
         )
         return result
 
@@ -555,13 +656,15 @@ class WireServer:
         rare and calls take exactly one lock, so acquiring in sorted order cannot
         deadlock.
         """
-        roots = sorted({root_path(p) for p in self._registry.list_paths()})
-        with ExitStack() as stack:
+        with self._configuration_lock, ExitStack() as stack:
+            roots = sorted({root_path(p) for p in self._registry.list_paths()})
             for root in roots:
                 stack.enter_context(self._registry.transport_lock(root))
             yield
 
-    def _refuse_if_leased(self, path: str) -> None:
+    def _refuse_if_leased(
+        self, path: str, registry: InstrumentRegistry | None = None
+    ) -> None:
         """Decline to open hardware another process has claimed.
 
         Only applies to exclusive transports and only to paths not already open:
@@ -570,7 +673,7 @@ class WireServer:
         """
         if path in self._registry.list_held():
             return
-        info = self._registry.transport_for(path)
+        info = (registry or self._registry).transport_for(path)
         if info.get("transport_sharing") == "shared":
             return
         key = info.get("transport_key")

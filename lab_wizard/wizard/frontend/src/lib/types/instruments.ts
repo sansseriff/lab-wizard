@@ -1,3 +1,4 @@
+import type { ParamSchema } from '$lib/instruments/model';
 /** Shapes shared by every surface that renders an instrument tree.
  *
  * These live outside `routes/` because two different components now render
@@ -15,6 +16,7 @@ export type TreeItem = {
 	type: string;
 	key: string;
 	fields: Record<string, any>;
+	yaml?: string;
 	children: Record<string, TreeItem>;
 };
 
@@ -58,6 +60,7 @@ export type ChainStep = {
 	key: string;
 	action: 'create_new' | 'use_existing';
 	resolved: boolean;
+	children?: { type: string | null; key_fields: Record<string, string> }[];
 	extra?: Record<string, any>;
 };
 
@@ -71,6 +74,8 @@ export type InstrumentMeta = {
 	parent_chain: string[];
 	child_types: string[];
 	defaults: Record<string, any>;
+	params_schema?: ParamSchema;
+	read_only_fields?: string[];
 	key_hint: string | null;
 	discovery_actions: DiscoveryAction[];
 	behavior_abc?: string | null;

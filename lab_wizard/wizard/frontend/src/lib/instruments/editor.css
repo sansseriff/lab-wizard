@@ -1,0 +1,119 @@
+.instrument-row {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	border-radius: 4px;
+	margin: 2px 0;
+	min-width: 0;
+}
+.instrument-row:hover {
+	background: var(--surface-2);
+}
+.instrument-row.selected {
+	background: var(--accent-wash);
+	color: var(--accent-strong);
+}
+.instrument-toggle {
+	width: 24px;
+	height: 30px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	color: var(--muted);
+}
+.instrument-select {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 4px 10px;
+	padding: 10px 2px;
+	text-align: left;
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+.instrument-address {
+	margin-left: auto;
+	font-size: 12px;
+	color: var(--muted);
+}
+.instrument-badge {
+	font-size: 10px;
+	color: var(--muted);
+	border: 1px solid var(--line);
+	border-radius: 3px;
+	padding: 1px 4px;
+}
+.instrument-add {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	flex-shrink: 0;
+	padding: 7px;
+	font-size: 11px;
+	color: var(--muted);
+}
+.instrument-add:hover {
+	color: var(--accent-strong);
+}
+.instrument-children {
+	border-left: 1px solid var(--line);
+	margin-left: 13px;
+	padding-left: 12px;
+}
+.parameter-field {
+	margin: 14px 0;
+	min-width: 0;
+}
+.parameter-group {
+	border-left: 2px solid var(--line);
+	padding-left: 12px;
+}
+.parameter-group summary {
+	cursor: pointer;
+	font-size: 12px;
+	font-weight: 600;
+}
+.inspector-tab {
+	padding: 8px 10px;
+	font-size: 12px;
+	color: var(--muted);
+	border-bottom: 2px solid transparent;
+}
+.inspector-tab[aria-pressed='true'] {
+	border-color: var(--accent);
+	color: var(--ink);
+	font-weight: 600;
+}
+.instrument-yaml {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: var(--surface-2);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	padding: 12px;
+	font-size: 11px;
+	line-height: 1.65;
+}
+.instrument-editor button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+@media (pointer: coarse) {
+	.instrument-add,
+	.instrument-toggle {
+		min-width: 44px;
+		min-height: 44px;
+	}
+}
+
+.inspector-save {
+	position: sticky;
+	top: -16px;
+	z-index: 1;
+	background: var(--surface);
+	padding: 10px 0;
+	border-bottom: 1px solid var(--line);
+}

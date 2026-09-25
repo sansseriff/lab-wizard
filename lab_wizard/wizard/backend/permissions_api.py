@@ -227,7 +227,12 @@ def _condition_attributes(cond: Any) -> set[str]:
     return refs
 
 
-def attributes_under(config_dir: str | Path, type_str: str, key: str) -> set[str]:
+def attributes_under(
+    config_dir: str | Path,
+    type_str: str,
+    key: str,
+    path: list[dict[str, str]] | None = None,
+) -> set[str]:
     """Every ``attribute_name`` at or beneath the node ``(type_str, key)``.
 
     Removing a parent removes its children and their channels, so the warning
@@ -238,8 +243,12 @@ def attributes_under(config_dir: str | Path, type_str: str, key: str) -> set[str
     # The key can name a child as well as a root, so it is matched as a path
     # segment anywhere, not only at the start. Matching only a leading
     # ``inst://<key>`` reported nothing for any instrument inside a rack.
-    def under(path: str) -> bool:
-        return key in path[len("inst://"):].split("/")
+    prefix = "inst://" + "/".join(part["key"] for part in path) if path else None
+
+    def under(candidate: str) -> bool:
+        if prefix:
+            return candidate == prefix or candidate.startswith(prefix + "/")
+        return key in candidate[len("inst://") :].split("/")
 
     return {name for name, path in registry.list_attributes().items() if under(path)}
 

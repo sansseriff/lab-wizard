@@ -15,6 +15,7 @@
 	import LocalTree from '$lib/components/instruments/LocalTree.svelte';
 	import ServerTree from '$lib/components/instruments/ServerTree.svelte';
 	import Pill from '$lib/components/Pill.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { workspaceName, type LocalServer } from '$lib/types/instruments';
 
 	let { data } = $props();
@@ -30,19 +31,23 @@
 
 	/** `null` is this workspace; otherwise the pid of the daemon being shown. */
 	let activePid = $state<number | null>(null);
+	let dirty = $state(false);
+	let busy = $state(false);
+	function switchWorkspace(pid: number | null) {
+		if (pid === activePid || busy) return;
+		if (dirty && !confirm('Discard unsaved instrument parameters?')) return;
+		dirty = false;
+		activePid = pid;
+	}
 
 	const activeServer = $derived(servers.find((s) => s.pid === activePid) ?? null);
 </script>
 
 <section class="space-y-4">
-	<div class="flex items-start justify-between gap-4">
-		<div>
-			<h1 class="text-[22px] font-semibold tracking-tight">Configured instruments</h1>
-			<p class="mt-1 max-w-[64ch] text-[13px] text-muted">
-				This workspace's tree, and the tree of every instrument server running on this machine.
-			</p>
-		</div>
-	</div>
+	<PageHeader
+		title="Configured instruments"
+		lede="Build your instrument tree, add modules under their parents, and edit settings in one place."
+	/>
 
 	<div class="flex gap-0 overflow-x-auto border-b border-line" role="tablist">
 		<button
@@ -52,7 +57,8 @@
 				{activePid === null
 				? 'border-accent font-semibold text-ink'
 				: 'border-transparent text-muted hover:text-ink'}"
-			onclick={() => (activePid = null)}
+			onclick={() => switchWorkspace(null)}
+			disabled={busy}
 		>
 			This workspace
 		</button>
@@ -65,7 +71,8 @@
 					{activePid === server.pid
 					? 'border-accent font-semibold text-ink'
 					: 'border-transparent text-muted hover:text-ink'}"
-				onclick={() => (activePid = server.pid)}
+				onclick={() => switchWorkspace(server.pid)}
+				disabled={busy}
 			>
 				{workspaceName(server.workspace_path)}
 				<span class="mono text-[10.5px] font-normal opacity-70">pid {server.pid}</span>
@@ -74,13 +81,13 @@
 	</div>
 
 	{#if activePid === null}
-		<LocalTree {data} autoOpenAdd={autoOpenAdd} />
+		<LocalTree {data} {autoOpenAdd} bind:dirty bind:busy />
 	{:else if activeServer}
 		<!-- Keyed so switching tabs remounts rather than reusing another server's
 		     state: the tree, its schema and its event log all belong to one
 		     daemon, and carrying any of them across would be wrong, not stale. -->
 		{#key activeServer.pid}
-			<ServerTree server={activeServer} />
+			<ServerTree server={activeServer} bind:dirty bind:busy />
 		{/key}
 	{:else}
 		<p class="py-6 text-sm text-muted">That server is no longer running.</p>

@@ -31,7 +31,7 @@ from lab_wizard.lib.instruments.general.parent_child import (
 
 
 Kind = Literal["instrument", "saver", "plotter", "step"]
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _KIND_DIRS = {
     "instrument": "instruments",
@@ -448,12 +448,19 @@ def _build_metadata(kind: Kind) -> dict[str, dict[str, Any]]:
             "class_name": info["class_name"],
             "module": info["module"],
             "kind": kind,
-            "is_top_level": kind != "instrument" or issubclass(params_cls, CanInstantiate),
+            "is_top_level": kind != "instrument"
+            or issubclass(params_cls, CanInstantiate),
             "is_child": kind == "instrument" and issubclass(params_cls, ChildParams),
             "parent_type": parents.get(type_str),
             "parent_chain": parent_chain(type_str),
             "child_types": sorted(children_of.get(type_str, [])),
             "defaults": default_params.model_dump(),
+            "params_schema": params_cls.model_json_schema(),
+            "read_only_fields": [
+                "type",
+                "enabled",
+                *getattr(params_cls, "_yaml_key_fields_", ()),
+            ],
             "key_hint": getattr(params_cls, "key_hint", None),
             "discovery_actions": actions,
             "behavior_abc": behavior_name_for(resource_cls, is_class=True),

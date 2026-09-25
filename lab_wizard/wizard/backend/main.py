@@ -46,9 +46,6 @@ from lab_wizard.lib.utilities.config_io import (
     reinitialize_instrument,
     remove_instrument,
     load_instruments,
-    save_instruments_to_config,
-    instrument_hash,
-    assign_missing_leaf_attribute_names,
 )
 from lab_wizard.lib.utilities.flat_resource_io import (
     add_resource as _flat_add_resource,
@@ -991,6 +988,8 @@ class _ChainStep(_BM):
         default_factory=dict
     )  # optional extra fields to set on newly-created params
 
+    children: list[dict] = _Field(default_factory=list)
+
 
 class _AddBody(_BM):
     chain: _List[_ChainStep]
@@ -999,11 +998,13 @@ class _AddBody(_BM):
 class _ResetBody(_BM):
     type: str
     key: str
+    path: list[dict[str, str]] | None = None
 
 
 class _RemoveBody(_BM):
     type: str
     key: str
+    path: list[dict[str, str]] | None = None
 
 
 @app.post("/api/manage-instruments/add")
@@ -1028,6 +1029,34 @@ def api_add_instrument(body: _AddBody, env: Env = Depends(get_env)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class _InstrumentPath(_BM):
+    type: str
+    key: str
+
+
+class _UpdateInstrumentBody(_BM):
+    path: list[_InstrumentPath]
+    fields: dict
+    expected_fields: dict
+
+
+@app.post("/api/manage-instruments/update")
+def api_update_instrument(body: _UpdateInstrumentBody, env: Env = Depends(get_env)):
+    from lab_wizard.lib.utilities.config_io import update_instrument_params
+
+    config_dir = _config_dir(env)
+    payload = body.model_dump()
+    try:
+        return apply_tree_edit(
+            config_dir,
+            "update",
+            payload,
+            lambda: update_instrument_params(config_dir, **payload),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/manage-instruments/reset")
 def api_reset_instrument(body: _ResetBody, env: Env = Depends(get_env)):
     """Reset an instrument's config to factory defaults (preserves children)."""
@@ -1036,8 +1065,14 @@ def api_reset_instrument(body: _ResetBody, env: Env = Depends(get_env)):
         return apply_tree_edit(
             config_dir,
             "reset",
-            {"type": body.type, "key": body.key},
-            lambda: reinitialize_instrument(config_dir, body.type, body.key),
+            {
+                "type": body.type,
+                "key": body.key,
+                **({"path": body.path} if body.path else {}),
+            },
+            lambda: reinitialize_instrument(
+                config_dir, body.type, body.key, path=body.path
+            ),
         )
     except Exception as e:
         logger.exception("Reset instrument API failed: %s", e)
@@ -1054,7 +1089,7 @@ def api_removal_impact(body: _RemoveBody, env: Env = Depends(get_env)):
     """
     config_dir = _config_dir(env)
     try:
-        attributes = attributes_under(config_dir, body.type, body.key)
+        attributes = attributes_under(config_dir, body.type, body.key, path=body.path)
         return {
             "attributes": sorted(attributes),
             "rules": rules_referencing(config_dir, attributes) if attributes else [],
@@ -1075,8 +1110,12 @@ def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
         return apply_tree_edit(
             config_dir,
             "remove",
-            {"type": body.type, "key": body.key},
-            lambda: remove_instrument(config_dir, body.type, body.key),
+            {
+                "type": body.type,
+                "key": body.key,
+                **({"path": body.path} if body.path else {}),
+            },
+            lambda: remove_instrument(config_dir, body.type, body.key, path=body.path),
         )
     except Exception as e:
         logger.exception("Remove instrument API failed: %s", e)
@@ -1090,30 +1129,7 @@ class _DiscoverBody(_BM):
     # Resolved ancestor chain, ordered root-first.
     # e.g. [{"type": "prologix_gpib", "key": "a1b2c3d4"}]
     parent_chain: list[dict] = _Field(default_factory=list)
-
-
-def _walk_parent_chain(chain: list[dict], env: Env):
-    """Walk a resolved ancestor chain top-down, initializing each level.
-
-    ``chain`` is root-first: [{"type": "prologix_gpib", "key": "a1b2"}, ...]
-    Returns the last (deepest) initialized instrument — the immediate parent
-    of the discovery target.
-    """
-    config_dir = _config_dir(env)
-    instruments = load_instruments(config_dir)
-
-    root_key = chain[0]["key"]
-    root_params = instruments.get(root_key)
-    if root_params is None:
-        raise HTTPException(
-            404, f"Top-level {chain[0]['type']} ({root_key}) not found in config"
-        )
-
-    current_inst = root_params.create_inst()
-    for step in chain[1:]:
-        current_inst = current_inst.make_child(step["key"])
-
-    return current_inst
+    draft_id: str | None = None
 
 
 @app.post("/api/manage-instruments/discover")
@@ -1122,7 +1138,7 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
     from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
     cls = load_params_class(body.type)
-    actions = {a.name: a for a in cls.discovery_actions()}
+    actions = {a.name: a for a in getattr(cls, "discovery_actions", lambda: [])()}
     action = actions.get(body.action)
     if action is None:
         raise HTTPException(
@@ -1130,16 +1146,30 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
             detail=f"Type '{body.type}' has no discovery action '{body.action}'",
         )
 
+    try:
+        draft_chain = (
+            _instrument_drafts.chain(_config_dir(env), body.draft_id)
+            if body.draft_id
+            else None
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
     def _in_process() -> dict:
-        """Fallback for when no server owns this workspace's hardware."""
-        parent_inst = None
-        try:
-            if body.parent_chain:
-                parent_inst = _walk_parent_chain(body.parent_chain, env)
-            return action.run(body.params, parent=parent_inst).model_dump()
-        finally:
-            if parent_inst is not None and hasattr(parent_inst, "disconnect"):
-                parent_inst.disconnect()
+        from lab_wizard.lib.server.registry import InstrumentRegistry
+        from lab_wizard.lib.utilities.instrument_discovery import (
+            draft_discovery_tree,
+            discover_with_registry,
+        )
+
+        if draft_chain:
+            registry, path = draft_discovery_tree(_config_dir(env), draft_chain)
+        else:
+            registry = InstrumentRegistry.from_config_dir(_config_dir(env))
+            path = body.parent_chain
+        return discover_with_registry(
+            registry, path, body.type, body.action, body.params
+        )
 
     try:
         # If a server is running it owns the transport, so it runs the scan —
@@ -1152,6 +1182,7 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
             params=body.params,
             parent_chain=body.parent_chain,
             in_process_fallback=_in_process,
+            draft_chain=draft_chain,
         )
     except HTTPException:
         logger.exception(
@@ -1171,55 +1202,77 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
 class _ApplyChildrenBody(_BM):
     parent_type: str
     parent_key: str
-    children: list[dict]  # [{type, key_fields: {slot?, gpib_address?, ...}}]
+    children: list[dict]
+    path: list[dict[str, str]] | None = None
 
 
 @app.post("/api/manage-instruments/apply-children")
 def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
-    """Add discovered children to an existing parent instrument in config."""
-    from lab_wizard.lib.utilities.resource_catalog import load_params_class
+    from lab_wizard.lib.utilities.config_io import apply_discovered_children
 
     config_dir = _config_dir(env)
-    instruments = load_instruments(config_dir)
-
-    parent = next(
-        (
-            p
-            for p in instruments.values()
-            if getattr(p, "type", None) == body.parent_type
-        ),
-        None,
-    )
-    if parent is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Parent {body.parent_type} ({body.parent_key}) not found",
+    payload = body.model_dump()
+    try:
+        return apply_tree_edit(
+            config_dir,
+            "apply_children",
+            payload,
+            lambda: apply_discovered_children(config_dir, **payload),
         )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
 
-    added = []
-    for child_spec in body.children:
-        child_type = child_spec["type"]
-        key_fields = child_spec.get("key_fields", {})
-        if child_type is None:
-            continue
-        params_cls = load_params_class(child_type)
-        child_params = params_cls()
-        for field_name, field_val in key_fields.items():
-            if hasattr(child_params, field_name):
-                setattr(child_params, field_name, str(field_val))
-        child_key = instrument_hash(child_type, *[str(v) for v in key_fields.values()])
-        parent.children[child_key] = child_params
-        added.append({"type": child_type, **key_fields})
 
-    assign_missing_leaf_attribute_names(instruments)
-    save_instruments_to_config(instruments, config_dir)
-    logger.info(
-        "apply-children: added %d children to %s (%s)",
-        len(added),
-        body.parent_type,
-        body.parent_key,
-    )
-    return {"status": "ok", "added": added, "tree": get_configured_tree(config_dir)}
+# Absolute, like every import here: build_ui_and_run.sh runs this file as a
+# script (``uv run main.py``), where a relative import has no package.
+from lab_wizard.wizard.backend.instrument_drafts import drafts as _instrument_drafts
+
+
+@app.post("/api/manage-instruments/drafts")
+def api_create_instrument_draft(env: Env = Depends(get_env)):
+    try:
+        return {"id": _instrument_drafts.create(_config_dir(env))}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.put("/api/manage-instruments/drafts/{draft_id}")
+def api_stage_instrument_draft(
+    draft_id: str, body: _AddBody, env: Env = Depends(get_env)
+):
+    try:
+        return _instrument_drafts.stage(
+            _config_dir(env), draft_id, [s.model_dump() for s in body.chain]
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.delete("/api/manage-instruments/drafts/{draft_id}")
+def api_cancel_instrument_draft(draft_id: str, env: Env = Depends(get_env)):
+    try:
+        _instrument_drafts.cancel(_config_dir(env), draft_id)
+        return {"status": "ok"}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/api/manage-instruments/drafts/{draft_id}/commit")
+def api_commit_instrument_draft(draft_id: str, env: Env = Depends(get_env)):
+    config_dir = _config_dir(env)
+    try:
+        return _instrument_drafts.commit(
+            config_dir,
+            draft_id,
+            lambda chain: apply_tree_edit(
+                config_dir,
+                "add",
+                {"chain": chain},
+                lambda: add_instrument_chain(config_dir, chain),
+            ),
+        )
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 # -------------------- Manage Savers / Plotters --------------------

@@ -43,6 +43,9 @@ import hashlib
 import re
 import logging
 import threading
+import os
+import tempfile
+from functools import wraps
 
 import coolname
 from pydantic import BaseModel
@@ -89,25 +92,55 @@ _yaml_lock = threading.RLock()
 
 
 def _read_yaml(path: Path) -> Dict[str, Any]:
-    with path.open("r", encoding="utf-8") as f:
-        with _yaml_lock:
-            loaded: Any = _yaml.load(f)
-        return cast(Dict[str, Any], loaded or {})
+    with _yaml_lock, path.open("r", encoding="utf-8") as f:
+        return cast(Dict[str, Any], _yaml.load(f) or {})
 
 
 def _write_yaml(path: Path, data: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Convert plain dicts into a CommentedMap so we can attach comments such
-    # as "managed by wizard" to specific keys (e.g. child refs).
-    if isinstance(data, CommentedMap):
-        data_to_dump: Any = data
-    elif isinstance(data, dict):
-        data_to_dump = to_commented_yaml_value(data)
-    else:
-        data_to_dump = data
-    with path.open("w", encoding="utf-8") as f:
+    with _yaml_lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = data if isinstance(data, CommentedMap) else to_commented_yaml_value(data)
+        fd, name = tempfile.mkstemp(
+            dir=path.parent, prefix=".instrument-", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                _yaml.dump(data, stream)
+            os.replace(name, path)
+        finally:
+            Path(name).unlink(missing_ok=True)
+
+
+def _config_read(fn):
+    @wraps(fn)
+    def read(*args, **kwargs):
         with _yaml_lock:
-            _yaml.dump(data_to_dump, f)
+            return fn(*args, **kwargs)
+
+    return read
+
+
+def _config_edit(fn):
+    """Serialize read/modify/write and restore YAML if a multi-file save fails."""
+
+    @wraps(fn)
+    def edit(config_dir, *args, **kwargs):
+        with _yaml_lock:
+            folder = Path(config_dir) / "instruments"
+            before = {p: p.read_bytes() for p in folder.rglob("*.yml")}
+            try:
+                return fn(config_dir, *args, **kwargs)
+            except Exception:
+                for path in folder.rglob("*.yml"):
+                    if path not in before:
+                        path.unlink()
+                for path, content in before.items():
+                    if not path.exists() or path.read_bytes() != content:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_bytes(content)
+                raise
+
+    return edit
 
 
 def _field_description(model: BaseModel, field_name: str) -> str | None:
@@ -263,6 +296,7 @@ def _attach_children(
     parent_params: Any,
     raw_dict: Dict[str, Any],
     visited_paths: Optional[set[Path]] = None,
+    include_disabled: bool = False,
 ) -> None:
     # Children are represented in YAML as a mapping: key -> {kind, ref}
     children_map: Dict[str, Dict[str, Any]] = cast(
@@ -280,7 +314,7 @@ def _attach_children(
         child_path = _resolve_child_file(base_dir, ref)
         child_params, child_raw = _load_node(base_dir, child_path, visited_paths)
 
-        if getattr(child_params, "enabled", True) is False:
+        if not include_disabled and getattr(child_params, "enabled", True) is False:
             continue
 
         # Migration: if the YAML key looks like a raw address (not a hash) and
@@ -293,7 +327,9 @@ def _attach_children(
             child_params.apply_key(key)
 
         # recursively attach grandchildren
-        _attach_children(base_dir, child_params, child_raw, visited_paths)
+        _attach_children(
+            base_dir, child_params, child_raw, visited_paths, include_disabled
+        )
         # add to parent — use the hash key derived from child params, not the
         # raw YAML key, so the in-memory tree already has canonical keys.
         if not hasattr(parent_params, "children"):
@@ -321,9 +357,12 @@ def _key_for_loaded_params(params: Any, type_str: str) -> str:
     return type_str
 
 
+@_config_read
 def load_instruments(
     config_dir: str | Path,
     visited_paths: Optional[set[Path]] = None,
+    *,
+    include_disabled: bool = False,
 ) -> Dict[str, Any]:
     """Load the instruments config into a top-level instruments dict mapping keys to Params.
 
@@ -341,10 +380,10 @@ def load_instruments(
     for p in sorted(inst_dir.glob("*.yml")):
         params, raw = _load_node(base_dir, p, visited_paths)
 
-        if getattr(params, "enabled", True) is False:
+        if not include_disabled and getattr(params, "enabled", True) is False:
             continue
 
-        _attach_children(base_dir, params, raw, visited_paths)
+        _attach_children(base_dir, params, raw, visited_paths, include_disabled)
         type_str = str(raw.get("type") or "")
         key = _key_for_loaded_params(params, type_str)
         instruments[key] = params
@@ -557,6 +596,7 @@ def merge_instruments(base: Dict[str, Any], delta: Dict[str, Any]) -> Dict[str, 
     return _merge_keyed_params_map(base, delta)
 
 
+@_config_edit
 def load_merge_save_instruments(
     config_dir: str | Path, subset: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -564,7 +604,7 @@ def load_merge_save_instruments(
 
     Returns the merged instruments dict.
     """
-    full = load_instruments(config_dir)
+    full = load_instruments(config_dir, include_disabled=True)
     merged = merge_instruments(full, subset)
     assign_missing_leaf_attribute_names(merged)
     save_instruments_to_config(merged, config_dir)
@@ -586,6 +626,7 @@ def _iter_instrument_yaml_files(config_dir: Path) -> List[Path]:
     return sorted(inst_dir.rglob("*.yml"))
 
 
+@_config_edit
 def normalize_instruments(config_dir: str | Path) -> Dict[str, Any]:
     """Normalize the instruments config tree.
 
@@ -604,7 +645,7 @@ def normalize_instruments(config_dir: str | Path) -> Dict[str, Any]:
     inst_dir = (base_dir / "instruments").resolve()
 
     # Step 1: Load current tree (keys are recomputed as hashes from params).
-    instruments = load_instruments(config_dir)
+    instruments = load_instruments(config_dir, include_disabled=True)
 
     assign_missing_leaf_attribute_names(instruments)
 
@@ -765,11 +806,145 @@ def _apply_key_to_params(type_str: str, params: Any, key: str) -> None:
         params.apply_key(key)
 
 
+def find_instrument_at_path(
+    instruments: Dict[str, Any], path: list[dict[str, str]]
+) -> Any:
+    """Resolve root-first path references, including each node's type."""
+    if not path:
+        raise ValueError("An instrument path is required")
+    nodes = instruments
+    for segment in path:
+        node = nodes.get(segment["key"])
+        if node is None or getattr(node, "type", None) != segment["type"]:
+            raise ValueError(
+                "Instrument no longer exists at this path; refresh the tree"
+            )
+        nodes = getattr(node, "children", {})
+    return node
+
+
+def instrument_params_yaml(params: BaseModel) -> str:
+    """Readable node-only YAML using the same comments/order as the file writer."""
+    from io import StringIO
+    from ruamel.yaml import YAML
+
+    stream = StringIO()
+    YAML().dump(model_to_commented_map(params, exclude_fields=("children",)), stream)
+    return stream.getvalue()
+
+
+@_config_edit
+def update_instrument_params(
+    config_dir: str | Path,
+    path: list[dict[str, str]],
+    fields: dict[str, Any],
+    expected_fields: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate and update exactly one node, addressed by its full ancestor path.
+
+    Hashes repeat across racks (e.g. slot 1). Follow stored child references,
+    never search globally by the leaf hash. Write only this file so disabled
+    children and unrelated configs survive. The optimistic comparison prevents
+    an old inspector from overwriting changes made by another editor.
+    """
+    if not path:
+        raise ValueError("An instrument path is required")
+    base = Path(config_dir)
+    with _yaml_lock:
+        target = None
+        params = raw = None
+        for candidate in sorted((base / "instruments").glob("*.yml")):
+            node, data = _load_node(base, candidate)
+            if (
+                node.type == path[0]["type"]
+                and _key_for_loaded_params(node, node.type) == path[0]["key"]
+            ):
+                target, params, raw = candidate, node, data
+                break
+        if target is None:
+            raise ValueError("Instrument no longer exists; refresh the tree")
+        for segment in path[1:]:
+            found = False
+            for stored_key, ref in (raw.get("children") or {}).items():
+                candidate = _resolve_child_file(base, ref["ref"])
+                node, data = _load_node(base, candidate)
+                if not _is_hash_key(stored_key) and hasattr(node, "apply_key"):
+                    node.apply_key(stored_key)
+                if (
+                    node.type == segment["type"]
+                    and _key_for_loaded_params(node, node.type) == segment["key"]
+                ):
+                    target, params, raw = candidate, node, data
+                    found = True
+                    break
+            if not found:
+                raise ValueError(
+                    "Instrument no longer exists at this path; refresh the tree"
+                )
+        current = params.model_dump(mode="json", exclude={"children"})
+        if current != expected_fields:
+            raise ValueError(
+                "These parameters changed since you opened them. Reload before saving."
+            )
+        unknown = set(fields) - set(current)
+        if unknown:
+            raise ValueError(
+                f"Unknown or structural fields: {', '.join(sorted(unknown))}"
+            )
+        protected = {"type", "enabled", *getattr(type(params), "_yaml_key_fields_", ())}
+        for name in protected:
+            if name in fields and fields[name] != current.get(name):
+                raise ValueError(f"{name} is read-only in the parameter editor")
+        validated = type(params).model_validate({**current, **fields})
+        # Defend against custom key derivation beyond the declared key fields.
+        if _key_for_loaded_params(validated, validated.type) != path[-1]["key"]:
+            raise ValueError(
+                "Changing an instrument's address requires adding it at the new address"
+            )
+        normalized = validated.model_dump(mode="json", exclude={"children"})
+
+        def reject_dropped_keys(before, after, prefix=""):
+            if isinstance(before, dict) and isinstance(after, dict):
+                for key, value in before.items():
+                    if key not in after:
+                        raise ValueError(f"Unknown parameter: {prefix}{key}")
+                    reject_dropped_keys(value, after[key], f"{prefix}{key}.")
+            elif isinstance(before, list) and isinstance(after, list):
+                for i, (value, result) in enumerate(zip(before, after)):
+                    reject_dropped_keys(value, result, f"{prefix}{i}.")
+
+        reject_dropped_keys(fields, normalized)
+        # Validate the replacement against the complete namespace before writing:
+        # duplicate names would otherwise make the server's registry reload fail
+        # after an invalid configuration had already reached disk. No hardware opens.
+        from lab_wizard.lib.server.registry import InstrumentRegistry
+
+        instruments = load_instruments(config_dir, include_disabled=True)
+        existing = find_instrument_at_path(instruments, path)
+        if hasattr(validated, "children"):
+            validated.children = existing.children
+        parent_nodes = (
+            instruments
+            if len(path) == 1
+            else find_instrument_at_path(instruments, path[:-1]).children
+        )
+        parent_nodes[path[-1]["key"]] = validated
+        InstrumentRegistry.from_instruments(instruments)
+        updated = model_to_commented_map(validated, exclude_fields=("children",))
+        if "children" in raw:
+            updated["children"] = raw["children"]
+        _write_yaml(target, updated)
+        return {
+            "status": "ok",
+            "fields": normalized,
+            "yaml": instrument_params_yaml(validated),
+        }
+
+
 def _node_to_tree_dict(key: str, params: Any) -> Dict[str, Any]:
     """Recursively serialize a Params tree node into a JSON-friendly dict."""
     type_str = str(getattr(params, "type", ""))
-    fields = params.model_dump()
-    fields.pop("children", None)
+    fields = params.model_dump(mode="json", exclude={"children"})
     children_dict: Dict[str, Any] = {}
     for ck, cp in (getattr(params, "children", {}) or {}).items():
         children_dict[ck] = _node_to_tree_dict(ck, cp)
@@ -777,6 +952,7 @@ def _node_to_tree_dict(key: str, params: Any) -> Dict[str, Any]:
         "type": type_str,
         "key": key,
         "fields": fields,
+        "yaml": instrument_params_yaml(params),
         "children": children_dict,
     }
     # Hardware channel count is a class-level fact (ChannelsLike), not a
@@ -817,102 +993,151 @@ def initialize_instrument(
     return target
 
 
-def add_instrument_chain(
-    config_dir: str | Path,
-    chain: List[Dict[str, str]],
-) -> Dict[str, Any]:
-    """Process a chain of operations to add an instrument (possibly with new parents).
-
-    ``chain`` is ordered leaf-first, e.g.:
-        [
-            {"type": "sim928", "key": "1", "action": "create_new"},
-            {"type": "sim900", "key": "7", "action": "create_new"},
-            {"type": "prologix_gpib", "key": "/dev/ttyUSB0", "action": "use_existing"},
-        ]
-
-    Returns dict with status and updated tree.
-    """
-    instruments = load_instruments(config_dir)
-
-    # Process top-down (reverse the chain: root ancestor first)
-    steps = list(reversed(chain))
-
-    current_parent: Any = None
-    saved_keys: List[Dict[str, str]] = []
-    for step in steps:
-        ts = step["type"]
-        key = step["key"]
-        action = step["action"]
-
+def prepare_instrument_chain(
+    instruments: Dict[str, Any],
+    chain: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build and validate a leaf-first chain in memory; never write configuration."""
+    if not chain:
+        raise ValueError("An instrument chain is required")
+    current_parent = None
+    saved_keys = []
+    path = []
+    for step in reversed(chain):
+        ts, key, action = step["type"], step["key"], step["action"]
+        nodes = (
+            instruments
+            if current_parent is None
+            else getattr(current_parent, "children", None)
+        )
+        if nodes is None:
+            raise ValueError("This parent does not support children")
         if action == "use_existing":
-            if current_parent is None:
-                if key not in instruments:
-                    raise ValueError(
-                        f"Cannot find existing top-level instrument with key '{key}' "
-                        f"(type={ts}). Available: {list(instruments.keys())}"
-                    )
-                current_parent = instruments[key]
-            else:
-                children = getattr(current_parent, "children", {})
-                if key not in children:
-                    raise ValueError(
-                        f"Cannot find existing child with key '{key}' "
-                        f"(type={ts}) under parent"
-                    )
-                current_parent = children[key]
-
+            node = nodes.get(key)
+            if node is None or getattr(node, "type", None) != ts:
+                raise ValueError(
+                    f"Existing instrument {key!r} was not found or is not of type {ts!r}"
+                )
+            if not node.enabled:
+                raise ValueError("Cannot add instruments under a disabled parent")
         elif action == "create_new":
-            params_cls = load_params_class(ts)
-            new_params = params_cls()
-            _apply_key_to_params(ts, new_params, key)
+            cls = load_params_class(ts)
+            node = cls()
+            _apply_key_to_params(ts, node, key)
             extra = step.get("extra") or {}
-            for field_name, field_val in extra.items():
-                if hasattr(new_params, field_name):
-                    setattr(new_params, field_name, field_val)
+            protected = {
+                "type",
+                "children",
+                "enabled",
+                *getattr(cls, "_yaml_key_fields_", ()),
+            }
+            if set(extra) - set(cls.model_fields) or set(extra) & protected:
+                raise ValueError("Invalid or protected instrument fields")
+            node = cls.model_validate({**node.model_dump(), **extra})
+            key = _key_for_loaded_params(node, ts)
+            if key in nodes:
+                raise ValueError(
+                    f"{ts} at this address already exists. Select the existing instrument."
+                )
+            nodes[key] = node
+            saved_keys.append({"type": ts, "key": key})
+        else:
+            raise ValueError(f"Unknown chain action: {action!r}")
+        if step.get("children"):
+            _attach_discovered_children(node, step["children"])
+        current_parent = node
+        path.append({"type": ts, "key": key})
+    _validate_instrument_tree(instruments)
+    return {"saved_keys": saved_keys, "path": path}
 
-            # Always use the hash key for storage so filenames are filesystem-safe.
-            # The raw key value was already applied to the params fields above via
-            # apply_key(), so the hardware address is preserved in the YAML content.
-            hash_key = _key_for_loaded_params(new_params, ts)
 
-            if current_parent is None:
-                instruments[hash_key] = new_params
-                current_parent = new_params
-            else:
-                if not hasattr(current_parent, "children"):
-                    raise ValueError(
-                        f"Parent type {type(current_parent).__name__} does not support children"
-                    )
-                current_parent.children[hash_key] = new_params  # type: ignore[attr-defined]
-                current_parent = new_params
-
-            saved_keys.append({"type": ts, "key": hash_key})
-
+def _validate_instrument_tree(instruments: Dict[str, Any]) -> None:
+    # Revalidate dumped data: assignment alone bypasses Pydantic child unions.
+    for node in instruments.values():
+        type(node).model_validate(node.model_dump())
     assign_missing_leaf_attribute_names(instruments)
+    from lab_wizard.lib.server.registry import InstrumentRegistry
+
+    InstrumentRegistry.from_instruments(instruments)
+
+
+def _attach_discovered_children(parent: Any, children: list[dict]) -> list[dict]:
+    nodes = getattr(parent, "children", None)
+    if nodes is None:
+        raise ValueError("This instrument does not support children")
+    added = []
+    for spec in children:
+        ts = spec.get("type")
+        if (
+            ts is None
+        ):  # Unrecognized devices are reported by discovery but cannot be configured.
+            continue
+        cls = load_params_class(ts)
+        fields = spec.get("key_fields", {})
+        if set(fields) - set(getattr(cls, "_yaml_key_fields_", ())):
+            raise ValueError(f"Invalid discovery key fields for {ts}")
+        node = cls.model_validate({**cls().model_dump(), **fields})
+        key = _key_for_loaded_params(node, ts)
+        if key in nodes:
+            # A repeat scan must never reset a configured child's parameters.
+            continue
+        nodes[key] = node
+        added.append({"type": ts, **fields})
+    return added
+
+
+@_config_edit
+def add_instrument_chain(
+    config_dir: str | Path, chain: list[dict[str, Any]]
+) -> dict[str, Any]:
+    instruments = load_instruments(config_dir, include_disabled=True)
+    result = prepare_instrument_chain(instruments, chain)
     save_instruments_to_config(instruments, config_dir)
-    logger.info("Added/updated instrument chain with %d steps", len(chain))
-    return {
-        "status": "ok",
-        "tree": get_configured_tree(config_dir),
-        "saved_keys": saved_keys,
-    }
+    return {"status": "ok", "tree": get_configured_tree(config_dir), **result}
 
 
+@_config_edit
+def apply_discovered_children(
+    config_dir: str | Path,
+    parent_type: str,
+    parent_key: str,
+    children: list[dict],
+    path: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    instruments = load_instruments(config_dir, include_disabled=True)
+    path = path or [{"type": parent_type, "key": parent_key}]
+    if path[-1] != {"type": parent_type, "key": parent_key}:
+        raise ValueError("Path does not match the discovery parent")
+    parent = find_instrument_at_path(instruments, path)
+    added = _attach_discovered_children(parent, children)
+    _validate_instrument_tree(instruments)
+    save_instruments_to_config(instruments, config_dir)
+    return {"status": "ok", "added": added, "tree": get_configured_tree(config_dir)}
+
+
+@_config_edit
 def reinitialize_instrument(
     config_dir: str | Path,
     type_str: str,
     key: str,
+    path: list[dict[str, str]] | None = None,
 ) -> Dict[str, Any]:
     """Reset an instrument's config to default values, preserving children.
 
     Finds the instrument in the tree by type + key, replaces its fields with
     defaults from the Params class, keeps existing children, and saves.
     """
-    instruments = load_instruments(config_dir)
+    instruments = load_instruments(config_dir, include_disabled=True)
     params_cls = load_params_class(type_str)
     default_params = params_cls()
 
-    target = _find_node_in_tree(instruments, type_str, key)
+    if path and path[-1] != {"type": type_str, "key": key}:
+        raise ValueError("Path does not match the target instrument")
+    target = (
+        find_instrument_at_path(instruments, path)
+        if path
+        else _find_node_in_tree(instruments, type_str, key)
+    )
     if target is None:
         raise ValueError(f"Instrument type={type_str} key={key} not found in config")
 
@@ -965,25 +1190,42 @@ def reinitialize_instrument(
     return {"status": "ok", "type": type_str, "key": key}
 
 
+@_config_edit
 def remove_instrument(
     config_dir: str | Path,
     type_str: str,
     key: str,
+    path: list[dict[str, str]] | None = None,
 ) -> Dict[str, Any]:
-    """Remove an instrument from config by deleting its node and re-saving the tree.
+    """Remove a node and its reachable YAML while preserving unrelated files.
 
-    Orphaned YAML files are cleaned up afterward.
+    Former canonical paths are cleaned up afterward.
     """
-    instruments = load_instruments(config_dir)
+    previous_paths: set[Path] = set()
+    instruments = load_instruments(
+        config_dir, visited_paths=previous_paths, include_disabled=True
+    )
     removed = False
 
-    for inst_key, params in list(instruments.items()):
-        if getattr(params, "type", None) == type_str and inst_key == key:
-            del instruments[inst_key]
-            removed = True
-            break
-    if not removed:
-        removed = _remove_child_from_tree(instruments, type_str, key)
+    if path:
+        if path[-1] != {"type": type_str, "key": key}:
+            raise ValueError("Path does not match the target instrument")
+        find_instrument_at_path(instruments, path)
+        nodes = (
+            instruments
+            if len(path) == 1
+            else find_instrument_at_path(instruments, path[:-1]).children
+        )
+        del nodes[key]
+        removed = True
+    else:
+        for inst_key, params in list(instruments.items()):
+            if getattr(params, "type", None) == type_str and inst_key == key:
+                del instruments[inst_key]
+                removed = True
+                break
+        if not removed:
+            removed = _remove_child_from_tree(instruments, type_str, key)
 
     if not removed:
         raise ValueError(f"Instrument type={type_str} key={key} not found in config")
@@ -998,8 +1240,8 @@ def remove_instrument(
 
     save_instruments_to_config(instruments, config_dir)
 
-    # Delete any YAML file under instruments/ that is not referenced by the new tree.
-    for f in _iter_instrument_yaml_files(base_dir):
+    # Delete only formerly reachable files, including the removed subtree.
+    for f in previous_paths:
         if f not in files_to_keep:
             try:
                 f.unlink()

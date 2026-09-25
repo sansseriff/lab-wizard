@@ -7,17 +7,20 @@
 	 * instantiate would be a form that cannot be submitted.
 	 */
 	import { onMount } from 'svelte';
-	import TreeNode from '$lib/components/TreeNode.svelte';
-	import type {
-		TreeItem as TreeNodeItem,
-		TransportBadge
-	} from '$lib/components/TreeNode.svelte';
-	import ScrollArea from '$lib/components/ScrollArea.svelte';
+	import InstrumentWorkbench from './InstrumentWorkbench.svelte';
+	import Modal from '$lib/components/Modal.svelte';
+	import type { InstrumentMeta } from '$lib/types/instruments';
+	import {
+		parentCandidates,
+		type NodePath,
+		type ParamUpdate,
+		type ParamResult
+	} from '$lib/instruments/model';
+	import type { TreeItem as TreeNodeItem, TransportBadge } from '$lib/components/TreeNode.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import { workspaceName, type LocalServer } from '$lib/types/instruments';
 	import ArrowClockwise from 'phosphor-svelte/lib/ArrowClockwise';
 	import ArrowCounterClockwise from 'phosphor-svelte/lib/ArrowCounterClockwise';
-	import Plus from 'phosphor-svelte/lib/Plus';
 	import Trash from 'phosphor-svelte/lib/Trash';
 
 	type RootTransport = {
@@ -32,17 +35,6 @@
 		inputs: DiscoveryInput[];
 		parent_dep?: string;
 		result_type: 'probe' | 'children' | 'self_candidates';
-	};
-	type InstrumentMeta = {
-		type: string;
-		class_name: string;
-		is_top_level: boolean;
-		is_child: boolean;
-		parent_type: string | null;
-		parent_chain: string[];
-		child_types: string[];
-		key_hint: string | null;
-		discovery_actions?: DiscoveryAction[];
 	};
 	type RemoteTree = {
 		tree: TreeNodeItem[];
@@ -60,7 +52,12 @@
 		held: boolean;
 	};
 
-	let { server }: { server: LocalServer } = $props();
+	let {
+		server,
+		dirty = $bindable(false),
+		busy = $bindable(false)
+	}: { server: LocalServer; dirty?: boolean; busy?: boolean } = $props();
+	let addParent = $state<{ node: TreeNodeItem; path: NodePath } | null>(null);
 
 	// Named `selected` throughout the edit helpers below; keeping the name means
 	// the tab row simply supplies what a picker used to.
@@ -70,6 +67,7 @@
 	let loading = $state(false);
 	let message: { text: string; ok: boolean } | null = $state(null);
 	let confirmTarget: TreeNodeItem | null = $state(null);
+	let confirmPath = $state<NodePath>([]);
 	let confirmAction: 'remove' | 'reset' = $state('remove');
 
 	// --- Add flow -----------------------------------------------------------
@@ -86,8 +84,7 @@
 	let discoveryResult: any = $state(null);
 	let discoveryLoading = $state(false);
 	let discoveryInputs: Record<string, any> = $state({});
-	let duplicate: { transport_key: string | null; clashes: DuplicateClash[] } | null =
-		$state(null);
+	let duplicate: { transport_key: string | null; clashes: DuplicateClash[] } | null = $state(null);
 
 	/** The server's own instrument vocabulary — never this build's. */
 	function metadataOf(r: RemoteTree | null): Record<string, InstrumentMeta> {
@@ -95,7 +92,9 @@
 	}
 
 	const addableTypes: InstrumentMeta[] = $derived(
-		Object.values(metadataOf(remote)).sort((a, b) => a.type.localeCompare(b.type))
+		Object.values(metadataOf(remote))
+			.filter((m) => !addParent || m.parent_type === addParent.node.type)
+			.sort((a, b) => a.type.localeCompare(b.type))
 	);
 	const addMeta: InstrumentMeta | null = $derived(
 		addType ? (metadataOf(remote)[addType] ?? null) : null
@@ -159,8 +158,31 @@
 		}
 	}
 
+	function startAdd(node?: TreeNodeItem, path?: NodePath) {
+		resetAddForm();
+		addParent = node && path ? { node, path } : null;
+		showAdd = true;
+	}
+
+	async function saveParams(update: ParamUpdate): Promise<ParamResult> {
+		const result = await fetchWithConfig<ParamResult>('/api/remote-tree/edit', 'POST', {
+			config_dir: server.config_dir,
+			operation: 'update',
+			payload: update
+		});
+		await loadTree();
+		return result;
+	}
+
+	function refresh() {
+		if (busy || (dirty && !confirm('Discard unsaved instrument parameters?'))) return;
+		dirty = false;
+		loadTree();
+	}
+
 	function resetAddForm() {
 		showAdd = false;
+		addParent = null;
 		addType = null;
 		addKey = '';
 		addParents = {};
@@ -172,7 +194,7 @@
 	function onPickType(type: string) {
 		addType = type;
 		addKey = '';
-		addParents = {};
+		addParents = Object.fromEntries((addParent?.path ?? []).map((p) => [p.type, p.key]));
 		discoveryResult = null;
 		duplicate = null;
 		const inputs: Record<string, any> = {};
@@ -182,17 +204,21 @@
 		discoveryInputs = inputs;
 	}
 
-	/** Nodes of a given type anywhere in the server's tree, as parent candidates. */
+	/** Constrain each parent to the already selected ancestor branch. */
 	function nodesOfType(type: string): TreeNodeItem[] {
-		const out: TreeNodeItem[] = [];
-		const walk = (nodes: TreeNodeItem[]) => {
-			for (const n of nodes) {
-				if (n.type === type) out.push(n);
-				walk(Object.values(n.children ?? {}));
-			}
-		};
-		walk(remote?.tree ?? []);
-		return out;
+		const ancestors = requiredParents.slice(requiredParents.indexOf(type) + 1).reverse()
+			.map((type) => ({ type, key: addParents[type] ?? '' }));
+		return parentCandidates(remote?.tree ?? [], type, ancestors);
+	}
+
+	function selectParent(type: string, key: string) {
+		if (!nodesOfType(type).some((node) => node.key === key)) return;
+		const next = { ...addParents, [type]: key };
+		for (const descendant of requiredParents.slice(0, requiredParents.indexOf(type))) {
+			delete next[descendant];
+		}
+		addParents = next;
+		discoveryResult = null;
 	}
 
 	async function runDiscovery(actionName: string) {
@@ -281,19 +307,11 @@
 		<div class="flex shrink-0 gap-2">
 			<button
 				class="flex items-center gap-1.5 rounded border border-line-2 px-3 py-1.5 text-xs hover:bg-surface-2 disabled:opacity-50"
-				onclick={loadTree}
-				disabled={loading}
+				onclick={refresh}
+				disabled={loading || busy}
 			>
 				<ArrowClockwise size={14} />
 				Refresh
-			</button>
-			<button
-				class="flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:brightness-110 disabled:opacity-50"
-				onclick={() => (showAdd = !showAdd)}
-				disabled={loading || !remote}
-			>
-				<Plus size={14} />
-				Add instrument
 			</button>
 		</div>
 	</div>
@@ -309,7 +327,10 @@
 	{/if}
 
 	{#if remote && showAdd}
-		<div class="rounded-xl border border-accent/30 bg-accent-wash/40 p-4">
+		<Modal
+			title={addParent ? `Add under ${addParent.node.type}` : 'Add instrument'}
+			onclose={resetAddForm}
+		>
 			<h2 class="text-sm font-medium">
 				Add to <span class="font-mono">{workspaceName(selected?.workspace_path ?? '')}</span>
 			</h2>
@@ -349,29 +370,29 @@
 				{/if}
 			</div>
 
-			{#if requiredParents.length > 0}
+			{#if addParent}<p class="mt-3 text-xs text-muted">
+					Parent: {addParent.path.map((p) => p.type).join(' → ')}. All ancestors are already
+					selected.
+				</p>{/if}
+			{#if requiredParents.length > 0 && !addParent}
 				<div class="mt-3 space-y-2">
 					<div class="text-xs text-ink-2">
 						This is a child instrument. Pick the parents it sits under — they must already exist
 						there; add a missing one as its own step first.
 					</div>
-					{#each requiredParents as parentType (parentType)}
+					{#each [...requiredParents].reverse() as parentType (parentType)}
 						{@const candidates = nodesOfType(parentType)}
 						<label class="block text-xs">
 							<span class="mb-1 block text-ink-2">{parentType}</span>
 							{#if candidates.length === 0}
 								<span class="text-warn">
-									No {parentType} configured there yet — add one first.
+									Choose its ancestor above first. If it has no {parentType}, add one there.
 								</span>
 							{:else}
 								<select
 									class="w-full rounded-md border border-line-2 px-2 py-1.5 text-sm"
 									value={addParents[parentType] ?? ''}
-									onchange={(e) =>
-										(addParents = {
-											...addParents,
-											[parentType]: (e.target as HTMLSelectElement).value
-										})}
+									onchange={(e) => selectParent(parentType, e.currentTarget.value)}
 								>
 									<option value="" disabled>Choose…</option>
 									{#each candidates as node (node.key)}
@@ -387,9 +408,7 @@
 			{#if addActions.length > 0}
 				<div class="mt-3 rounded-md border border-line bg-surface p-2.5/40">
 					<div class="text-xs font-medium">Discover</div>
-					<p class="text-[11px] text-muted">
-						Runs on that server, where the hardware is.
-					</p>
+					<p class="text-[11px] text-muted">Runs on that server, where the hardware is.</p>
 					{#each addActions as action (action.name)}
 						<div class="mt-2 flex flex-wrap items-end gap-2">
 							{#each action.inputs ?? [] as inp (inp.name)}
@@ -495,50 +514,38 @@
 					{loading ? 'Adding…' : 'Add'}
 				</button>
 			</div>
-		</div>
+		</Modal>
 	{/if}
 
 	{#if remote}
 		{#if remote.config_status?.diverged}
-			<div
-				class="rounded-md border border-warn/30 bg-warn-wash p-2.5 text-xs text-warn"
-			>
+			<div class="rounded-md border border-warn/30 bg-warn-wash p-2.5 text-xs text-warn">
 				That server's config on disk no longer matches what it loaded — someone edited the files
 				directly. It needs a restart to pick the change up.
 			</div>
 		{/if}
 
-		<div class="grid gap-4 lg:grid-cols-3">
-			<div class="lg:col-span-2">
-				<h2 class="mb-2 text-sm font-medium">Instrument tree</h2>
-				<ScrollArea
-					type="hover"
-					class="relative overflow-hidden rounded-lg border border-line"
-					orientation="vertical"
-					viewportClasses="h-full max-h-[28rem] w-full"
-				>
-					<div class="p-2">
-						{#if remote.tree.length === 0}
-							<p class="px-2 py-3 text-sm text-muted">No instruments configured there.</p>
-						{:else}
-							{#each remote.tree as node (node.key)}
-								<TreeNode
-									{node}
+		<InstrumentWorkbench
+			tree={remote.tree}
+			metadata={remote.metadata}
 									{transportBadge}
-									onRemove={(n) => {
+			bind:dirty
+			bind:busy
+			onadd={() => startAdd()}
+			onaddparent={(node, path) => startAdd(node, path)}
+			onsave={saveParams}
+			onrefresh={loadTree}
+			onremove={(node, path) => {
+				confirmPath = path;
 										confirmAction = 'remove';
-										confirmTarget = n;
+				confirmTarget = node;
 									}}
-									onReset={(n) => {
+			onreset={(node, path) => {
+				confirmPath = path;
 										confirmAction = 'reset';
-										confirmTarget = n;
+				confirmTarget = node;
 									}}
 								/>
-							{/each}
-						{/if}
-					</div>
-				</ScrollArea>
-			</div>
 
 			<div>
 				<h2 class="mb-2 text-sm font-medium">Recent activity</h2>
@@ -557,7 +564,6 @@
 							</div>
 						{/each}
 					{/if}
-				</div>
 			</div>
 		</div>
 	{/if}
@@ -590,7 +596,11 @@
 						? 'bg-crit hover:brightness-110'
 						: 'bg-warn hover:brightness-110'}"
 					onclick={() =>
-						edit(confirmAction, { type: confirmTarget!.type, key: confirmTarget!.key })}
+						edit(confirmAction, {
+							type: confirmTarget!.type,
+							key: confirmTarget!.key,
+							path: confirmPath
+						})}
 					disabled={loading}
 				>
 					{#if confirmAction === 'remove'}

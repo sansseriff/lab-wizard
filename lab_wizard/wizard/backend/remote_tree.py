@@ -158,9 +158,12 @@ def remote_tree_edit(
     caller is remote, or if the rack is currently open — both are its decisions,
     surfaced here as an error the UI can show.
     """
-    rpc = {"add": "tree_add", "remove": "tree_remove", "reset": "tree_reset"}.get(
-        operation
-    )
+    rpc = {
+        "add": "tree_add",
+        "remove": "tree_remove",
+        "reset": "tree_reset",
+        "update": "tree_update",
+    }.get(operation)
     if rpc is None:
         raise ValueError(f"Unknown tree operation {operation!r}")
 

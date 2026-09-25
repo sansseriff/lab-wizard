@@ -96,7 +96,13 @@ def hardware_owner(config_dir: str | Path) -> dict[str, Any]:
 
 _TREE_EDIT_TIMEOUT_MS = 20_000
 
-_TREE_RPCS = {"add": "tree_add", "remove": "tree_remove", "reset": "tree_reset"}
+_TREE_RPCS = {
+    "add": "tree_add",
+    "remove": "tree_remove",
+    "reset": "tree_reset",
+    "update": "tree_update",
+    "apply_children": "tree_apply_children",
+}
 
 
 def apply_tree_edit(
@@ -138,6 +144,7 @@ def run_discovery(
     params: dict[str, Any],
     parent_chain: list[dict[str, Any]],
     in_process_fallback: Any,
+    draft_chain: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run a discovery action on whichever process owns the hardware.
 
@@ -157,6 +164,7 @@ def run_discovery(
                     "action": action,
                     "params": params,
                     "parent_chain": parent_chain,
+                    **({"draft_chain": draft_chain} if draft_chain else {}),
                 },
             )
 
