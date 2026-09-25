@@ -15,7 +15,7 @@ from collections.abc import Iterator, Mapping
 from datetime import datetime
 from typing import Any
 
-__all__ = ["run_facets", "write_run_facets"]
+__all__ = ["facet_value", "run_facets", "write_run_facets"]
 
 Facet = tuple[str, str, float | None]
 
@@ -23,8 +23,11 @@ Facet = tuple[str, str, float | None]
 MAX_VALUE_LENGTH = 200
 
 
-def _scalar(value: Any) -> tuple[str, float | None] | None:
-    """``(text, number)`` for a value worth filtering by, else ``None``."""
+def facet_value(value: Any) -> tuple[str, float | None] | None:
+    """``(text, number)`` for a value worth filtering by, else ``None``.
+
+    Filters are matched against this same text, so ``1.0`` finds ``"1.0"``.
+    """
     if isinstance(value, bool):
         return ("true" if value else "false"), None
     if isinstance(value, int):
@@ -42,7 +45,7 @@ def _leaves(prefix: str, data: Any) -> Iterator[Facet]:
         for key, value in data.items():
             yield from _leaves(f"{prefix}.{key}", value)
         return
-    scalar = _scalar(data)
+    scalar = facet_value(data)
     if scalar is not None:
         yield prefix, scalar[0], scalar[1]
 
@@ -56,7 +59,7 @@ def run_facets(run: Mapping[str, Any], device: Mapping[str, Any] | None) -> list
     out: list[Facet] = []
 
     def add(key: str, value: Any) -> None:
-        scalar = _scalar(value)
+        scalar = facet_value(value)
         if scalar is not None:
             out.append((key, scalar[0], scalar[1]))
 

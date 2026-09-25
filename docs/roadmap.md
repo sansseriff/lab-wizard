@@ -31,11 +31,14 @@ the current source. Look here before assuming a feature works end to end.
   because no measurement passes a device. Designed in
   `plans/semantic_data_plan.md`; not built.
 - ❌ **No database browser in the GUI.** `/data/database` lists the configured
-  savers and says so; reading runs back means querying the file.
-- ❌ **No query layer or migrations.** `lib/savers/query.py` has pandas helpers
-  but pandas is not a dependency; the `measurements_full` view does not exist,
-  and there is no migration framework — new nullable columns are added in place
-  by `schema.add_missing_columns`.
+  savers and says so.
+- ⚠️ **Reading runs back is Python only.** `lab_wizard.lib.data` finds runs by
+  any filter, loads their points as polars frames, computes derived columns,
+  evaluates plot specs and exports them to a notebook; the Data page that uses
+  it is not built. See [Reading runs back](data/database.md#reading-runs-back).
+- ❌ **No migrations.** The lab database refuses a file from another schema
+  version rather than altering it; the old `database_saver` still adds nullable
+  columns in place with `schema.add_missing_columns`.
 
 ## Procedures
 

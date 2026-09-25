@@ -285,6 +285,21 @@ def test_the_generated_mcr_project_runs_as_a_script(tmp_path: Path):
     assert status == "success"
     assert points == 1 + len(ATTENUATIONS)
 
+    # Read back the way the Data page will: the background-subtracted rate,
+    # plotted against attenuation, falls as the attenuation rises.
+    from lab_wizard.lib.data import find, load_plot, to_series
+
+    (run_id,) = find(db=setup_path.parent / "data" / "lab.db", procedure="mcr_curve").ids
+    (series,) = to_series(load_plot({
+        "runs": [run_id],
+        "x": "attenuation_db",
+        "y": ['count_rate - mean(count_rate, phase == "background")'],
+        "where": {"phase": "signal"},
+    }, setup_path.parent / "data" / "lab.db"))
+    assert series["x"] == ATTENUATIONS
+    assert series["y"] == sorted(series["y"])
+    assert series["y"][-1] > 100 * max(series["y"][0], 1.0)
+
 
 def test_an_embedded_mcr_project_runs_outside_any_workspace(tmp_path: Path):
     """The escape hatch's reason to exist: the project folder is all it needs.

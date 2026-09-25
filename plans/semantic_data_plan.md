@@ -1,6 +1,6 @@
 # The lab data system: recording runs, saving files, and the viewer
 
-> **Status: Phases 1–2 built (2026-09-23); Phases 3–8 not started.** Decisions
+> **Status: Phases 1–3 built (2026-09-23); Phases 4–8 not started.** Decisions
 > still marked **(open)** in §14 need an answer; everything else was settled
 > in review.
 >
@@ -515,6 +515,12 @@ log_y: false
 `{per_run: min | max | first | last}`. `x`, `y` and `where` columns may be
 derived expressions.
 
+**`where` picks the points to draw; it does not change what a reduction sees.**
+Every expression is evaluated over whole runs and the rows are filtered after,
+so `y: count_rate - mean(count_rate, phase == "background")` with
+`where: {phase: signal}` draws the signal subtracted by its own background.
+(Filtering first would remove the background and give nothing.)
+
 - One run selected → the spec starts as that run's first plot.
 - More runs selected → they join `runs:` and `series` becomes `run`.
 - Overlay matches columns by name. Differently named columns across procedures
@@ -525,7 +531,7 @@ derived expressions.
   bins); a step recording an array declares its bins in `columns`
   (`"bins": {"start": 0, "step": 4, "unit": "ps"}`).
 
-**The evaluator** (D16) is one function in `lab_wizard.data`: plot spec + a
+**The evaluator** (D16) is one function in `lab_wizard.lib.data` (`evaluate_plot`): plot spec + a
 polars DataFrame of points (with a `run_id` column) → series ready to draw. The viewer calls it on
 database rows. A live plotter calls it on the rows so far, recomputing the whole
 thing (throttled) as each point arrives, which keeps per-run reductions such as
@@ -534,7 +540,7 @@ thing (throttled) as each point arrives, which keeps per-run reductions such as
 **Open in notebook** writes:
 
 ```python
-from lab_wizard.data import load_plot
+from lab_wizard.lib.data import load_plot
 spec = {...}                     # the spec, verbatim
 df = load_plot(spec)             # polars DataFrame: one row per plotted point, with run_id and series
 
@@ -669,6 +675,29 @@ missing from a row) and may hold arrays. Build the frame from the rows with the
 schema taken from `runs.columns` rather than inferred, so a column absent from
 the first rows is still typed correctly and missing values are nulls. Array
 columns become polars `List(Float64)`, which the waterfall plot uses directly.
+
+As built — Phase 3:
+
+- `lab_wizard/lib/data/`: `read.py` (`Lab`, `Runs`, `find`, `facets`,
+  `lab_database`), `expressions.py` (`compile_expression`, `derive`), `plot.py`
+  (`PlotSpec`, `evaluate_plot`, `load_plot`, `to_series`, `notebook_source`).
+  The import path is `lab_wizard.lib.data`, not `lab_wizard.data`.
+- `columns` records only units, so types are inferred over **all** rows
+  (`infer_schema_length=None`) rather than taken from it. That still types a
+  column absent from the first rows; a column mixing text and numbers becomes
+  text.
+- Filters are facet keys: a value, a list (any of), or `{"range": [lo, hi]}`
+  on `num`; keys combine with AND. `facets(filters)` counts each key's values
+  ignoring that key's own filter, so a chosen procedure still shows the others.
+- `Lab` opens a connection per query, so a `Runs` kept in a notebook holds
+  nothing open and sees runs recorded since.
+- `evaluate_plot` returns one row per point (`run_id, seq, series, axis,
+  y_name, x, y, z`); `to_series` groups it into JSON-ready series for a browser
+  or a live plotter. Histogram and waterfall kinds spread an array column over
+  its bins; nothing records an array yet.
+- The notebook export draws with matplotlib (`y2` on a twin axis).
+- Tests: `tests/test_data_reading.py`, plus the mcr script test reading its own
+  recorded run back as a background-subtracted plot.
 
 ### Phase 4: procedure definitions and ports
 

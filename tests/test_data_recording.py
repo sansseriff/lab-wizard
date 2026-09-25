@@ -39,6 +39,22 @@ class Boom(Step):
         raise RuntimeError("counter timed out")
 
 
+_OPEN: list[sqlite3.Connection] = []
+
+
+@pytest.fixture(autouse=True)
+def _close_connections():
+    yield
+    while _OPEN:
+        _OPEN.pop().close()
+
+
+def _connect(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(path)
+    _OPEN.append(connection)
+    return connection
+
+
 def _record(tmp_path: Path, tree: Step, started: RunStarted | None = None) -> sqlite3.Connection:
     recorder = DatabaseRecorder(tmp_path / "lab.db")
     runner = ProcedureRunner()
@@ -49,7 +65,7 @@ def _record(tmp_path: Path, tree: Step, started: RunStarted | None = None) -> sq
         pass
     finally:
         recorder.close()
-    db = sqlite3.connect(tmp_path / "lab.db")
+    db = _connect(tmp_path / "lab.db")
     db.row_factory = sqlite3.Row
     return db
 
@@ -63,7 +79,7 @@ def _values(db: sqlite3.Connection) -> list[dict[str, Any]]:
 
 def test_a_new_database_is_stamped_with_its_schema_version(tmp_path: Path):
     open_database(tmp_path / "lab.db").close()
-    db = sqlite3.connect(tmp_path / "lab.db")
+    db = _connect(tmp_path / "lab.db")
     assert db.execute("select value from meta where key = 'schema_version'").fetchone() == ("1",)
     assert {r[0] for r in db.execute("select name from sqlite_master where type = 'table'")} == {
         "meta", "devices", "runs", "steps", "points", "run_facets",
@@ -72,7 +88,7 @@ def test_a_new_database_is_stamped_with_its_schema_version(tmp_path: Path):
 
 def test_a_database_from_another_schema_version_is_refused_and_left_alone(tmp_path: Path):
     open_database(tmp_path / "lab.db").close()
-    with sqlite3.connect(tmp_path / "lab.db") as db:
+    with _connect(tmp_path / "lab.db") as db:
         db.execute("update meta set value = '99' where key = 'schema_version'")
     before = (tmp_path / "lab.db").read_bytes()
 
@@ -82,7 +98,7 @@ def test_a_database_from_another_schema_version_is_refused_and_left_alone(tmp_pa
 
 
 def test_a_file_that_is_not_a_lab_database_is_refused(tmp_path: Path):
-    with sqlite3.connect(tmp_path / "measurements.db") as db:
+    with _connect(tmp_path / "measurements.db") as db:
         db.execute("create table measurements (id integer primary key)")
     with pytest.raises(DatabaseVersionError, match="no lab_wizard schema version"):
         open_database(tmp_path / "measurements.db")
@@ -141,7 +157,7 @@ def test_an_aborted_run_is_recorded_as_aborted(tmp_path: Path):
     thread.join(timeout=2.0)
     recorder.close()
 
-    db = sqlite3.connect(tmp_path / "lab.db")
+    db = _connect(tmp_path / "lab.db")
     assert db.execute("select status from runs").fetchone() == ("aborted",)
     assert db.execute('select "values" from points').fetchone() == ('{"counts":5}',)
 
@@ -160,7 +176,7 @@ def test_two_runs_share_one_device_row(tmp_path: Path):
         recorder.attach(runner.context.data_bus, runner.context.status_bus)
         runner.run(Record(counts=1), RunStarted(procedure="p", device="A7"))
         recorder.close()
-    db = sqlite3.connect(tmp_path / "lab.db")
+    db = _connect(tmp_path / "lab.db")
     assert db.execute("select count(*) from devices").fetchone() == (1,)
     assert db.execute("select count(distinct device_id) from runs").fetchone() == (1,)
 
@@ -261,7 +277,7 @@ def test_a_project_run_records_its_run_block(tmp_path: Path):
     tree = WithParameter("phase", "signal", Record(counts=1))
     assert run_procedure(tree, _Resources(), procedure="probe", project_dir=project_dir) is Status.SUCCESS
 
-    db = sqlite3.connect(project_dir / "data" / "lab.db")
+    db = _connect(project_dir / "data" / "lab.db")
     db.row_factory = sqlite3.Row
     run = db.execute("select * from runs").fetchone()
     assert (run["operator"], run["notes"], run["project"]) == ("andrew", "first cooldown", "probe_1")

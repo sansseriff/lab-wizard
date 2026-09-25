@@ -11,8 +11,63 @@ icon: lucide/database
     page will offer. See [Every run is recorded](../wizard/measurements.md#every-run-is-recorded).
     The `database_saver` below is the older, per-project database; it still
     works if a project selects it, and is being replaced
-    (`plans/semantic_data_plan.md`). This page will describe the lab database
-    once reading it back is built.
+    (`plans/semantic_data_plan.md`).
+
+## Reading runs back
+
+Runs in the lab database are read with
+[`lab_wizard.lib.data`](../../lab_wizard/lib/data/), which returns
+[polars](https://pola.rs) frames. No SQL is involved:
+
+```python
+from lab_wizard.lib.data import find, facets, load_plot
+
+runs = find(procedure="mcr_curve", device="A7")          # newest first
+runs = find({"device.type": "SNSPD-A", "run.cryostat": "BlueFors1"})
+runs = find({"param.readout.gate_time_s": {"range": [0.1, 1.0]}})
+
+runs.table()     # one row per run: date, procedure, device, operator, points
+runs.points()    # one row per point: run_id, seq, t, then every column
+runs.steps()     # every step each run executed: the timeline
+facets()         # every filter there is, with how many runs each leaves
+```
+
+`find` and `facets` use the workspace you are in (or `LAB_WIZARD_WORKSPACE`);
+pass `db=` to name a `lab.db` directly. A filter is any facet: `procedure`,
+`device`, `device.<property>`, `operator`, `date`, `run.<metadata key>`,
+`instrument.<role>.type`, `instrument.<role>.<param>`, `param.<path>`, or
+`column` (runs that recorded a column).
+
+**Derived columns** are expressions computed when read, never stored:
+
+```python
+runs.points(derived={
+    "above_dark": 'count_rate - mean(count_rate, phase == "background")',
+    "normalized": "above_dark / max(above_dark)",
+})
+```
+
+They take numbers, column names, `+ - * / **`, `abs sqrt exp log log10`, and
+the per-run reductions `mean min max sum count first last`, each optionally
+with a condition. A reduction is computed per run, so each run is subtracted
+from its own background.
+
+**Plots** are specs, the same ones the Data page will draw:
+
+```python
+df = load_plot({
+    "runs": [41, 42, 43],
+    "x": "bias_voltage",
+    "y": ["count_rate"],
+    "where": {"trigger_mV": {"per_run": "min"}},  # each run's own lowest level
+    "series": "run",
+    "label": "device",
+})
+```
+
+`where` picks which points to draw; reductions in `x` and `y` still see the
+whole run. `notebook_source(spec, db)` writes the Python that reproduces a
+plot, which is what the Data page's "Open in notebook" will give you.
 
 The `database_saver` persists measurement data to **SQLite** via SQLAlchemy. It
 is the one fully-implemented saver. Schema:
@@ -138,8 +193,5 @@ which is how a database written last month keeps working when a column like
 real migration and is deliberately not attempted.
 
 !!! note "Reading the data"
-    [`query.py`](../../lab_wizard/lib/savers/query.py) has pandas helpers
-    (`get_measurements`, `get_runs`), but pandas is not a dependency of this
-    package, and the `measurements_full` view described in
-    `plans/database_plan.md` does not exist. Querying with `sqlite3` and
-    `json_extract` works today — see the [Roadmap](../roadmap.md).
+    The old database has no read helpers; query it with `sqlite3` and
+    `json_extract`. The lab database is read with `lab_wizard.lib.data`, above.
