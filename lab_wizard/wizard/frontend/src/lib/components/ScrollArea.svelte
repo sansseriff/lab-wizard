@@ -18,15 +18,9 @@
 {#snippet Scrollbar({ orientation }: { orientation: 'vertical' | 'horizontal' })}
 	<ScrollArea.Scrollbar
 		{orientation}
-		class="bg-muted hover:bg-dark-10 data-[state=visible]:animate-in data-[state=hidden]:animate-out data-[state=hidden]:fade-out-0 data-[state=visible]:fade-in-0 flex {orientation ===
-		'vertical'
-			? 'w-2.5'
-			: 'h-2.5'} touch-none select-none rounded-full border-l border-l-transparent p-px transition-all duration-200 hover:{orientation ===
-		'vertical'
-			? 'w-3'
-			: 'h-3'}"
+		class="flex touch-none select-none p-px {orientation === 'vertical' ? 'w-2.5' : 'h-2.5'}"
 	>
-		<ScrollArea.Thumb class="bg-muted-foreground flex-1 rounded-full" />
+		<ScrollArea.Thumb class="flex-1 rounded-full bg-line-2 hover:bg-muted" />
 	</ScrollArea.Scrollbar>
 {/snippet}
 

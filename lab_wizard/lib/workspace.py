@@ -14,8 +14,6 @@ CONFIG_SCHEMA_VERSION = 1
 _CONFIG_DIRS = (
     "instruments",
     "measurements",
-    "plotters",
-    "savers",
     "server",
     "remote",
 )
@@ -32,6 +30,8 @@ class Workspace:
     logs_dir: Path
     # Where recorded runs live: the lab database, and saved run folders.
     data_dir: Path
+    # This lab's own measurements, written in Python (lib/custom_measurements.py).
+    measurements_dir: Path
     config_schema: int
 
 
@@ -69,6 +69,7 @@ def _resolve_from_root(root: Path) -> Workspace:
         projects_dir=path_for("projects_dir", "projects"),
         logs_dir=path_for("logs_dir", "logs"),
         data_dir=path_for("data_dir", "data"),
+        measurements_dir=path_for("measurements_dir", "measurements"),
         config_schema=schema,
     )
 
@@ -146,6 +147,7 @@ def initialize_workspace(path: str | Path) -> tuple[Workspace, bool]:
             'projects_dir = "projects"\n'
             'logs_dir = "logs"\n'
             'data_dir = "data"\n'
+            'measurements_dir = "measurements"\n'
             "\n"
             "[lab_wizard]\n"
             f"config_schema = {CONFIG_SCHEMA_VERSION}\n",
@@ -159,7 +161,25 @@ def initialize_workspace(path: str | Path) -> tuple[Workspace, bool]:
     workspace.projects_dir.mkdir(parents=True, exist_ok=True)
     workspace.logs_dir.mkdir(parents=True, exist_ok=True)
     workspace.data_dir.mkdir(parents=True, exist_ok=True)
+    _add_example_measurements(workspace.measurements_dir)
     return workspace, created
+
+
+EXAMPLE_MEASUREMENTS = Path(__file__).parent / "examples" / "measurements"
+
+
+def _add_example_measurements(folder: Path) -> None:
+    """Create the measurements folder with the examples, the first time only.
+
+    The examples are how anyone learns to write a custom measurement, so a new
+    workspace always has them. A folder that already exists is the lab's own:
+    nothing in it is added to or overwritten, even an example someone deleted.
+    """
+    if folder.exists():
+        return
+    folder.mkdir(parents=True)
+    for example in sorted(EXAMPLE_MEASUREMENTS.glob("*.py")):
+        shutil.copyfile(example, folder / example.name)
 
 
 def clean_workspace(workspace: Workspace) -> list[Path]:
@@ -168,8 +188,9 @@ def clean_workspace(workspace: Workspace) -> list[Path]:
     Every managed directory must resolve strictly below the workspace root.
     Validation happens before deletion, and the manifest is removed last.
     """
-    # ``data_dir`` is deliberately not here: it holds the lab's recorded
-    # measurements, which cleaning a workspace must never delete.
+    # ``data_dir`` and ``measurements_dir`` are deliberately not here: they hold
+    # the lab's recorded runs and its own measurement code, which cleaning a
+    # workspace must never delete.
     targets = {workspace.config_dir, workspace.projects_dir, workspace.logs_dir}
     for target in targets:
         if target == workspace.root or not target.is_relative_to(workspace.root):

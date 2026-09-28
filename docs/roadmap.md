@@ -9,27 +9,30 @@ the current source. Look here before assuming a feature works end to end.
 
 ## Plotters
 
-- ❌ **No working plotter.** Both
-  [`MplPlotter`](../lab_wizard/lib/plotters/mpl_plotter.py) and
-  [`BokehPlotter`](../lab_wizard/lib/plotters/bokeh_plotter.py) store the last
-  payload and print; nothing renders. `StandInPlotter` is a deliberate no-op.
-  The wiring around them is real — a run publishes rows and
-  `PlotterSink` forwards each one — so a working plotter is two method bodies.
+- ✅ **Live plots.** A run started from the wizard is drawn on its Run page. From
+  a terminal, `outputs.live_plot: window` opens a matplotlib window and `web`
+  the live page (a window here, a link over SSH). All of them read the run from
+  the lab database as it records. See [The Run page](wizard/measurements.md#the-run-page).
+- ⚠️ **The matplotlib window draws one plot** (the one `outputs.plot` names, or
+  the first); the web page and the Run page have a tab for each.
+- ❌ **No progress within a step.** A long `Wait` shows as a growing bar, not a
+  fraction done.
 
-## Savers and data
+## Data
 
 - ✅ **Every run is recorded** in the workspace's `data/lab.db`: one row per
   point, every step, the device and run metadata, the instruments' settings, and
   the procedure it ran, with its plots and derived columns. See
   [The lab database](data/database.md).
-- ✅ **File saver.** Each run as a folder of CSV and YAML, laid out by a path
-  template of filter keys. See [Savers](wizard/data.md#savers).
-- ❌ **No database browser in the GUI.** `/data/database` says where runs are
-  recorded and how to read them.
-- ⚠️ **Reading runs back is Python only.** `lab_wizard.lib.data` finds runs by
-  any filter, loads their points as polars frames, computes derived columns,
-  evaluates plot specs and exports them to a notebook; the Data page that uses
-  it is not built. See [Reading runs back](data/database.md#reading-runs-back).
+- ✅ **The [Data page](wizard/data.md)** filters every run by anything it
+  recorded, plots one or several with their procedure's plots, shows a run's
+  timeline and details, exports a run, and hands a plot to a notebook.
+- ✅ **Reading runs from Python.** `lab_wizard.lib.data` finds runs by any
+  filter and loads their points as polars frames. See
+  [Reading runs back](data/database.md#reading-runs-back).
+- ✅ **File saving.** Each run as a folder of CSV and YAML, on by default per
+  project, laid out by the workspace's folder template (Settings). See
+  [Saving files](wizard/data.md#saving-files).
 - ❌ **No migrations.** The lab database refuses a file from another schema
   version rather than altering it.
 
@@ -44,9 +47,12 @@ the current source. Look here before assuming a feature works end to end.
 
 ## Running measurements
 
-- ❌ **The wizard cannot run a project.** It generates the folder; you run the
-  setup file yourself from a terminal. There is no launch endpoint, no run view,
-  and no live progress — see `plans/runner_plan.md`.
+- ✅ **The [Run page](wizard/measurements.md#the-run-page)** edits a project's
+  device, metadata, params and outputs, runs it as its own process, and shows
+  its plots and timeline live; Stop is a Ctrl-C, so the instruments end safe.
+- ⚠️ **One run per project at a time**, and the page follows only runs it
+  started (a run started from a terminal shows once it is recorded, as the
+  project's last run).
 
 ## Server (remote control)
 
@@ -74,12 +80,6 @@ The server handles concurrent runs, but a few things remain:
 - ⚠️ **Prologix GPIB scanning** can be slow and, on some setups, report
   instruments at the wrong address due to response desync.
 
-## Misc
-
-- The legacy CLI [`wizard/wizard.py`](../lab_wizard/wizard/wizard.py) is an old
-  interactive setup tool superseded by the GUI; it imports modules that no
-  longer exist and is effectively dead.
-
 ## How to extend cleanly
 
 Most additions are drop-in, thanks to
@@ -87,8 +87,8 @@ Most additions are drop-in, thanks to
 
 | To add… | Do this |
 |---|---|
-| A saver or plotter | A `SaverParams`/`PlotterParams` subclass with a `type: Literal[...]` in `lib/savers/` or `lib/plotters/` |
+| A saver | A `GenericSaver` subclass, handed to `run_procedure(..., savers=[...])` |
 | An instrument | A `Params`/`Instrument` pair under `lib/instruments/<vendor>/`, inheriting the right KeyLike and behavior ABC |
 | A behavior ABC | Add it under `lib/instruments/general/`, register a proxy in `lib/client/proxies/registry.py`, and add the steps that drive it |
 | A procedure step | A `*StepParams` schema in `lib/procedures/steps/` whose field names match the runtime step's constructor — the generator and the composer both pick it up with no further change |
-| A measurement | Compose it in [Procedures](wizard/procedures.md), or add a YAML definition to `lib/procedures/library/` to ship it built in |
+| A measurement | Compose it in [Procedures](wizard/procedures.md), or add a YAML definition to `lib/procedures/library/` to ship it built in; for what composing cannot say, a [custom measurement](wizard/measurements.md#custom-measurements) in the workspace's `measurements/` folder |

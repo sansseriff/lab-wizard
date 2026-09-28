@@ -1,10 +1,10 @@
-:is(.procedure-editor, .instrument-editor) .editor-grid {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-grid {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) 21rem;
 	align-items: start;
 	gap: 16px;
 }
-:is(.procedure-editor, .instrument-editor) .editor-detail {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-detail {
 	min-width: 0;
 	position: sticky;
 	top: 62px;
@@ -16,7 +16,7 @@
 	padding: 16px;
 	overflow-wrap: anywhere;
 }
-:is(.procedure-editor, .instrument-editor) .editor-row {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-row {
 	display: flex;
 	align-items: baseline;
 	flex-wrap: wrap;
@@ -26,51 +26,53 @@
 	padding: 10px;
 	border-radius: 4px;
 	text-align: left;
-	font-size: 13px;
+	font-size: var(--text-body);
 	line-height: 1.45;
 	overflow-wrap: anywhere;
 }
-:is(.procedure-editor, .instrument-editor) .editor-row:hover {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-row:hover {
 	background: var(--surface-2);
 }
-:is(.procedure-editor, .instrument-editor) .editor-row[aria-pressed='true'] {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-row[aria-pressed='true'] {
 	background: var(--accent-wash);
 	color: var(--accent-strong);
 }
-:is(.procedure-editor, .instrument-editor) .editor-row-summary {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-row-summary {
 	margin-left: auto;
-	font-size: 12px;
+	font-size: var(--text-xs);
 	color: var(--muted);
 }
-:is(.procedure-editor, .instrument-editor) .editor-field {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-field {
 	display: block;
 	margin-top: 16px;
 }
-:is(.procedure-editor, .instrument-editor) .editor-field > span:first-child {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-field > span:first-child {
 	display: block;
 	margin-bottom: 6px;
-	font-size: 12px;
+	font-size: var(--text-xs);
 	color: var(--ink-2);
 }
-:is(.procedure-editor, .instrument-editor) .editor-detail h3 {
-	font-size: 16px;
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-detail h3 {
+	font-size: var(--text-title);
 	font-weight: 600;
 }
-:is(.procedure-editor, .instrument-editor) .editor-detail :is(input, select, textarea) {
+:is(.procedure-editor, .instrument-editor, .data-viewer)
+	.editor-detail
+	:is(input, select, textarea) {
 	max-width: 100%;
 }
-:is(.procedure-editor, .instrument-editor) .editor-empty {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-empty {
 	padding: 20px 14px;
-	font-size: 13px;
+	font-size: var(--text-body);
 	color: var(--muted);
 }
-:is(.procedure-editor, .instrument-editor) .editor-actions {
+:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-top: 16px;
 }
-:is(.procedure-editor, .instrument-editor) .editor-code {
+:is(.procedure-editor, .instrument-editor, .data-viewer, .run-page) .editor-code {
 	display: block;
 	width: 100%;
 	min-width: 0;
@@ -83,33 +85,33 @@
 	background: var(--surface);
 	color: var(--ink);
 	font-family: var(--font-mono, monospace);
-	font-size: 13px;
+	font-size: var(--text-body);
 	line-height: 1.65;
 	tab-size: 2;
 	overflow: auto;
 	resize: vertical;
 }
-:is(.procedure-editor, .instrument-editor) .editor-code:focus-visible {
+:is(.procedure-editor, .instrument-editor, .data-viewer, .run-page) .editor-code:focus-visible {
 	outline: 2px solid var(--accent);
 	outline-offset: -2px;
 }
-:is(.procedure-editor, .instrument-editor) .editor-code-status {
+:is(.procedure-editor, .instrument-editor, .data-viewer, .run-page) .editor-code-status {
 	padding: 10px 14px;
 	border-top: 1px solid var(--line);
-	font-size: 12px;
+	font-size: var(--text-xs);
 	color: var(--muted);
 }
 @media (max-width: 1099px) {
-	:is(.procedure-editor, .instrument-editor) .editor-grid {
+	:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}
-	:is(.procedure-editor, .instrument-editor) .editor-detail {
+	:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-detail {
 		position: static;
 		max-height: none;
 	}
 }
 @media (pointer: coarse) {
-	:is(.procedure-editor, .instrument-editor) .editor-row {
+	:is(.procedure-editor, .instrument-editor, .data-viewer) .editor-row {
 		min-height: 44px;
 	}
 }

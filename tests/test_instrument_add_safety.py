@@ -316,7 +316,7 @@ def test_discover_unsaved_parent_releases_root_and_writes_nothing(config, monkey
 
 @pytest.fixture
 def client(config, monkeypatch):
-    from lab_wizard.wizard.backend import hardware_access, main
+    from lab_wizard.wizard.backend import deps, hardware_access, main
     from lab_wizard.wizard.backend.models import Env
 
     @contextmanager
@@ -324,11 +324,11 @@ def client(config, monkeypatch):
         yield None
 
     monkeypatch.setattr(hardware_access, "server_session", no_server)
-    main.app.dependency_overrides[main.get_env] = lambda: Env(config_dir=config)
+    main.app.dependency_overrides[deps.get_env] = lambda: Env(config_dir=config)
     try:
         yield TestClient(main.app)
     finally:
-        main.app.dependency_overrides.pop(main.get_env)
+        main.app.dependency_overrides.pop(deps.get_env)
 
 
 def test_http_draft_discover_and_cancel(client, config, rig):

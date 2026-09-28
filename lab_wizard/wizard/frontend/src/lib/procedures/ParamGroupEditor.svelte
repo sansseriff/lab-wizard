@@ -1,9 +1,13 @@
 <script lang="ts">
 	import Panel from '$lib/components/Panel.svelte';
+	import RowContextMenu from '$lib/components/menu/RowContextMenu.svelte';
+	import type { MenuAction } from '$lib/components/menu/items';
 	import ParamValueInput from './ParamValueInput.svelte';
 	import type { ProcedureEditor } from './editor.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import {
 		PARAM_TYPES,
+		type ParamDecl,
 		type ParamGroup,
 		type ParamType,
 		getAt,
@@ -50,17 +54,56 @@
 		}
 		input.value = selectedName;
 	}
-	function add(groupPath: string[], group: boolean) {
+	// Where the Add buttons put a new entry: inside the selected group, or
+	// beside the selected parameter in its group; the top level otherwise.
+	const target = $derived(selected ? (leaf ? selected.path.slice(0, -1) : selected.path) : []);
+	const where = $derived(target.length ? ` to ${humanize(target.at(-1)!)}` : '');
+
+	/** Add a parameter (or group) to ``groupPath``: at its end, or right after ``after``. */
+	function add(groupPath: string[], group: boolean, after?: string) {
 		const parent = getAt(editor.definition.params, groupPath) as ParamGroup;
 		const name = uniqueName(group ? 'group' : 'value', Object.keys(parent));
-		parent[name] = group ? {} : { type: 'float', default: 0 };
+		const entry: ParamDecl | ParamGroup = group ? {} : { type: 'float', default: 0 };
+		if (after !== undefined && after in parent) {
+			// A group's order is its keys' order, so it is replaced by a copy with
+			// the new entry in place (reordering keys on the live object does not
+			// reorder them).
+			const rebuilt: ParamGroup = {};
+			for (const [k, v] of Object.entries(parent)) {
+				rebuilt[k] = v;
+				if (k === after) rebuilt[name] = entry;
+			}
+			if (groupPath.length) {
+				(getAt(editor.definition.params, groupPath.slice(0, -1)) as ParamGroup)[groupPath.at(-1)!] = rebuilt;
+			} else {
+				editor.definition.params = rebuilt;
+			}
+		} else {
+			parent[name] = entry;
+		}
 		select([...groupPath, name].join('.'));
 	}
-	function remove() {
-		if (!selected) return;
-		delete getAt(editor.definition.params, selected.path.slice(0, -1))[selectedName];
+	function remove(path: string[] = selected?.path ?? []) {
+		if (!path.length) return;
+		delete getAt(editor.definition.params, path.slice(0, -1))[path.at(-1)!];
 		editor.selectedParameter = null;
 		renameError = '';
+	}
+	/** A row's right-click menu: add inside it (a group) or after it, or remove it. */
+	function rowActions(path: string[], isGroup: boolean): MenuAction[] {
+		const parent = path.slice(0, -1);
+		const name = path.at(-1)!;
+		return [
+			...(isGroup
+				? [
+						{ label: 'Add parameter inside', onselect: () => add(path, false) },
+						{ label: 'Add group inside', onselect: () => add(path, true) }
+					]
+				: []),
+			{ label: 'Add parameter after', onselect: () => add(parent, false, name) },
+			{ label: 'Add group after', onselect: () => add(parent, true, name) },
+			{ label: `Remove ${isGroup ? 'group' : 'parameter'}`, danger: true, onselect: () => remove(path) }
+		];
 	}
 	function setType(type: ParamType) {
 		if (!leaf || leaf.type === type) return;
@@ -79,17 +122,18 @@
 <div class="editor-grid">
 	<Panel
 		title="Parameter defaults"
-		description="Select a parameter to edit its default, type, and description."
+		description="Select a parameter to edit it. Add puts a new one in the selected group; right-click a row to add inside or after it."
 		flush
 	>
 		{#snippet actions()}
-			<button class="lw-btn lw-btn-sm" onclick={() => add([], false)}>Add parameter</button>
-			<button class="lw-btn lw-btn-sm" onclick={() => add([], true)}>Add group</button>
+			<button class="lw-btn lw-btn-sm" onclick={() => add(target, false)}>Add parameter{where}</button>
+			<button class="lw-btn lw-btn-sm" onclick={() => add(target, true)}>Add group{where}</button>
 		{/snippet}
 		<div class="p-2">
 			{#each nodes as node (node.path.join('.'))}
 				{@const dotted = node.path.join('.')}
 				{@const decl = isParamDecl(node.entry) ? node.entry : null}
+				<RowContextMenu items={rowActions(node.path, !decl)}>
 				<button
 					id="param-{dotted}"
 					class="editor-row scroll-mt-16"
@@ -107,6 +151,7 @@
 							class="text-xs text-crit">Needs attention</span
 						>{/if}
 				</button>
+				</RowContextMenu>
 			{:else}<p class="editor-empty">
 					No parameters yet. Add a shared value here, or use “Make parameter” in a step.
 				</p>{/each}
@@ -130,13 +175,12 @@
 			{#if renameError}<p class="mt-2 text-xs text-crit" role="alert">{renameError}</p>{/if}
 			{#if leaf}
 				<label class="editor-field"
-					><span>Type</span><select
-						class="lw-select"
+					><span>Type</span><Select
 						value={leaf.type}
-						onchange={(e) => setType(e.currentTarget.value as ParamType)}
+						onValueChange={(v) => setType(v as ParamType)}
 						aria-label="Parameter type"
-						>{#each PARAM_TYPES as type}<option value={type}>{type}</option>{/each}</select
-					></label
+						options={PARAM_TYPES.map((type) => ({ value: type, label: type }))}
+					/></label
 				>
 				<div class="editor-field">
 					<span>Default value</span><ParamValueInput
@@ -184,10 +228,10 @@
 				Renaming updates all step references. Projects and presets can override the defaults.
 			</p>
 			<div class="editor-actions">
-				<button class="lw-btn lw-btn-danger lw-btn-sm" onclick={remove}
+				<button class="lw-btn lw-btn-danger lw-btn-sm" onclick={() => remove()}
 					>Remove {leaf ? 'parameter' : 'group'}</button
 				>
 			</div>
-		{:else}<p class="text-sm text-muted">Select a parameter or add one to get started.</p>{/if}
+		{:else}<p class="text-body text-muted">Select a parameter or add one to get started.</p>{/if}
 	</aside>
 </div>

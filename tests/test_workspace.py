@@ -23,8 +23,6 @@ def test_init_creates_empty_workspace_and_is_idempotent(tmp_path: Path) -> None:
     assert {path.name for path in workspace.config_dir.iterdir()} == {
         "instruments",
         "measurements",
-        "plotters",
-        "savers",
         "server",
         "remote",
     }
@@ -86,12 +84,12 @@ def test_bare_wizard_launches_from_initialized_workspace(
     monkeypatch.chdir(tmp_path)
     launched: dict[str, object] = {}
 
-    def fake_call(command: list[str], *, env: dict[str, str]) -> int:
+    def fake_run(command: list[str], env: dict[str, str]) -> int:
         launched["command"] = command
         launched["env"] = env
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", fake_call)
+    monkeypatch.setattr(cli, "_run_until_stopped", fake_run)
     with pytest.raises(SystemExit) as exc_info:
         cli.main(["--no-ui"])
 
@@ -118,11 +116,11 @@ def test_explicit_port_is_still_forwarded(
     monkeypatch.chdir(tmp_path)
     launched: dict[str, object] = {}
 
-    def fake_call(command: list[str], *, env: dict[str, str]) -> int:
+    def fake_run(command: list[str], env: dict[str, str]) -> int:
         launched["command"] = command
         return 0
 
-    monkeypatch.setattr(cli.subprocess, "call", fake_call)
+    monkeypatch.setattr(cli, "_run_until_stopped", fake_run)
     with pytest.raises(SystemExit):
         cli.main(["--no-ui", "--port", "9001"])
 

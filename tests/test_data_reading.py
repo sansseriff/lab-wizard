@@ -360,3 +360,18 @@ def test_evaluate_plot_serves_a_live_plotter_from_rows_in_memory():
         "run_id": [7, 7], "seq": [0, 1],  # which point each value came from
     }]
     json.dumps(series)  # ready to send to a browser
+
+
+def test_line_shape_says_how_many_lines_a_plot_draws_and_how_long_they_are():
+    """Two nested sweeps: each bias counted at three trigger levels."""
+    from lab_wizard.lib.data.plot import line_shape
+
+    points = pl.DataFrame([
+        {"run_id": 1, "seq": i, "bias": b, "trigger": t, "rate": b * 1000 - t}
+        for i, (b, t) in enumerate((b, t) for b in (0.1, 0.2, 0.3, 0.4) for t in (-50, -100, -150))
+    ])
+    split = line_shape(evaluate_plot({"x": "bias", "y": ["rate"], "series": "trigger"}, points))
+    assert split == {"lines": 3, "points": [4, 4]}
+    one = line_shape(evaluate_plot({"x": "bias", "y": ["rate"], "series": None}, points))
+    assert one == {"lines": 1, "points": [12, 12]}
+    assert line_shape(evaluate_plot({"x": "bias", "y": ["rate"], "where": {"trigger": 7}}, points)) == {"lines": 0, "points": [0, 0]}

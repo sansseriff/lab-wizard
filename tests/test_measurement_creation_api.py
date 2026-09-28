@@ -60,7 +60,7 @@ def test_procedures_are_offered_with_their_presets(workspace):
 def test_a_procedures_roles_are_its_requirements(workspace):
     _ws, client = workspace
     reqs = {r["variable_name"]: r for r in client.get("/api/get-resources/mcr_curve?kind=procedure").json()}
-    assert set(reqs) == {"voltage_source", "voltage_sense", "counter", "attenuator", "savers", "plotters"}
+    assert set(reqs) == {"voltage_source", "voltage_sense", "counter", "attenuator"}
     matched = {m["class_name"] for m in reqs["attenuator"]["matching_instruments"]}
     assert "YokoAttenuator" in matched
     assert client.get("/api/get-resources/nothing?kind=procedure").status_code == 404
@@ -85,9 +85,31 @@ def test_a_project_is_created_from_a_procedure_with_a_preset(workspace, rig):
     assert payload["measurement"]["params"]["bias"]["voltage"] == 0.02
     assert "instruments" not in payload["resources"]
     assert len(payload["resources"]["instrument_sources"]) == 4
+    # Files are saved by default; no live plot unless asked for.
+    assert payload["outputs"] == {"files": True, "live_plot": "none", "plot": ""}
 
 
-def test_the_retired_style_is_refused_with_its_reason(workspace, rig):
+def test_a_projects_outputs_are_what_was_chosen(workspace, rig):
+    _ws, client = workspace
+    response = client.post(
+        "/api/create-measurement-project",
+        json={
+            "measurement_name": "mcr_curve",
+            "kind": "procedure",
+            "selected_resources": _mcr_selections(rig),
+            "outputs": {"files": False, "live_plot": "web"},
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = YAML(typ="safe").load(Path(response.json()["yaml_file"]).read_text(encoding="utf-8"))
+    assert payload["outputs"] == {"files": False, "live_plot": "web", "plot": ""}
+    listed = client.get("/api/projects").json()["projects"][0]
+    assert listed["outputs"] == {"files": False, "live_plot": "web", "plot": ""}
+    setup = Path(response.json()["setup_file"]).read_text(encoding="utf-8")
+    assert "saver" not in setup.lower() and "plotter" not in setup.lower()
+
+
+def test_an_unknown_style_is_refused(workspace, rig):
     _ws, client = workspace
     response = client.post(
         "/api/create-measurement-project",
@@ -98,8 +120,8 @@ def test_the_retired_style_is_refused_with_its_reason(workspace, rig):
             "selected_resources": _mcr_selections(rig),
         },
     )
-    assert response.status_code == 400
-    assert "retired" in response.json()["detail"]
+    assert response.status_code == 422
+    assert "generation_style" in response.text
 
 
 def test_removing_an_instrument_lists_the_projects_that_use_it(workspace, rig):
@@ -122,7 +144,7 @@ def test_removing_an_instrument_lists_the_projects_that_use_it(workspace, rig):
     ).json()
     assert [p["name"] for p in meter["projects"]] == [created["project_name"]]
     projects = client.get("/api/projects").json()["projects"]
-    assert counter_name in projects[0]["resources"]["instruments"]
+    assert counter_name in projects[0]["instruments"]
 
 
 def test_this_workspaces_own_server_is_a_source_to_pick_from(tmp_path: Path, monkeypatch):

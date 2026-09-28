@@ -23,7 +23,7 @@ graph LR
   bare `wizard` launcher. The launcher resolves `lab-wizard.toml`, passes the
   workspace root to the backend, and launches it as a subprocess.
 - [`backend/main.py`](../../lab_wizard/wizard/backend/main.py) is a FastAPI app.
-  It defines the `/api/*` routes and then mounts the pre-built SvelteKit static
+  It includes the `/api/*` routers from `backend/routes/` and then mounts the pre-built SvelteKit static
   site at `/`. A `pywebview` window points at `http://localhost:8884/`.
 - The frontend ([`wizard/frontend`](../../lab_wizard/wizard/frontend/)) is built
   with Bun + Vite during `setup.sh`; the backend serves the static output.
@@ -44,14 +44,16 @@ mirror them.
 | Procedures | `/procedures` | write and edit procedures — roles, parameters, step tree | [Procedures](procedures.md) |
 | Instruments | `/instruments`, `/instruments/custom` | configure the hardware this workspace owns; build standalone resource files | [Instruments](instruments.md) |
 | Servers | `/servers`, `/servers/permissions`, `/servers/hardware`, `/servers/remote` | run a server, author safety rules, see who holds what, register servers elsewhere | [Servers](servers.md) |
-| Plotters | `/plotters` | configure plotters | [Plotters](plotters.md) |
-| Data | `/data/savers`, `/data/database` | configure savers; browse what runs wrote | [Data](data.md) |
+| Data | `/data` | browse and plot what runs recorded | [Data](data.md) |
+| Settings | `/settings` | what applies to every project: how runs are saved as files; where the workspace keeps things | [Saving files](data.md#saving-files) |
 
 ## API surface
 
-Every endpoint is declared in
-[`backend/main.py`](../../lab_wizard/wizard/backend/main.py). The ones worth
-knowing:
+Endpoints are declared in
+[`backend/routes/`](../../lab_wizard/wizard/backend/routes/), one module per
+section of the GUI (`measurements`, `runs`, `procedures`, `instruments`,
+`servers`, `data`, `live`, `settings`); [`backend/main.py`](../../lab_wizard/wizard/backend/main.py)
+builds the app and opens the window. The ones worth knowing:
 
 | Endpoint | Does |
 |---|---|
@@ -70,7 +72,12 @@ knowing:
 | `/api/server/*` | server lifecycle (start, stop, restart, bind) |
 | `GET /api/local-servers/claims`, `POST .../force-release` | run claims on this machine's servers |
 | `/api/remote-servers*` | the address book |
-| `/api/manage-{savers,plotters}*` | flat-resource CRUD |
+| `GET/PUT /api/projects/{name}/settings` | a project's run details, params and outputs, as fields or YAML; a refusal lists every problem with its path |
+| `GET/POST /api/projects/{name}/launch`, `POST .../stop` | run a project as its own process, follow it, Ctrl-C it |
+| `WS /api/live/runs/{id}` | a run as it happens — status, steps, every plot — read from the lab database |
+| `GET /api/settings/workspace` | where the workspace keeps config, projects, runs and logs |
+| `GET/PUT /api/settings/files` | how runs are saved as files, for the whole workspace |
+| `POST /api/settings/files/check` | what a folder template would name the latest run, and what is wrong with it |
 
 ## What the frontend may and may not do
 

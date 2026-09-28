@@ -1,12 +1,10 @@
-"""Phase A: a daemon that outlives its wizard, needs no address, and never
-routes savers or plotters.
+"""Phase A: a daemon that outlives its wizard and needs no address.
 
-Three separate mistakes are covered here, all of which produced the same
+Two separate mistakes are covered here, both of which produced the same
 user-visible symptom — "my instruments disappeared":
 
 * the host's daemon dying with the GUI window that started it,
-* a same-machine host being forced to pick and defend a tcp port,
-* a project routing *any* instrument to a server and then failing on its saver.
+* a same-machine host being forced to pick and defend a tcp port.
 """
 
 import pytest
@@ -39,12 +37,10 @@ class _Source:
 
 
 class _LocalResources(_Source):
-    """A local ResourceConfig also carries savers and plotters."""
+    """A local ResourceConfig."""
 
     def __init__(self, label="local"):
         super().__init__(label)
-        self.savers = {"main": "saver-params"}
-        self.plotters = {"live": "plotter-params"}
 
 
 class _Project:
@@ -56,40 +52,6 @@ def _config_dir(tmp_path):
     config = tmp_path / "config"
     (config / "server").mkdir(parents=True)
     return config
-
-
-# --------------------------- A2: savers never route ---------------------------
-
-
-def test_savers_and_plotters_come_from_the_local_project():
-    """Generated code calls ``Saver.from_config(resources, key=...)``.
-
-    ``resources`` is whatever source the project was handed, so without a
-    passthrough every routed project dies on ``exp.savers[key]`` — including one
-    that routes a single instrument and keeps the rest local.
-    """
-    composite = CompositeResources(
-        local=_LocalResources(),
-        remotes={"cryo": _Source("cryo")},
-        sources={"counter": "cryo"},
-    )
-    assert composite.savers["main"] == "saver-params"
-    assert composite.plotters["live"] == "plotter-params"
-
-
-def test_savers_stay_local_even_when_every_instrument_is_remote():
-    """The ``--remote`` case. A saver writes *this* machine's database."""
-    composite = CompositeResources.all_remote(
-        _Project(_LocalResources()), "tcp://rack:1", connect=lambda url: _Source("rack")
-    )
-    assert composite.from_attribute("bias") == "rack:bias"
-    assert composite.savers["main"] == "saver-params"
-
-
-def test_a_project_without_savers_says_so_rather_than_raising_attribute_error():
-    composite = CompositeResources(local=_Source("local"))
-    with pytest.raises(ValueError, match="resolved locally"):
-        _ = composite.savers
 
 
 # --------------------------- A2: the remote default ---------------------------

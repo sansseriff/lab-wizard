@@ -21,7 +21,6 @@ from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
     SelectedResource,
-    generate_measurement_project,
 )
 from lab_wizard.wizard.backend.custom_resource_generation import (
     CustomResourceSelection,
@@ -292,38 +291,6 @@ def test_generate_pcr_project_references_the_selected_channel_by_name(tmp_path: 
     assert f"counter_1 = resources.from_attribute({channel_name!r})" in setup_text
     assert ".from_config(resources, key=" not in setup_text
     assert "cast(" not in setup_text
-
-
-def test_custom_resources_refuse_the_retired_yaml_expanded_style(tmp_path: Path) -> None:
-    """Retired here too, and for the same reason as in measurement creation.
-
-    It taught hash traversal into a project's own instrument copy — which a
-    custom resource no longer carries.
-    """
-    config_dir = tmp_path / "config"
-    projects_dir = tmp_path / "projects"
-    _write_test_config(config_dir)
-
-    with pytest.raises(ValueError, match="has been retired"):
-        generate_custom_resource_project(
-            config_dir=config_dir,
-            projects_dir=projects_dir,
-            req=GenerateCustomResourceRequest(
-                generation_style="pedagogical_yaml_expanded",
-                selections=[
-                    CustomResourceSelection(
-                        variable_name="bias_source",
-                        type="sim928",
-                        key=_SIM928_KEY,
-                        path=[
-                            SelectedNodeRef(type="sim928", key=_SIM928_KEY),
-                            SelectedNodeRef(type="sim900", key=_SIM900_KEY),
-                            SelectedNodeRef(type="prologix_gpib", key=_PROLOGIX_KEY),
-                        ],
-                    )
-                ],
-            ),
-        )
 
 
 def test_generate_custom_resource_pedagogical_embedded(tmp_path: Path) -> None:

@@ -1,12 +1,9 @@
 from .saver import GenericSaver, SaverContext, StandInSaver
-from .base import SaverParams
-from .file_saver import FileSaver, FileSaverParams
+from .file_saver import FileSaver
 
 __all__ = [
     "FileSaver",
-    "FileSaverParams",
     "GenericSaver",
     "SaverContext",
-    "SaverParams",
     "StandInSaver",
 ]

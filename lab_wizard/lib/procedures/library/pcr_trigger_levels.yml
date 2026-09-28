@@ -1,0 +1,88 @@
+# PCR curves at several trigger levels, in one run.
+#
+# Two nested sweeps: the bias outside, the counter's trigger level inside, so
+# each bias is set once and counted at every trigger level before moving on.
+# A detector's pulses grow with its bias current, so a higher trigger cuts off
+# the small pulses of a lightly biased detector and its curve turns on later,
+# while a trigger low enough to reach the readout's noise counts a noise floor
+# at every bias. Comparing the curves shows where the trigger stops mattering.
+#
+# The rows do not depend on the loop order: each (bias, trigger level) pair is
+# one row holding both values and its count, whichever sweep is outside. Which
+# of the two goes across the plot and which becomes one line each is not
+# something the rows can say, so the plots below say it: bias across, a line
+# per trigger level. (Swapping the sweeps would move setting the trigger
+# outside the bias sweep, so the level it reached would be read once per
+# trigger level, on a row of its own, rather than beside every count.)
+schema_version: 1
+name: pcr_trigger_levels
+description: Photon count rate against bias voltage, at several trigger levels.
+roles:
+  voltage_source:
+    behavior: VSource
+    description: Biases the detector.
+  counter:
+    behavior: Counter
+    description: Counts the detector's pulses.
+params:
+  bias:
+    sweep:
+      type: sweep
+      default: {mode: linear, start: 0.0, stop: 0.0285, step: 0.0015}
+      unit: V
+      description: the bias voltages to visit, in order
+    settle_s:
+      type: float
+      default: 0.05
+      unit: s
+      description: wait after setting each bias before counting
+  readout:
+    trigger_levels_mV:
+      type: sweep
+      # The lowest sits near the readout noise, so its curve shows the noise floor.
+      default: {mode: explicit, values: [-25.0, -90.0, -110.0, -130.0, -150.0, -170.0]}
+      unit: mV
+      description: the counter's trigger levels, each counted at every bias
+    gate_time_s:
+      type: float
+      default: 1.0
+      unit: s
+      description: how long each count lasts
+body:
+  type: source_guard
+  source: {role: voltage_source}
+  body:
+    type: sweep
+    parameter: bias_voltage
+    values: {param: bias.sweep}
+    body:
+      type: sequence
+      children:
+        - type: set_voltage
+          source: {role: voltage_source}
+          voltage: {swept: bias_voltage}
+        - {type: wait, seconds: {param: bias.settle_s}}
+        - type: sweep
+          parameter: trigger_mV
+          values: {param: readout.trigger_levels_mV}
+          body:
+            type: sequence
+            children:
+              - type: set_threshold
+                counter: {role: counter}
+                threshold_mV: {swept: trigger_mV}
+                # The level the counter actually set, which it quantizes.
+                record: trigger_mV_reached
+              - {type: count, counter: {role: counter}, gate_time: {param: readout.gate_time_s}}
+plots:
+  - name: PCR at each trigger level
+    x: bias_voltage
+    y: [count_rate]
+    # One line per trigger level, rather than one per bias.
+    series: trigger_mV
+  - name: Trigger level at the top bias
+    x: trigger_mV
+    y: [count_rate]
+    # Only the rows at each run's own highest bias: counts against trigger level there.
+    where: {bias_voltage: {per_run: max}}
+    series: null

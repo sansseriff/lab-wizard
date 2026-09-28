@@ -7,6 +7,7 @@
 	 * you are looking, and it keeps its own scroll so a long list of instrument
 	 * types cannot push the buttons out of reach.
 	 */
+	import { Dialog } from 'bits-ui';
 	import type { Snippet } from 'svelte';
 	import XIcon from 'phosphor-svelte/lib/X';
 
@@ -28,66 +29,58 @@
 		children: Snippet;
 	} = $props();
 
-	function onkeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') {
-			e.stopPropagation();
-			onclose();
-		}
-	}
-
-	/** Focus the first control so typing works immediately — the type picker's
-	 *  search field is the first thing in the dialog for exactly this reason. */
-	function autofocus(node: HTMLElement) {
-		const target = node.querySelector<HTMLElement>(
-			'input:not([type=checkbox]), select, textarea, button'
+	/** Focus the first field rather than the close button, so typing works
+	 *  immediately — the type picker's search field is the first thing in the
+	 *  dialog for exactly this reason. */
+	let content = $state<HTMLElement | null>(null);
+	function focusFirstField(event: Event) {
+		const field = content?.querySelector<HTMLElement>(
+			'[data-modal-body] :is(input:not([type=checkbox]), select, textarea, button)'
 		);
-		target?.focus();
+		if (field) {
+			event.preventDefault();
+			field.focus();
+		}
 	}
 </script>
 
-<svelte:window {onkeydown} />
-
-<div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4 sm:p-8">
-	<!-- Backdrop click closes. The dialog stops propagation so a click inside
-	     never reaches it. -->
-	<button
-		class="fixed inset-0 cursor-default"
-		aria-label="Close dialog"
-		tabindex="-1"
-		onclick={onclose}
-	></button>
-
-	<div
-		class="relative flex w-full {width} max-h-[calc(100vh-4rem)] flex-col rounded-lg border border-line bg-surface shadow-2xl"
-		role="dialog"
-		aria-modal="true"
-		aria-label={title}
-		use:autofocus
-	>
-		<div class="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
-			<div class="min-w-0">
-				<h2 class="text-[15px] font-semibold">{title}</h2>
-				{#if subtitle}
-					<p class="mt-0.5 text-xs text-muted">{subtitle}</p>
-				{/if}
+<Dialog.Root
+	open
+	onOpenChange={(open) => {
+		if (!open) onclose();
+	}}
+>
+	<Dialog.Portal>
+		<Dialog.Overlay class="fixed inset-0 z-50 bg-black/50" />
+		<Dialog.Content
+			bind:ref={content}
+			onOpenAutoFocus={focusFirstField}
+			class="fixed left-1/2 top-4 z-50 flex w-[calc(100vw-2rem)] {width} max-h-[calc(100vh-2rem)] -translate-x-1/2 flex-col rounded-lg border border-line bg-surface shadow-2xl sm:top-8 sm:max-h-[calc(100vh-4rem)]"
+		>
+			<div class="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+				<div class="min-w-0">
+					<Dialog.Title class="text-title font-semibold">{title}</Dialog.Title>
+					{#if subtitle}
+						<Dialog.Description class="mt-0.5 text-xs text-muted">{subtitle}</Dialog.Description>
+					{/if}
+				</div>
+				<Dialog.Close
+					class="shrink-0 rounded p-1 text-muted transition-colors hover:bg-surface-2 hover:text-ink"
+					aria-label="Close"
+				>
+					<XIcon size={16} />
+				</Dialog.Close>
 			</div>
-			<button
-				class="shrink-0 rounded p-1 text-muted transition-colors hover:bg-surface-2 hover:text-ink"
-				title="Close"
-				onclick={onclose}
-			>
-				<XIcon size={16} />
-			</button>
-		</div>
 
-		<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3.5">
-			{@render children()}
-		</div>
-
-		{#if footer}
-			<div class="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
-				{@render footer()}
+			<div class="min-h-0 flex-1 overflow-y-auto px-4 py-3.5" data-modal-body>
+				{@render children()}
 			</div>
-		{/if}
-	</div>
-</div>
+
+			{#if footer}
+				<div class="flex items-center justify-end gap-2 border-t border-line px-4 py-3">
+					{@render footer()}
+				</div>
+			{/if}
+		</Dialog.Content>
+	</Dialog.Portal>
+</Dialog.Root>

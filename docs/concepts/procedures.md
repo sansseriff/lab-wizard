@@ -10,8 +10,10 @@ instrument it needs, which parameters it takes, and a tree of steps. It lives in
 ordinary Python — the same kind of project a hand-written measurement produces.
 Nothing reads the YAML at run time.
 
-Every measurement that ships with lab_wizard is a procedure. A hand-written
-measurement under `lib/measurements/<name>/` is still possible, but none ship.
+Every measurement that ships with lab_wizard is a procedure. For what a step
+tree composed this way cannot say, a lab writes a
+[custom measurement](../wizard/measurements.md#custom-measurements): a Python
+file in its workspace's `measurements/` folder.
 
 ## A definition
 
@@ -47,9 +49,18 @@ body:
 with that behavior can fill the role when a project is generated.
 
 **Params** are groups and typed leaves: `float`, `int`, `bool`, `str`, or
-`sweep`. A sweep is linear (`start`, `stop`, `step`) or explicit (`values`),
-with no unit in the field names — the same sweep drives volts or decibels, so
-the unit goes on the param. (The older `start_V`-style names still load.)
+`sweep`. A sweep is linear (`start`, `stop`, `step`), explicit (`values`), or
+waypoints (`points`, `step`), with no unit in the field names — the same sweep
+drives volts or decibels, so the unit goes on the param. (The older
+`start_V`-style names still load.)
+
+A **waypoints** sweep walks straight legs between turning points:
+`points: [0, 1.4, 0, -1.4, 0]` with `step: 0.005` is an IV loop — up, back,
+down, back — and is the built-in `iv_curve`'s default. Each turning point is
+visited once, and every point records the leg it was taken on
+(`bias_voltage_leg`: 0, 1, 2, 3), so a hysteretic curve's branches can be
+filtered, or drawn one line per leg (`series: bias_voltage_leg`, as the
+`iv_curve`'s *IV by leg* plot does).
 Params become the project's `measurement.params` and a pydantic model in the
 generated setup file.
 

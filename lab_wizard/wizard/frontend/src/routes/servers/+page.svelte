@@ -12,6 +12,7 @@
 	 * the fix is Configure, not Start.
 	 */
 	import { untrack } from 'svelte';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import Pill from '$lib/components/Pill.svelte';
 	import { workstation, type ServerStatus } from '$lib/stores/workstation.svelte';
@@ -104,10 +105,10 @@
 
 <section class="space-y-4">
 	<div>
-		<h1 class="text-[22px] font-semibold tracking-tight">This workspace's server</h1>
-		<p class="mt-1 max-w-[64ch] text-[13px] text-muted">
+		<h1 class="text-headline font-semibold tracking-tight">This workspace's server</h1>
+		<p class="mt-1 max-w-[64ch] text-body text-muted">
 			The process that owns this workstation's hardware and enforces its safety rules. Saved to
-			<code class="text-[12px]">config/server/server.yaml</code>.
+			<code class="text-xs">config/server/server.yaml</code>.
 		</p>
 	</div>
 
@@ -120,7 +121,7 @@
 		<div class="rounded border border-line bg-surface">
 			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-line px-3.5 py-2.5">
 				<div class="flex items-center gap-2.5">
-					<h2 class="text-[13.5px] font-semibold">Lifecycle</h2>
+					<h2 class="text-body font-semibold">Lifecycle</h2>
 					{#if !configured}
 						<Pill tone="neutral">Not configured</Pill>
 					{:else if running}
@@ -133,14 +134,13 @@
 				{#if configured}
 					<div class="flex items-center gap-2">
 						{#if running}
-							<button
+							<Tooltip text="Stop and start, which is what applies edited rules">{#snippet child({ props })}<button {...props}
 								class="rounded border border-line-2 px-3 py-1.5 text-xs font-medium hover:bg-surface-2 disabled:opacity-50"
 								onclick={restartServer}
 								disabled={serverBusy}
-								title="Stop and start, which is what applies edited rules"
 							>
 								{serverBusy ? '…' : 'Restart'}
-							</button>
+							</button>{/snippet}</Tooltip>
 							<button
 								class="rounded bg-crit px-3 py-1.5 text-xs font-medium text-white hover:brightness-110 disabled:opacity-50"
 								onclick={stopServer}
@@ -166,7 +166,7 @@
 					<!-- Creating the config is the opt-in to being a host. A workspace
 					     without one is a client, which is what keeps a cloned workspace
 					     from racing the real host for the same instruments. -->
-					<p class="text-[12.5px] text-ink-2">
+					<p class="text-body text-ink-2">
 						This workspace has no server config, so it acts as a <strong>client</strong> of other
 						servers. Enable hosting to make it own its own hardware — it will serve this machine over
 						<code>ipc://</code>, with no port to choose.
@@ -179,14 +179,14 @@
 						{serverBusy ? 'Enabling…' : 'Enable hosting'}
 					</button>
 				{:else}
-					<dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-3.5 gap-y-1 text-[12.5px]">
-						<dt class="text-[11.5px] text-muted">Serving</dt>
+					<dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-3.5 gap-y-1 text-body">
+						<dt class="text-fine text-muted">Serving</dt>
 						<dd>
 							this machine over <code>ipc://</code>{#if serverStatus?.bind}, and the network on
 								<span class="mono">{serverStatus.bind}</span>{/if}
 						</dd>
 						{#if running}
-							<dt class="text-[11.5px] text-muted">Process</dt>
+							<dt class="text-fine text-muted">Process</dt>
 							<dd>
 								pid <span class="mono">{serverStatus?.pid}</span>
 								{#if serverStatus?.detached}
@@ -194,7 +194,7 @@
 								{/if}
 							</dd>
 						{/if}
-						<dt class="text-[11.5px] text-muted">Rules</dt>
+						<dt class="text-fine text-muted">Rules</dt>
 						<dd>
 							{serverStatus?.rule_count ?? 0} loaded
 							<a class="ml-1 text-accent hover:underline" href="/servers/permissions">Edit →</a>
@@ -241,7 +241,7 @@
 								<span class="text-muted">(stop the server to change)</span>
 							{/if}
 						</div>
-						<p class="text-[11px] text-muted">
+						<p class="text-fine text-muted">
 							Optional. Leaving it unset is a complete configuration — the server still serves this
 							machine. Add one only when another computer needs to connect, then register that exact
 							address in its
@@ -254,9 +254,9 @@
 
 		<div class="rounded border border-line bg-surface">
 			<div class="border-b border-line px-3.5 py-2.5">
-				<h2 class="text-[13.5px] font-semibold">What running it changes</h2>
+				<h2 class="text-body font-semibold">What running it changes</h2>
 			</div>
-			<ul class="space-y-2 p-3.5 text-[12.5px] text-ink-2">
+			<ul class="space-y-2 p-3.5 text-body text-ink-2">
 				<li class="flex gap-2">
 					<span class="text-accent">→</span>
 					<span>

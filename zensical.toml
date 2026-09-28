@@ -53,7 +53,6 @@ nav = [
     { "Procedures" = "wizard/procedures.md" },
     { "Instruments" = "wizard/instruments.md" },
     { "Servers" = "wizard/servers.md" },
-    { "Plotters" = "wizard/plotters.md" },
     { "Data" = "wizard/data.md" },
   ] },
   { "Concepts" = [

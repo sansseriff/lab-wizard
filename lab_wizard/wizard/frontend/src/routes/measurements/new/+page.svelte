@@ -30,10 +30,12 @@
 </script>
 
 <section class="space-y-4">
-	<h1 class="text-2xl font-semibold">Choose a measurement</h1>
-	<p class="text-sm text-ink-2">
-		Pick what to run, then continue to bind instruments. Procedures are measurements written as
-		definitions rather than Python — built into lab_wizard, or saved in this workspace.
+	<h1 class="text-headline font-semibold">Choose a measurement</h1>
+	<p class="text-body text-ink-2">
+		Pick what to run, then continue to bind instruments. Procedures are composed in the wizard —
+		built into lab_wizard, or saved in this workspace. Custom measurements are Python files in this
+		workspace's <code>measurements/</code> folder, for what a composed procedure cannot do; the
+		examples there show how to write one.
 	</p>
 
 	{#if data?.error}
@@ -58,12 +60,14 @@
 							<span class="font-medium">{c.name}</span>
 							{#if c.kind === 'procedure'}
 								<Pill tone="accent">procedure</Pill>
-							{/if}
-							{#if c.origin === 'workspace'}
-								<Pill title="Saved in this workspace's config/procedures">this workspace</Pill>
+								{#if c.origin === 'workspace'}
+									<Pill title="Saved in this workspace's config/procedures">this workspace</Pill>
+								{/if}
+							{:else}
+								<Pill title="A Python file in this workspace's measurements folder">custom</Pill>
 							{/if}
 							{#if c.presets.length > 0}
-								<span class="text-[11px] text-muted">
+								<span class="text-fine text-muted">
 									{c.presets.length} preset{c.presets.length === 1 ? '' : 's'}
 								</span>
 							{/if}
@@ -72,14 +76,16 @@
 							<div class="mt-0.5 text-xs text-ink-2">{c.description}</div>
 						{/if}
 						{#if c.roles}
-							<div class="mt-1 flex flex-wrap gap-1.5 text-[11px] text-muted">
+							<div class="mt-1 flex flex-wrap gap-1.5 text-fine text-muted">
 								{#each Object.entries(c.roles) as [role, behavior] (role)}
 									<span class="mono">{role}: {behavior}</span>
 								{/each}
 							</div>
 						{/if}
 						{#if c.error}
-							<div class="mt-1 text-xs text-crit">This definition does not load: {c.error}</div>
+							<div class="mt-1 text-xs text-crit">
+								{c.kind === 'custom' ? `${c.name}.py` : 'This definition'} does not load: {c.error}
+							</div>
 						{/if}
 					</button>
 				</li>

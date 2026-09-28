@@ -23,7 +23,7 @@ Simulated bench running. Add these instruments in lab_wizard:
   prologix_gpib    port: /Users/you/.lab_sim/prologix   (-> /dev/ttys004)
     sim900         gpib_address: 5
       sim928       slot: 1
-      sim970       slot: 2   (detector on channel 1)
+      sim970       slot: 2   (detector on its channel 1: channel index 0 in lab_wizard)
   keysight53220A   ip_address: 127.0.0.1  ip_port: 5025
   yokogawa_aq2212  ip_address: 127.0.0.1  ip_port: 50000
     yoko_attenuator  slot: 1
@@ -139,9 +139,15 @@ so the standard detector switches at 0.03 V applied.
 
 The counter sees what the detector would put out. Detection efficiency turns on
 with bias as an error function, dark counts double every
-`dark_count_doubling_current_a`, a latched detector emits nothing, and the
-discriminator passes pulses below `pulse_amplitude_mV`. Counts are drawn from a
-Poisson distribution, seeded, so a run is reproducible.
+`dark_count_doubling_current_a`, and a latched detector emits nothing. A pulse
+is the bias current diverted into the readout, so its height grows with the
+bias, reaching `pulse_amplitude_mV` at the critical current; the discriminator
+passes the pulses taller than its trigger level. So a higher trigger turns on
+at a higher bias. The readout's own noise (`readout_noise_rms_mV`) triggers
+the counter too, at a rate falling as `exp(-T²/2σ²)` with the trigger level
+`T`, so only a trigger near the noise counts it: a noise floor at every bias.
+Counts are drawn from a Poisson distribution, seeded, so a run is reproducible.
+`pcr_trigger_levels` shows both effects.
 
 The attenuator scales the light reaching the detector by `10 ** (-dB / 10)`,
 and closing its shutter blocks it entirely. Dark counts are unaffected, so a

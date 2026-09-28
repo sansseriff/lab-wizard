@@ -107,7 +107,7 @@ plot, which is what the Data page's "Open in notebook" will give you.
 ## Saving runs as files too
 
 A **file saver** writes each run as a folder of CSV and YAML as well, for
-people who work with files; see [Savers](../wizard/data.md#savers). The folder
+people who work with files; see [Saving files](../wizard/data.md#saving-files). The folder
 is a complete copy of the run's rows here, and `export_run(db, run_id, root)`
 in `lab_wizard.lib.data.run_folder` writes the same folder for any recorded run.
 

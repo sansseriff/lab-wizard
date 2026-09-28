@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Panel from '$lib/components/Panel.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import type { ProcedureEditor } from './editor.svelte';
 	import { uniqueName, validIdentifier } from './model';
 	let { editor }: { editor: ProcedureEditor } = $props();
@@ -88,19 +89,19 @@
 			>
 			{#if error}<p class="mt-2 text-xs text-crit" role="alert">{error}</p>{/if}
 			<label class="editor-field"
-				><span>Required behavior</span><select
-					class="lw-select"
+				><span>Required behavior</span><Select
 					value={decl.behavior}
-					onchange={(e) => {
-						if (decl) decl.behavior = e.currentTarget.value;
+					onValueChange={(v) => {
+						if (decl) decl.behavior = v;
 					}}
 					aria-label="Required behavior"
-				>
-					{#if !catalog.behaviors[decl.behavior]}<option value={decl.behavior}
-							>{decl.behavior} (unknown)</option
-						>{/if}
-					{#each bindable as behavior}<option value={behavior.name}>{behavior.name}</option>{/each}
-				</select></label
+					options={[
+						...(catalog.behaviors[decl.behavior]
+							? []
+							: [{ value: decl.behavior, label: `${decl.behavior} (unknown)` }]),
+						...bindable.map((b) => ({ value: b.name, label: b.name }))
+					]}
+				/></label
 			>
 			<p class="mt-2 text-xs text-muted">{catalog.behaviors[decl.behavior]?.summary}</p>
 			<label class="editor-field"
@@ -134,6 +135,6 @@
 					}}>Remove role</button
 				>
 			</div>
-		{:else}<p class="text-sm text-muted">Select a role or add one to get started.</p>{/if}
+		{:else}<p class="text-body text-muted">Select a role or add one to get started.</p>{/if}
 	</aside>
 </div>

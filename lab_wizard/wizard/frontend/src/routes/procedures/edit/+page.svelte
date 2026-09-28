@@ -7,9 +7,12 @@
 	 * the Python the definition becomes, so what is being built is never a
 	 * mystery. Save refuses anything that does not check.
 	 */
-	import { onDestroy, tick, untrack } from 'svelte';
+	import { onDestroy, onMount, tick, untrack } from 'svelte';
 	import '$lib/procedures/composer.css';
-	import { beforeNavigate, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
+	import { queryChoice, setQuery } from '$lib/url';
+	import Tabs from '$lib/components/Tabs.svelte';
+	import { ask, guardNavigation } from '$lib/confirm.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import Callout from '$lib/components/Callout.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -47,8 +50,9 @@
 			: null
 	);
 
-	type Tab = 'compose' | 'params' | 'roles' | 'plots' | 'details' | 'yaml' | 'python' | 'presets';
-	let tab = $state<Tab>('compose');
+	const TABS = ['compose', 'params', 'roles', 'plots', 'details', 'yaml', 'python', 'presets'] as const;
+	type Tab = (typeof TABS)[number];
+	let tab = $state<Tab>(queryChoice('tab', TABS, 'compose'));
 	let saving = $state(false);
 	let hasBuiltin = $state(untrack(() => !!data.hasBuiltin));
 	let saveMessage = $state<{ tone: 'ok' | 'crit'; text: string } | null>(null);
@@ -70,14 +74,11 @@
 		editor.scheduleCheck();
 	});
 
-	beforeNavigate((navigation) => {
-		if (
-			(editor?.dirty || yamlDirty || presetDirty) &&
-			!saving &&
-			!confirm('This procedure has unsaved changes. Leave anyway?')
-		) {
-			navigation.cancel();
-		}
+	guardNavigation(() => !!(editor?.dirty || yamlDirty || presetDirty) && !saving, {
+		title: 'Leave with unsaved changes?',
+		description: 'This procedure has changes that are not saved.',
+		confirmLabel: 'Leave',
+		tone: 'danger'
 	});
 
 	const name = $derived(editor?.definition.name ?? '');
@@ -126,7 +127,7 @@
 					/* Keep the revert action hidden if metadata could not be refreshed. */
 				}
 			}
-			replaceState(`/procedures/edit?name=${encodeURIComponent(savedName)}`, {});
+			setQuery({ name: savedName, from: null });
 			saveMessage = { tone: 'ok', text };
 		} catch (e) {
 			saveMessage = { tone: 'crit', text: e instanceof Error ? e.message : String(e) };
@@ -139,7 +140,16 @@
 		if (!editor || yamlBusy) return;
 		tab = 'yaml';
 		if (!reload && (yamlDirty || yamlSourceJson === editor.json)) return;
-		if (reload && yamlDirty && !confirm('Discard this YAML draft and reload from the workflow?'))
+		if (
+			reload &&
+			yamlDirty &&
+			!(await ask({
+				title: 'Discard this YAML draft?',
+				description: 'It will be reloaded from the workflow.',
+				confirmLabel: 'Discard',
+				tone: 'danger'
+			}))
+		)
 			return;
 		yamlBusy = true;
 		yamlError = null;
@@ -162,9 +172,13 @@
 		const source = editor.json;
 		if (
 			yamlConflict &&
-			!confirm(
-				'The workflow changed after this YAML draft was created. Replace those changes with this draft?'
-			)
+			!(await ask({
+				title: 'Replace the workflow with this draft?',
+				description:
+					'The workflow changed after this YAML draft was created. Applying the draft discards those changes.',
+				confirmLabel: 'Replace',
+				tone: 'danger'
+			}))
 		)
 			return;
 		yamlBusy = true;
@@ -211,15 +225,30 @@
 	onDestroy(() => editor?.dispose());
 
 	const tabs = $derived([
-		['compose', 'Workflow'],
-		['params', `Parameters · ${editor ? paramLeaves(editor.definition.params).length : 0}`],
-		['roles', `Instrument roles · ${Object.keys(editor?.definition.roles ?? {}).length}`],
-		['plots', `Plots · ${editor?.definition.plots?.length ?? 0}`],
-		['details', 'Details'],
-		['presets', 'Presets'],
-		['yaml', 'YAML'],
-		['python', 'Python']
+		{ value: 'compose', label: 'Workflow' },
+		{ value: 'params', label: `Parameters · ${editor ? paramLeaves(editor.definition.params).length : 0}` },
+		{ value: 'roles', label: `Instrument roles · ${Object.keys(editor?.definition.roles ?? {}).length}` },
+		{ value: 'plots', label: `Plots · ${editor?.definition.plots?.length ?? 0}` },
+		{ value: 'details', label: 'Details' },
+		{ value: 'presets', label: 'Presets' },
+		{ value: 'yaml', label: 'YAML' },
+		{ value: 'python', label: 'Python' }
 	]);
+
+	// The tab and the selected step live in the URL, so a reload or a trip to
+	// another page and Back returns to the same place.
+	onMount(() => {
+		const step = page.url.searchParams.get('step');
+		if (editor && step)
+			editor.selectStep(step.split('.').map((part) => (/^\d+$/.test(part) ? Number(part) : part)));
+		if (tab !== 'compose') switchTab(tab);
+	});
+	$effect(() => {
+		setQuery({
+			tab: tab === 'compose' ? null : tab,
+			step: tab === 'compose' && editor?.selectedPath ? pathKey(editor.selectedPath) : null
+		});
+	});
 
 	async function revealElement(id: string) {
 		await tick();
@@ -274,26 +303,6 @@
 		}
 	}
 
-	function tabKeydown(event: KeyboardEvent) {
-		if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-		const buttons = [
-			...(event.currentTarget as HTMLElement)
-				.closest('[role="tablist"]')!
-				.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-		];
-		const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-		if (index < 0) return;
-		event.preventDefault();
-		const next =
-			event.key === 'Home'
-				? 0
-				: event.key === 'End'
-					? buttons.length - 1
-					: (index + (event.key === 'ArrowRight' ? 1 : buttons.length - 1)) % buttons.length;
-		buttons[next].focus();
-		switchTab(tabs[next][0] as Tab);
-	}
-
 	$effect(() => {
 		if (!editor?.revealVersion) return;
 		untrack(() => {
@@ -312,7 +321,15 @@
 	}
 
 	async function revertToBuiltin() {
-		if (!editor || !confirm(`Delete this workspace's ${name} and use the built-in one again?`))
+		if (
+			!editor ||
+			!(await ask({
+				title: `Delete this workspace's ${name}?`,
+				description: 'The built-in one will be used again.',
+				confirmLabel: 'Delete',
+				tone: 'danger'
+			}))
+		)
 			return;
 		await fetchWithConfig(`/api/procedures/${encodeURIComponent(name)}`, 'DELETE');
 		editor.savedJson = editor.json; // leaving is intended
@@ -399,26 +416,7 @@
 						>Create a measurement</a
 					>{/if}</Callout
 			>{/if}
-		<div
-			class="flex flex-wrap gap-1 border-b border-line"
-			role="tablist"
-			aria-label="Procedure sections"
-		>
-			{#each tabs as [id, label] (id)}
-				<button
-					id="procedure-tab-{id}"
-					role="tab"
-					onkeydown={tabKeydown}
-					aria-selected={tab === id}
-					aria-controls="procedure-panel"
-					class="-mb-px border-b-2 px-3 py-2 text-[13px] {tab === id
-						? 'border-accent font-semibold text-accent-strong'
-						: 'border-transparent text-muted hover:text-ink'}"
-					onclick={() => switchTab(id as Tab)}>{label}</button
-				>
-			{/each}
-		</div>
-		<div id="procedure-panel" role="tabpanel" aria-labelledby="procedure-tab-{tab}">
+		<Tabs value={tab} onValueChange={(v) => switchTab(v as Tab)} {tabs} label="Procedure sections">
 			{#if tab === 'compose'}
 				<div class="editor-grid">
 					<div class="min-w-0" id="workflow-outline">
@@ -449,7 +447,7 @@
 									path={editor.selectedPath}
 									onreference={reference}
 								/>{/key}
-						{:else}<p class="text-sm text-muted">Select a step to edit its settings.</p>{/if}
+						{:else}<p class="text-body text-muted">Select a step to edit its settings.</p>{/if}
 					</aside>
 				</div>
 			{:else if tab === 'params'}
@@ -594,11 +592,11 @@
 							title="Presets"
 							description="Named params sets, offered when creating a measurement."
 						>
-							<p class="text-sm text-muted">Save the procedure to add presets.</p>
+							<p class="text-body text-muted">Save the procedure to add presets.</p>
 						</Panel>
 					{/if}
 				</div>
 			{/if}
-		</div>
+		</Tabs>
 	</div>
 {/if}

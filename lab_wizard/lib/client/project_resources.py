@@ -67,10 +67,8 @@ def _workspace_instruments(project_dir: Path) -> dict[str, Any]:
 
 
 def _local_resources(project: ProjectConfig, project_dir: Path) -> ResourceConfig:
-    """The project's savers and plotters, with the workspace's instruments."""
+    """The workspace's instruments, with the project's routing."""
     return ResourceConfig(
-        savers=project.resources.savers,
-        plotters=project.resources.plotters,
         instruments=_workspace_instruments(project_dir),
         instrument_sources=project.resources.instrument_sources,
     )
@@ -79,8 +77,7 @@ def _local_resources(project: ProjectConfig, project_dir: Path) -> ResourceConfi
 def resource_source_for(project: ProjectConfig, project_dir: Path, *, remote: Optional[str] = None) -> Any:
     """The object a setup file's ``create_instrument_resources`` resolves against."""
     if remote:
-        # Explicit override: every instrument through one server; savers and
-        # plotters still come from the project.
+        # Explicit override: every instrument through one server.
         return CompositeResources.all_remote(project, remote)
     if not uses_workspace_tree(project):
         if project.resources.instrument_sources:

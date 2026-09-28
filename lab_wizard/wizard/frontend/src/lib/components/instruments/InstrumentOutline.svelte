@@ -1,8 +1,10 @@
 <script lang="ts">
 	import CaretDown from 'phosphor-svelte/lib/CaretDown';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 	import CaretRight from 'phosphor-svelte/lib/CaretRight';
 	import Plus from 'phosphor-svelte/lib/Plus';
 	import Self from './InstrumentOutline.svelte';
+	import RowContextMenu from '$lib/components/menu/RowContextMenu.svelte';
 	import type { TreeItem, InstrumentMeta } from '$lib/types/instruments';
 	import type { TransportBadge } from '$lib/components/TreeNode.svelte';
 	import {
@@ -21,6 +23,8 @@
 		query,
 		onselect,
 		onadd,
+		onreset,
+		onremove,
 		transportBadge,
 		disabled = false
 	}: {
@@ -31,6 +35,8 @@
 		query: string;
 		onselect: (path: NodePath) => void;
 		onadd: (node: TreeItem, path: NodePath) => void;
+		onreset: (node: TreeItem, path: NodePath) => void;
+		onremove: (node: TreeItem, path: NodePath) => void;
 		transportBadge?: (node: TreeItem) => TransportBadge | null;
 		disabled?: boolean;
 	} = $props();
@@ -39,44 +45,52 @@
 	const children = $derived(sortedChildren(node));
 	const addable = $derived(childTypes(metadata, node).length > 0);
 	const badge = $derived(path.length === 0 ? transportBadge?.(node) : null);
+	// Right-click: the same actions the inspector offers, without selecting first.
+	const menu = $derived([
+		...(addable
+			? [{ label: 'Add child…', onselect: () => ((collapsed = false), onadd(node, currentPath)) }]
+			: []),
+		{ label: 'Reset defaults…', onselect: () => onreset(node, currentPath) },
+		{ label: 'Remove…', danger: true, onselect: () => onremove(node, currentPath) }
+	]);
 </script>
 
 {#if matchesTree(node, query)}
 	<div class="instrument-branch">
-		<div class="instrument-row" class:selected={selected === pathKey(currentPath)}>
-			{#if children.length}
+		<RowContextMenu items={menu} {disabled}>
+			<div class="instrument-row" class:selected={selected === pathKey(currentPath)}>
+				{#if children.length}
+					<button
+						class="instrument-toggle"
+						aria-label="{collapsed ? 'Expand' : 'Collapse'} {node.type}"
+						aria-expanded={!collapsed || !!query}
+						onclick={() => (collapsed = !collapsed)}
+					>
+						{#if collapsed && !query}<CaretRight size={14} />{:else}<CaretDown size={14} />{/if}
+					</button>
+				{:else}<span class="instrument-toggle"></span>{/if}
 				<button
-					class="instrument-toggle"
-					aria-label="{collapsed ? 'Expand' : 'Collapse'} {node.type}"
-					aria-expanded={!collapsed || !!query}
-					onclick={() => (collapsed = !collapsed)}
-				>
-					{#if collapsed && !query}<CaretRight size={14} />{:else}<CaretDown size={14} />{/if}
-				</button>
-			{:else}<span class="instrument-toggle"></span>{/if}
-			<button
-				class="instrument-select"
-				aria-pressed={selected === pathKey(currentPath)}
-				{disabled}
-				onclick={() => onselect(currentPath)}
-			>
-				<span class="font-medium">{node.type}</span>
-				<span class="instrument-address">{nodeAddress(node)}</span>
-				{#if badge}<span class="instrument-badge"
-						>{badge.held_by_server ? 'In use' : badge.transport_sharing}</span
-					>{/if}
-			</button>
-			{#if addable}<button
-					class="instrument-add"
-					title="Add instrument under {node.type} ({nodeAddress(node)})"
-					aria-label="Add instrument under {node.type} ({nodeAddress(node)})"
+					class="instrument-select"
+					aria-pressed={selected === pathKey(currentPath)}
 					{disabled}
-					onclick={() => {
-						collapsed = false;
-						onadd(node, currentPath);
-					}}><Plus size={14} /><span>Add</span></button
-				>{/if}
-		</div>
+					onclick={() => onselect(currentPath)}
+				>
+					<span class="font-medium">{node.type}</span>
+					<span class="instrument-address">{nodeAddress(node)}</span>
+					{#if badge}<span class="instrument-badge"
+							>{badge.held_by_server ? 'In use' : badge.transport_sharing}</span
+						>{/if}
+				</button>
+				{#if addable}<Tooltip text="Add instrument under {node.type} ({nodeAddress(node)})">{#snippet child({ props })}<button {...props}
+						class="instrument-add"
+						aria-label="Add instrument under {node.type} ({nodeAddress(node)})"
+						{disabled}
+						onclick={() => {
+							collapsed = false;
+							onadd(node, currentPath);
+						}}><Plus size={14} /><span>Add</span></button>{/snippet}</Tooltip>{/if}
+			</div>
+		</RowContextMenu>
 		{#if (!collapsed || query) && children.length}
 			<div class="instrument-children">
 				{#each children as child (child.key)}
@@ -88,6 +102,8 @@
 						{query}
 						{onselect}
 						{onadd}
+						{onreset}
+						{onremove}
 						{transportBadge}
 						{disabled}
 					/>

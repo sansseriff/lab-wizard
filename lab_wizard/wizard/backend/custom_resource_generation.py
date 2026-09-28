@@ -32,7 +32,10 @@ from lab_wizard.wizard.backend.instrument_sources import (
     ensure_source_registered,
     resolve_source_url,
 )
-from lab_wizard.wizard.backend.project_generation import _normalized_style
+from lab_wizard.wizard.backend.project_generation import (
+    GenerationStyle,
+    _refuse_embedded_through_server,
+)
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
     _NodeRef,
@@ -70,7 +73,7 @@ class CustomResourceSelection(BaseSelection):
 class GenerateCustomResourceRequest(BaseModel):
     selections: list[CustomResourceSelection] = Field(default_factory=list)
     project_prefix: str | None = None
-    generation_style: str = "production"
+    generation_style: GenerationStyle = "production"
     file_style: str = "dataclass"  # "dataclass" | "simple"
     resource_class_name: str = "CustomResources"
     persist_attribute_names: bool = False
@@ -327,8 +330,7 @@ def _custom_resource_yaml(
 
     A production file names them — ``instrument_sources`` says which tree
     answers for each — and copies no params. The embedded escape hatch is the
-    one that carries ``instruments``. ``ResourceConfig`` defaults
-    ``savers``/``plotters`` to empty dicts, so both emit empty ones.
+    one that carries ``instruments``.
     """
     return {
         "project": {
@@ -341,8 +343,6 @@ def _custom_resource_yaml(
         "run": {"device": None, "operator": None, "notes": None, "metadata": {}},
         "measurement": {"params": {}},
         "resources": {
-            "savers": {},
-            "plotters": {},
             "instruments": {
                 key: model_to_commented_map(value, exclude_none=True)
                 for key, value in instruments.items()
@@ -373,11 +373,12 @@ def generate_custom_resource_project(
         raise ValueError("At least one selection is required")
     # Same two styles the measurement flow offers, and the same retirement
     # message for the third (procedure_plan.md 5.10).
-    style = _normalized_style(req.generation_style)
+    style = req.generation_style
     if req.file_style not in ("dataclass", "simple"):
         raise ValueError(f"Unknown file_style: {req.file_style}")
     if req.file_style == "simple" and len(req.selections) != 1:
         raise ValueError("Simple file style requires exactly one selection")
+    _refuse_embedded_through_server(style, req.selections)
 
     instruments = load_instruments(config_dir)
     all_nodes = _walk_tree(instruments)
@@ -418,15 +419,6 @@ def generate_custom_resource_project(
         instrument_sources[sel.attribute] = registered[sel.source]
         leaves.append(None)
 
-    if instrument_sources and style == "pedagogical_embedded":
-        # Embedding a routed instrument's params would build a local object for
-        # hardware a server owns; its attribute_name is the only handle that
-        # means the same thing on both sides of the wire.
-        logger.info(
-            "Selection spans %d server source(s); generating in production style",
-            len(set(instrument_sources.values())),
-        )
-        style = "production"
     embedded = style == "pedagogical_embedded"
 
     var_names = _unique_var_names([sel.variable_name for sel in req.selections])

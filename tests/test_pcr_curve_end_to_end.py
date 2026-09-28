@@ -58,6 +58,9 @@ DEVICE = SnspdParams(
     dark_count_rate_hz=100.0,
 )
 
+# The detector alone, without the readout's noise, for the tests of its own physics.
+QUIET = DEVICE.model_copy(update={"readout_noise_rms_mV": 0.0})
+
 # 100 kΩ bias resistor, so 0.030 V is the 300 nA switching current.
 SWEEP_V = [round(0.002 * i, 3) for i in range(17)]  # 0.000 .. 0.032 V
 SWITCHING_BIAS_V = 0.030
@@ -95,7 +98,7 @@ def test_detection_efficiency_is_an_error_function_turn_on() -> None:
 
 def test_count_rate_saturates_at_the_incident_rate_times_efficiency() -> None:
     plateau = DEVICE.incident_photon_rate_hz * DEVICE.max_detection_efficiency
-    rate = _biased_model(0.029).count_rate()
+    rate = _biased_model(0.029, QUIET).count_rate()
     assert rate == pytest.approx(plateau, rel=0.02)
 
 
@@ -116,14 +119,14 @@ def test_dark_counts_are_negligible_under_the_plateau_and_rise_toward_switching(
 
 
 def test_a_latched_detector_counts_nothing() -> None:
-    model = _biased_model(SWITCHING_BIAS_V + 0.002)
+    model = _biased_model(SWITCHING_BIAS_V + 0.002, QUIET)
     assert model.count_rate() == 0.0
     assert model.count_events(1.0) == 0
     assert model.is_normal
 
 
 def test_counts_are_poissonian_about_the_rate() -> None:
-    model = _biased_model(MIDPOINT_BIAS_V)
+    model = _biased_model(MIDPOINT_BIAS_V, QUIET)
     rate = model.count_rate()
     draws = [model.count_events(0.001) for _ in range(200)]
     mean = sum(draws) / len(draws)
@@ -136,15 +139,38 @@ def test_counts_are_poissonian_about_the_rate() -> None:
 
 
 def test_the_discriminator_cuts_counts_off_above_the_pulse_height() -> None:
-    model = _biased_model(0.029)
+    model = _biased_model(0.029, QUIET)
     full = model.count_rate(threshold_mV=THRESHOLD_MV)
 
-    assert model.count_rate(threshold_mV=DEVICE.pulse_amplitude_mV) == pytest.approx(
+    assert model.count_rate(threshold_mV=model.pulse_amplitude()) == pytest.approx(
         full / 2, rel=1e-9
     ), "half the pulses clear a threshold at the mean pulse height"
     assert model.count_rate(threshold_mV=400.0) < full / 1000
     # Magnitude only: the model takes no position on readout polarity.
     assert model.count_rate(threshold_mV=-100.0) == model.count_rate(threshold_mV=100.0)
+
+
+def test_a_trigger_near_the_readout_noise_counts_it_whatever_the_bias() -> None:
+    """The noise floor a PCR curve's lowest trigger level shows."""
+    for bias in (0.0, 0.010, SWITCHING_BIAS_V + 0.002):  # unbiased, below turn-on, latched
+        model = _biased_model(bias)
+        assert model.count_rate(25.0) > 50_000
+        assert model.count_rate(25.0) == pytest.approx(model.noise_count_rate(25.0), rel=0.05)
+    # Rice's formula falls off as exp(-T²/2σ²): a few σ up, there is none.
+    assert _biased_model(0.0).noise_count_rate(50.0) < 0.1
+    assert _biased_model(0.0).count_rate(90.0) < 1e-6
+
+
+def test_pulses_grow_with_bias_so_a_higher_trigger_turns_on_later() -> None:
+    """Why PCR curves are measured at several trigger levels."""
+    assert _biased_model(0.015).pulse_amplitude() == pytest.approx(DEVICE.pulse_amplitude_mV / 2)
+    low, high = 50.0, 150.0
+    # Well biased, both triggers see nearly every pulse...
+    top = _biased_model(0.028)
+    assert top.count_rate(high) / top.count_rate(low) > 0.95
+    # ...lightly biased, the high one cuts off the small pulses.
+    weak = _biased_model(0.018)  # 120 mV pulses
+    assert weak.count_rate(high) < weak.count_rate(low) / 5
 
 
 # ---------------------------------------------------------------------------

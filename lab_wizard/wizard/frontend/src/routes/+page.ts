@@ -7,8 +7,7 @@ export type OverviewData = {
 	instrumentCount: number;
 	roots: RootTransport[];
 	duplicates: [string, string[]][];
-	saverCount: number;
-	plotterCount: number;
+	projectCount: number;
 	remoteCount: number;
 	otherServers: LocalServer[];
 	projects: { name: string; measurement: string | null; created: string | null }[];
@@ -30,8 +29,7 @@ export const load: PageLoad = async () => {
 		instrumentCount: 0,
 		roots: [],
 		duplicates: [],
-		saverCount: 0,
-		plotterCount: 0,
+		projectCount: 0,
 		remoteCount: 0,
 		otherServers: [],
 		projects: [],
@@ -50,7 +48,7 @@ export const load: PageLoad = async () => {
 		}
 	};
 
-	const [instruments, transport, savers, plotters, remotes, locals, projects] = await Promise.all([
+	const [instruments, transport, remotes, locals, projects] = await Promise.all([
 		settle(fetchWithConfig<{ tree: TreeItem[] }>('/api/manage-instruments', 'GET'), { tree: [] }),
 		settle(
 			fetchWithConfig<{
@@ -59,8 +57,6 @@ export const load: PageLoad = async () => {
 			}>('/api/transport-status', 'GET'),
 			{ roots: {}, duplicate_transports: {} }
 		),
-		settle(fetchWithConfig<{ tree: unknown[] }>('/api/manage-savers', 'GET'), { tree: [] }),
-		settle(fetchWithConfig<{ tree: unknown[] }>('/api/manage-plotters', 'GET'), { tree: [] }),
 		settle(fetchWithConfig<{ servers: unknown[] }>('/api/remote-servers', 'GET'), { servers: [] }),
 		settle(fetchWithConfig<{ servers: LocalServer[] }>('/api/local-servers', 'GET'), {
 			servers: []
@@ -74,8 +70,7 @@ export const load: PageLoad = async () => {
 		instrumentCount: countNodes(instruments.tree ?? []),
 		roots: Object.values(transport.roots ?? {}),
 		duplicates: Object.entries(transport.duplicate_transports ?? {}),
-		saverCount: (savers.tree ?? []).length,
-		plotterCount: (plotters.tree ?? []).length,
+		projectCount: (projects.projects ?? []).length,
 		remoteCount: (remotes.servers ?? []).length,
 		otherServers: (locals.servers ?? []).filter((s) => !s.is_this_workspace),
 		projects: (projects.projects ?? []).slice(0, 3),

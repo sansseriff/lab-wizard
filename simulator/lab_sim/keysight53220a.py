@@ -258,7 +258,7 @@ class Keysight53220A:
             channel.relative_percent = _number(argument, channel.relative_percent)
             return None
         if tail in ("LEV:MIN", "LEV:MAX", "LEV:PTP"):
-            amplitude = self.model.params.pulse_amplitude_mV / 1000.0
+            amplitude = self.model.pulse_amplitude() / 1000.0
             return {
                 "LEV:MIN": f"{0.0:+.6E}",
                 "LEV:MAX": f"{amplitude:+.6E}",
@@ -348,7 +348,7 @@ class Keysight53220A:
             # pass this test while sending levels the real counter would round.
             step = channel.range_v / 2000.0
             return round(channel.threshold_v / step) * step
-        return self.model.params.pulse_amplitude_mV / 1000.0 * channel.relative_percent / 100.0
+        return self.model.pulse_amplitude() / 1000.0 * channel.relative_percent / 100.0
 
     # -- helpers ------------------------------------------------------------
 

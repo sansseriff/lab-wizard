@@ -1,6 +1,6 @@
 # The lab data system: recording runs, saving files, and the viewer
 
-> **Status: Phases 1–6 built (2026-09-25); Phases 7–8 not started.** Decisions
+> **Status: Phases 1–7 built (2026-09-25); Phase 8 not started.** Decisions
 > still marked **(open)** in §14 need an answer; everything else was settled
 > in review.
 >
@@ -203,16 +203,17 @@ Every output is a sink subscribed to that stream:
 | Sink | When | Where |
 |---|---|---|
 | `DatabaseRecorder` | always | §3 |
-| `FileSaver` | when the project configures one | §7 |
-| `MplPlotter`, `WebPlotter` | when the project configures one | `runner_plan.md` |
+| `FileSaver` | when the project's `outputs.files` is on (the default) | §7 |
+| `MplPlotter`, `WebPlotter` | when the project's `outputs.live_plot` names one | `runner_plan.md` |
 | `EventPublisher` (websocket) | when the wizard launched the run, or a web plotter needs it | `runner_plan.md` |
 
 Generated projects stop wiring sinks by hand. `run_measurement` calls one
 library function, `run_procedure(tree, resources, procedure=, definition=,
 project_dir=)` in `lab_wizard/lib/task_adapters/run.py`, which builds
 `RunStarted` from the project, calls `attach_sinks` (the recorder, then the
-configured savers and plotters) and runs. Changing what a sink does never means
-regenerating projects.
+savers and plotters the project's `outputs:` block asks for) and runs. Changing
+what a sink does, or which sinks a project has, never means regenerating
+projects.
 
 **A run started from a project is always recorded; a bare step tree is not.**
 `run_procedure` records when it is given `project_dir`, which a generated
@@ -352,15 +353,15 @@ fields in tree order, all taken from `columns`.
 ### The folder hierarchy is a choice of facets
 
 A folder tree can only be ordered one way. The saver builds each run's path
-from a template whose fields are **facet keys** (§8):
+from a template whose fields are **facet keys** (§8). The layout is one choice
+for the workspace, in `<config_dir>/data.yaml`, and a project only turns file
+saving on or off (`outputs.files`, on by default):
 
 ```yaml
-savers:
-  files:
-    type: file_saver
-    root: ""                                   # empty = <workspace>/<data_dir>/files
-    path: "{date}/{procedure}_{device}_{time}"  # any facet keys
-    plot_png: true
+files:
+  root: ""                                   # empty = <workspace>/<data_dir>/files
+  path: "{date}/{procedure}_{device}_{time}"  # any facet keys
+  plot_png: true
 ```
 
 `{date}/{procedure}_{device}_{time}` is the default. A lab that thinks by device
@@ -442,7 +443,11 @@ plots:
 ```
 
 **Fallback** with no `plots:`: x = the innermost swept parameter, y = the first
-recorded field.
+recorded field, and one line per value of the sweep enclosing x (if any), so
+nested sweeps never draw as one line zigzagging through every point. The
+fallback cannot know which of two sweeps is "the" axis (bias across with a line
+per trigger level, or the reverse); that is the procedure's choice, made in
+`plots:`. `pcr_trigger_levels` is the worked example.
 
 The viewer uses the **current** definition's `plots:` and `derived:`, so a plot
 added later applies to past runs; if the procedure was deleted, the snapshot in
@@ -758,7 +763,7 @@ As built:
 ### Phase 5: the file saver (`lab_wizard/lib/savers/file_saver.py`) — built
 
 - `FileSaverParams` (§7) as the saver resource type; `DatabaseSaver` and its
-  params are deleted.
+  params are deleted. (Later: `FileSaverParams` is gone too; see §14.)
 - The run-folder writer, shared with Export run.
 - Tests: a run folder round-trips everything on its database rows; the path
   template; crash mid-run leaves a readable folder.
@@ -801,7 +806,7 @@ As built:
 | `GET /api/data/runs/{id}/steps` | the timeline |
 | `POST /api/data/plot` | series for a spec |
 | `POST /api/data/plot/notebook` | Python text for a spec |
-| `POST /api/data/runs/{id}/export` | a run folder, zipped |
+| `GET /api/data/runs/{id}/export` | a run folder, zipped (a `GET`, so a plain link downloads it) |
 | `GET/PUT /api/data/devices` | the device registry |
 | `POST /api/procedures/{name}/plots` | save a spec into a procedure |
 
@@ -840,7 +845,7 @@ As built — Phase 6:
   `run{id}_{procedure}_{device}`.
 - Tests: `tests/test_data_api.py`.
 
-### Phase 7: the viewer (`routes/data/database`, replacing the stub)
+### Phase 7: the viewer (`routes/data/database`, replacing the stub) — built
 
 - **Left:** facet sidebar, grouped (Procedure, Device, Device properties, Run,
   Instruments, Params, Operator, Date, Status), with a search over facet keys.
@@ -851,6 +856,37 @@ As built — Phase 6:
 - A running run refreshes on a poll.
 - Clicking a point shows its steps and highlights them in the timeline.
 - The plot itself is the shared BokehJS component from `runner_plan.md`.
+
+As built — Phase 7:
+
+- `lib/components/BokehPlot.svelte` is the shared plot. BokehJS 3.8.2 is pinned
+  through npm (`@bokeh/bokehjs`); its prebuilt bundles are imported with Vite's
+  `?url` and loaded as scripts by `lib/data/bokeh.ts`, only on a page that
+  draws. Bundling BokehJS's ES modules was not needed, and nothing is fetched
+  from the internet. The figure is rebuilt only when the plot's shape changes;
+  new values for the same lines replace the data in place, so a zoom survives
+  a running run's refresh. A legend is drawn only for more than one line.
+- The composer's plot settings became `lib/components/PlotSettings.svelte`,
+  used by both the composer and the viewer's spec editor, so a plot is edited
+  one way everywhere. It gained `kind` and the legend `label`.
+- The page is `routes/data/+page.svelte` (first `routes/data/database/`) over `lib/data/`:
+  `FacetSidebar`, `RunList`, `Timeline`, `RunDetails`, `DevicesPanel`, the typed
+  `api.ts`, and pure helpers in `model.ts` (`tests/data-viewer.test.ts`).
+- Filters and chosen runs are in the URL (`?filters=…&runs=5,3`), so a view
+  reloads and can be shared.
+- Polling: every 2.5 s, if a listed run is running, the list and filters
+  refresh; if the chosen one is, its plot and timeline too. A run whose process
+  died without `RunEnded` stays "running" and keeps being polled; nothing marks
+  it dead yet.
+- Export became a `GET` (a plain link downloads it), and the wizard's window
+  now allows downloads (`webview.settings["ALLOW_DOWNLOADS"]`).
+- The layout lets this page use the whole window width; other pages keep their
+  reading width.
+- Checked in Chrome through Playwright against real runs of `iv_curve` and
+  `mcr_curve` recorded on `lab-sim`. That covered filtering, overlaying, editing
+  and saving a plot, clicking a point through to its steps, devices, export,
+  following a running run, and dark mode. Not checked inside the pywebview
+  window itself.
 
 ### Phase 8: cleanup
 
@@ -869,10 +905,17 @@ As built — Phase 6:
 Settled in review:
 
 - **One database per workspace**; synchronization across computers later.
-- **Savers stay** as a configurable resource, meaning optional extra outputs;
-  the database is always written.
-- **Plotters stay**: a native matplotlib window and a web plotter
-  (`runner_plan.md`).
+- **Savers and plotters are not resources.** The database is always written.
+  A project's `outputs:` block says what else a run produces: `files` (on by
+  default) and `live_plot` (`none | window | web`, for a run started from a
+  terminal). The file layout is the workspace's (`config/data.yaml`, edited
+  from the Settings page). There is no saver or plotter registry, no Savers or
+  Plotters page, no picker when a measurement is created, and no saver or
+  plotter code in a generated setup file; `run_procedure` builds the sinks
+  from `outputs:` each time a run starts. This replaces the earlier decision
+  that savers and plotters stay as configurable resources: the file saver was
+  the only saver, a folder template and a toggle, and a plotter's only real
+  setting is how it displays, since what it draws is the procedure's `plots:`.
 - **`iv_curve` and `pcr_curve` are ported** to procedure definitions.
 
 Still open:

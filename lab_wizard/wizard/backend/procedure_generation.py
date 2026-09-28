@@ -1,11 +1,9 @@
 """Generate and refresh projects from composed procedures.
 
 A composed procedure (``config/procedures/<name>.yml``) reaches a project
-through the same generator as a hand-written measurement: this module only
-supplies the pieces a measurement directory would — a setup template, a
-measurement module, requirements, and params — derived from the definition
-instead of read from ``lib/measurements``. See ``plans/procedure_plan.md``
-Phase 3.
+through the same generator as a custom measurement: this module supplies the
+pieces — a setup template, a measurement module, requirements, and params —
+derived from the definition. See ``plans/procedure_plan.md`` Phase 3.
 """
 
 from __future__ import annotations
@@ -15,7 +13,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from lab_wizard.lib.plotters.plotter import GenericPlotter
 from lab_wizard.lib.procedures.codegen import (
     DEFINITION_BLOCK,
     PROCEDURE_BLOCK,
@@ -26,7 +23,6 @@ from lab_wizard.lib.procedures.codegen import (
 )
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.storage import load_procedure
-from lab_wizard.lib.savers.saver import GenericSaver
 from lab_wizard.lib.utilities.model_tree import load_project_config
 from lab_wizard.wizard.backend.models import FilledReq
 from lab_wizard.wizard.backend.project_generation import (
@@ -48,16 +44,11 @@ __all__ = [
 
 
 def procedure_requirements(definition: ProcedureDefinition) -> list[FilledReq]:
-    """One instrument requirement per role, plus the savers and plotters every project takes."""
-    reqs = [
-        FilledReq(variable_name=role, base_type=behavior, resource_kind="instrument")
+    """One instrument requirement per role."""
+    return [
+        FilledReq(variable_name=role, base_type=behavior)
         for role, behavior in definition.role_behaviors().items()
     ]
-    reqs.append(FilledReq(variable_name="savers", base_type=GenericSaver, resource_kind="saver", is_list=True))
-    reqs.append(
-        FilledReq(variable_name="plotters", base_type=GenericPlotter, resource_kind="plotter", is_list=True)
-    )
-    return reqs
 
 
 def generate_procedure_project(
@@ -78,6 +69,7 @@ def generate_procedure_project(
         template_text=setup_template_source(definition),
         measurement_source=format_python_code(measurement_module_source(definition)),
         params=params if params is not None else definition.param_defaults(),
+        params_model=definition.params_model(),
     )
 
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping, Sequence as Seq
+from contextlib import ExitStack
 
 from lab_procedure.core import Status, Step
 
@@ -95,6 +96,13 @@ class Repeat(Step):
 
 
 class Sweep(Step):
+    """Run a child once per value, with ``parameter`` bound to the value.
+
+    ``also`` binds more parameters alongside, one value per sweep value:
+    ``also={"bias_voltage_leg": [0, 0, 1, 1]}`` records which leg of a
+    there-and-back sweep each point was taken on.
+    """
+
     determinate = True
 
     def __init__(
@@ -103,10 +111,17 @@ class Sweep(Step):
         values: Iterable[object],
         child_factory: Callable[[object], Step],
         name: str | None = None,
+        also: Mapping[str, Seq[object]] | None = None,
     ) -> None:
         super().__init__(name=name)
         self.parameter = parameter
         self.values = list(values)
+        self.also = {key: list(column) for key, column in (also or {}).items()}
+        for key, column in self.also.items():
+            if len(column) != len(self.values):
+                raise ValueError(
+                    f"Sweep {parameter!r}: also[{key!r}] has {len(column)} values for {len(self.values)} points"
+                )
         self.child_factory = child_factory
         self._active_child: Step | None = None
 
@@ -126,7 +141,10 @@ class Sweep(Step):
             if self.aborted:
                 return Status.ABORTED
             self.report_progress(index / total, detail=f"{self.parameter}={value}")
-            with self.context.bound_parameter(self.parameter, value):
+            with ExitStack() as bound:
+                for key, column in self.also.items():
+                    bound.enter_context(self.context.bound_parameter(key, column[index]))
+                bound.enter_context(self.context.bound_parameter(self.parameter, value))
                 child = self.child_factory(value)
                 self._active_child = child
                 try:

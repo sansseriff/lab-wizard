@@ -43,7 +43,7 @@
 	const Icon = $derived(icons[tone]);
 </script>
 
-<div class="flex gap-2.5 rounded border px-3 py-2 text-[12.5px] leading-relaxed {styles[tone]}">
+<div class="flex gap-2.5 rounded border px-3 py-2 text-body leading-relaxed {styles[tone]}">
 	<Icon size={15} class="mt-px shrink-0" />
 	<div class="min-w-0">
 		{#if title}

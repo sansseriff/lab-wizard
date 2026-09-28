@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Self from './ParameterField.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import { resolveSchema, type ParamSchema } from '$lib/instruments/model';
 	let {
 		schema,
@@ -60,26 +61,26 @@
 		<label class="block">
 			<span class="mb-1.5 block text-xs text-ink-2">{title}</span>
 			{#if spec.enum}
-				<select
-					class="lw-select w-full"
+				<Select
 					aria-label={label}
 					value={JSON.stringify(value)}
-					onchange={(e) => onchange(JSON.parse(e.currentTarget.value))}
-				>
-					{#if nullable}<option value="null">Not set</option>{/if}
-					{#each spec.enum as option}<option value={JSON.stringify(option)}>{String(option)}</option
-						>{/each}
-				</select>
+					onValueChange={(v) => onchange(JSON.parse(v))}
+					options={[
+						...(nullable ? [{ value: 'null', label: 'Not set' }] : []),
+						...spec.enum.map((option) => ({ value: JSON.stringify(option), label: String(option) }))
+					]}
+				/>
 			{:else if spec.type === 'boolean'}
-				<select
-					class="lw-select w-full"
+				<Select
 					aria-label={label}
 					value={JSON.stringify(value)}
-					onchange={(e) => onchange(JSON.parse(e.currentTarget.value))}
-				>
-					<option value="true">Yes</option><option value="false">No</option>
-					{#if nullable}<option value="null">Not set</option>{/if}
-				</select>
+					onValueChange={(v) => onchange(JSON.parse(v))}
+					options={[
+						{ value: 'true', label: 'Yes' },
+						{ value: 'false', label: 'No' },
+						...(nullable ? [{ value: 'null', label: 'Not set' }] : [])
+					]}
+				/>
 			{:else if spec.type === 'string'}
 				<input
 					class="lw-input mono"
@@ -134,7 +135,7 @@
 				/> Not set
 			</label>
 		{/if}
-		{#if resolved.description}<p class="mt-1 text-[11px] text-muted">{resolved.description}</p>{/if}
+		{#if resolved.description}<p class="mt-1 text-fine text-muted">{resolved.description}</p>{/if}
 		{#if error}<p class="mt-1 text-xs text-crit" role="alert">{error}</p>{/if}
 	{/if}
 </div>

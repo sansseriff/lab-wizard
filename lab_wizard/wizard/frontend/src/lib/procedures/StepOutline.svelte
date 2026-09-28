@@ -6,7 +6,9 @@
 	import StepPicker from './StepPicker.svelte';
 	import type { ProcedureEditor } from './editor.svelte';
 	import { pathKey, type Path } from './model';
-	import { cleanupSummary, humanize, stepSummary, stepTitle } from './presentation';
+	import { cleanupSummary, humanize, stepContext, stepSummary, stepTitle } from './presentation';
+	import RowContextMenu from '$lib/components/menu/RowContextMenu.svelte';
+	import type { MenuAction } from '$lib/components/menu/items';
 
 	let { editor, path }: { editor: ProcedureEditor; path: Path } = $props();
 	const step = $derived(editor.step(path));
@@ -27,38 +29,63 @@
 	const cleanup = $derived(step ? cleanupSummary(step, editor.definition) : null);
 	const collapsed = $derived(editor.collapsedSteps.includes(step));
 	let picker = $state<{ target: Path; index?: number; title: string } | null>(null);
+
+	// Right-click: the inspector's structural actions, on the row itself.
+	// Built only when the menu opens, since every row has one.
+	const menu = $derived.by((): MenuAction[] => {
+		const context = stepContext(editor.definition, editor.catalog, path);
+		const inList = context.place === 'list';
+		const removes = context.optional || inList;
+		return [
+			...(inList
+				? [
+						{ label: 'Move up', disabled: context.index === 0, onselect: () => editor.moveStep(path, -1) },
+						{
+							label: 'Move down',
+							disabled: context.index === context.count - 1,
+							onselect: () => editor.moveStep(path, 1)
+						}
+					]
+				: []),
+			...(context.place === 'root'
+				? []
+				: [{ label: removes ? 'Remove' : 'Empty this slot', danger: true, onselect: () => editor.removeStep(path) }])
+		];
+	});
 </script>
 
 {#if step}
 	<div class="outline-node" id="step-{key}">
 		{#if !flat}
-			<div class="outline-item">
-				{#if children.length}
+			<RowContextMenu items={menu} disabled={path.length === 1}>
+				<div class="outline-item">
+					{#if children.length}
+						<button
+							class="outline-toggle"
+							aria-label="{collapsed ? 'Expand' : 'Collapse'} {stepTitle(step)}"
+							aria-expanded={!collapsed}
+							onclick={() => editor.toggleStep(step)}
+						>
+							{#if collapsed}<CaretRightIcon size={14} />{:else}<CaretDownIcon size={14} />{/if}
+						</button>
+					{:else}<span class="outline-spacer"></span>{/if}
 					<button
-						class="outline-toggle"
-						aria-label="{collapsed ? 'Expand' : 'Collapse'} {stepTitle(step)}"
-						aria-expanded={!collapsed}
-						onclick={() => editor.toggleStep(step)}
+						class="outline-row"
+						class:selected
+						aria-pressed={selected}
+						onclick={() => editor.selectStep(path)}
 					>
-						{#if collapsed}<CaretRightIcon size={14} />{:else}<CaretDownIcon size={14} />{/if}
+						<span class="outline-title"
+							>{stepTitle(step)}{#if !spec}<span class="text-crit"> · unknown type</span>{/if}</span
+						>
+						<span class="outline-summary">{stepSummary(step, editor.definition, editor.catalog)}</span
+						>
+						{#if problems.length}<span class="outline-problems"
+								>{problems.length} problem{problems.length === 1 ? '' : 's'}</span
+							>{/if}
 					</button>
-				{:else}<span class="outline-spacer"></span>{/if}
-				<button
-					class="outline-row"
-					class:selected
-					aria-pressed={selected}
-					onclick={() => editor.selectStep(path)}
-				>
-					<span class="outline-title"
-						>{stepTitle(step)}{#if !spec}<span class="text-crit"> · unknown type</span>{/if}</span
-					>
-					<span class="outline-summary">{stepSummary(step, editor.definition, editor.catalog)}</span
-					>
-					{#if problems.length}<span class="outline-problems"
-							>{problems.length} problem{problems.length === 1 ? '' : 's'}</span
-						>{/if}
-				</button>
-			</div>
+				</div>
+			</RowContextMenu>
 		{/if}
 		{#if flat || !collapsed}
 			<div class:scoped={!flat && children.length > 0}>
@@ -166,7 +193,7 @@
 		padding: 9px 10px;
 		text-align: left;
 		border-radius: 4px;
-		font-size: 13px;
+		font-size: var(--text-body);
 		line-height: 1.45;
 	}
 	.outline-row:hover {
@@ -182,12 +209,12 @@
 	.outline-summary {
 		margin-left: auto;
 		color: var(--muted);
-		font-size: 12px;
+		font-size: var(--text-xs);
 		overflow-wrap: anywhere;
 	}
 	.outline-problems {
 		color: var(--crit);
-		font-size: 12px;
+		font-size: var(--text-xs);
 	}
 	.scoped {
 		margin-left: 12px;
@@ -198,7 +225,7 @@
 		padding: 8px 10px 3px;
 		color: var(--ink-2);
 		font-weight: 600;
-		font-size: 12px;
+		font-size: var(--text-xs);
 	}
 	.outline-add-row {
 		display: flex;
@@ -215,7 +242,7 @@
 		padding: 5px 8px;
 		border-radius: 4px;
 		color: var(--accent);
-		font-size: 12px;
+		font-size: var(--text-xs);
 	}
 	.outline-add:hover {
 		background: var(--accent-wash);
@@ -224,7 +251,7 @@
 		margin-left: 24px;
 	}
 	.sequence-settings {
-		font-size: 11px;
+		font-size: var(--text-fine);
 		color: var(--muted);
 		padding: 5px 0;
 	}
@@ -235,7 +262,7 @@
 	}
 	.outline-cleanup {
 		padding: 7px 10px 10px 34px;
-		font-size: 12px;
+		font-size: var(--text-xs);
 		color: var(--ink-2);
 		overflow-wrap: anywhere;
 	}

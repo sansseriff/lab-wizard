@@ -24,12 +24,12 @@
 
 <div class="flex items-start justify-between gap-4">
 	<div class="min-w-0">
-		<h1 class="text-[22px] font-semibold tracking-tight">{title}</h1>
+		<h1 class="text-headline font-semibold tracking-tight">{title}</h1>
 		{#if lede}
-			<p class="mt-1 max-w-[64ch] text-[13px] text-muted">{lede}</p>
+			<p class="mt-1 max-w-[64ch] text-body text-muted">{lede}</p>
 		{/if}
 		{#if children}
-			<div class="mt-1 max-w-[64ch] text-[13px] text-muted">{@render children()}</div>
+			<div class="mt-1 max-w-[64ch] text-body text-muted">{@render children()}</div>
 		{/if}
 	</div>
 	{#if actions}

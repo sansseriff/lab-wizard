@@ -290,7 +290,7 @@ def test_saving_a_plot_needs_a_name_and_a_procedure(client):
 
 def test_a_run_exports_as_a_zipped_folder(client):
     run_id = _ids(client)["mcr_a"]
-    response = client.post(f"/api/data/runs/{run_id}/export")
+    response = client.get(f"/api/data/runs/{run_id}/export")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
     assert f"run{run_id}_mcr_curve_A7.zip" in response.headers["content-disposition"]
@@ -333,3 +333,42 @@ def test_a_device_can_be_registered_before_it_is_measured(client):
 def test_a_device_property_is_one_named_value(client):
     assert client.put("/api/data/devices/A7", json={"properties": {"a.b": 1}}).status_code == 422
     assert client.put("/api/data/devices/A7", json={"properties": {"size": {"w": 1}}}).status_code == 422
+
+
+# --------------------------- saving files: the template ---------------------------
+
+
+def test_a_folder_template_is_checked_against_what_the_lab_has_recorded(client):
+    settings = client.get("/api/settings/files").json()
+    # The fixed keys, then what these runs recorded: their metadata and params.
+    assert settings["keys"][:3] == ["date", "time", "procedure"]
+    assert "run.cryostat" in settings["keys"] and "param.gate_time_s" in settings["keys"]
+
+    # A recorded key is fine; the example is the latest run's folder.
+    check = client.post("/api/settings/files/check", json={"path": "{run.cryostat}/{procedure}_{device}"}).json()
+    assert check == {"example": "BF1/probe_A7", "problems": []}
+
+    check = client.post("/api/settings/files/check", json={"path": "{device.wafer}"}).json()
+    assert [(p["level"], p["key"]) for p in check["problems"]] == [("warning", "device.wafer")]
+
+
+def test_a_metadata_quantity_is_filtered_by_its_value_and_shown_with_its_unit(workspace):
+    project_dir = workspace.projects_dir / "cold"
+    project_dir.mkdir(parents=True)
+    (project_dir / "cold.yaml").write_text(
+        "project: {measurement_type: probe}\n"
+        "run: {device: A7, metadata: {temperature: {value: 0.8, unit: K}, optics: {fiber: SM28}}}\n"
+        "outputs: {files: false}\n",
+        encoding="utf-8",
+    )
+    probe = Sweep("bias", [0.1], lambda b: Measure(counts=lambda p: 1.0))
+    assert run_procedure(probe, Resources(params=Params(gate_time_s=0.1)), procedure="probe", definition=PROBE_DEFINITION,
+                         project_dir=project_dir) is Status.SUCCESS
+
+    facets = {f["key"]: f for f in TestClient(app).get("/api/data/facets").json()["facets"]}
+    temperature = facets["run.temperature"]
+    assert (temperature["numeric"], temperature["unit"], temperature["values"][0]["value"]) == (True, "K", "0.8")
+    assert facets["run.optics.fiber"]["unit"] is None
+    # The run keeps the quantity as written.
+    detail = TestClient(app).get("/api/data/runs/1").json()
+    assert detail["run"]["metadata"]["temperature"] == {"value": 0.8, "unit": "K"}

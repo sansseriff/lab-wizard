@@ -36,7 +36,7 @@ import yaml
 
 from lab_wizard.lib.data.encoding import jsonable
 
-__all__ = ["RunFolder", "export_run", "folder_name", "run_facets_for_folder"]
+__all__ = ["FOLDER_KEYS", "FOLDER_KEY_FAMILIES", "RunFolder", "check_template", "export_run", "folder_name", "run_facets_for_folder"]
 
 # What a run.yaml holds, in order: the runs row, as the database has it.
 RUN_FIELDS = (
@@ -46,6 +46,12 @@ RUN_FIELDS = (
 STEP_FIELDS = ("path", "kind", "started_at", "ended_at", "status", "error")
 
 _FIELD = re.compile(r"\{([^{}]+)\}")
+
+# What a folder template can name: every run has these ...
+FOLDER_KEYS = ("date", "time", "procedure", "device", "operator", "project", "status", "run_id")
+# ... and these families hold whatever a lab records: device properties, the
+# run: block's metadata, params, and instrument settings.
+FOLDER_KEY_FAMILIES = ("device.", "run.", "param.", "instrument.")
 _UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
@@ -78,6 +84,35 @@ def folder_name(template: str, facets: Mapping[str, str]) -> Path:
         if rendered.strip():
             parts.append(_segment(rendered))
     return Path(*parts) if parts else Path("run")
+
+
+def check_template(template: str, recorded: set[str] | None = None) -> list[dict[str, str]]:
+    """What is wrong with a folder template, if anything.
+
+    Each problem is ``{"level": "error" | "warning", "key", "message"}``. A key
+    no run can have is an error. A key in one of the open families that no run
+    has recorded yet is only a warning — the lab may start recording it — so
+    ``recorded`` (the keys the lab database has seen) is optional.
+    """
+    problems: list[dict[str, str]] = []
+    if not template.strip():
+        return [{"level": "error", "key": "", "message": "The template cannot be empty."}]
+    if template.count("{") != template.count("}"):
+        problems.append({"level": "error", "key": "", "message": "A { has no matching }, or a } no matching {."})
+    for match in _FIELD.finditer(template):
+        key = match.group(1).strip()
+        family = next((f for f in FOLDER_KEY_FAMILIES if key.startswith(f) and len(key) > len(f)), None)
+        if key in FOLDER_KEYS:
+            continue
+        if family is None:
+            problems.append({"level": "error", "key": key, "message": f"No run has a {{{key}}}."})
+        elif recorded is not None and key not in recorded:
+            problems.append({
+                "level": "warning",
+                "key": key,
+                "message": f"No run has recorded {{{key}}} yet; runs without it go in a folder named none.",
+            })
+    return problems
 
 
 def _local(timestamp: str) -> datetime:

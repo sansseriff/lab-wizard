@@ -1,10 +1,12 @@
 <script lang="ts">
 	/** An input for one param value of a declared type — a default, or a preset's value.
 	 *
-	 * A sweep is the one structured type: linear (start/stop/step) or an explicit
-	 * list, the two shapes `SweepParams` accepts.
+	 * A sweep is the one structured type: linear (start/stop/step), an explicit
+	 * list, or waypoints (turning points walked at a step, recording each leg) —
+	 * the three shapes `SweepParams` accepts.
 	 */
 	import type { ParamType } from './model';
+	import Select from '$lib/components/Select.svelte';
 
 	let {
 		type,
@@ -20,7 +22,8 @@
 
 	type Sweep =
 		| { mode: 'linear'; start: number; stop: number; step: number }
-		| { mode: 'explicit'; values: number[] };
+		| { mode: 'explicit'; values: number[] }
+		| { mode: 'waypoints'; points: number[]; step: number };
 
 	const sweep = $derived(
 		(value && typeof value === 'object'
@@ -33,20 +36,26 @@
 		return Number.isNaN(n) ? 0 : n;
 	}
 
+	function numbers(text: string): number[] {
+		return text
+			.split(/[,\s]+/)
+			.filter(Boolean)
+			.map(Number)
+			.filter((n) => !Number.isNaN(n));
+	}
+
+	/** Switch mode, keeping what carries over: the ends, the points, the step. */
 	function setSweepMode(mode: string) {
 		if (mode === sweep.mode) return;
-		if (mode === 'explicit') {
-			const s = sweep as Extract<Sweep, { mode: 'linear' }>;
-			onchange({ mode: 'explicit', values: [s.start, s.stop] });
-		} else {
-			const values = (sweep as Extract<Sweep, { mode: 'explicit' }>).values ?? [];
-			onchange({
-				mode: 'linear',
-				start: values[0] ?? 0,
-				stop: values[values.length - 1] ?? 1,
-				step: 0.01
-			});
-		}
+		const ends =
+			sweep.mode === 'linear' ? [sweep.start, sweep.stop]
+			: sweep.mode === 'explicit' ? (sweep.values ?? [])
+			: (sweep.points ?? []);
+		const step = sweep.mode === 'explicit' ? 0.01 : sweep.step;
+		if (mode === 'explicit') onchange({ mode, values: ends });
+		else if (mode === 'waypoints')
+			onchange({ mode, points: ends.length >= 2 ? [...ends, ends[0]] : [0, 1, 0], step });
+		else onchange({ mode: 'linear', start: ends[0] ?? 0, stop: ends[1] ?? ends.at(-1) ?? 1, step });
 	}
 </script>
 
@@ -69,15 +78,16 @@
 	/>
 {:else if type === 'sweep'}
 	<div class="grid gap-2">
-		<select
-			class="lw-select w-full"
+		<Select
 			value={sweep.mode}
-			onchange={(e) => setSweepMode(e.currentTarget.value)}
+			onValueChange={setSweepMode}
 			aria-label="{label}: sweep mode"
-		>
-			<option value="linear">Linear range</option>
-			<option value="explicit">Explicit values</option>
-		</select>
+			options={[
+				{ value: 'linear', label: 'Linear range' },
+				{ value: 'waypoints', label: 'Waypoints (there and back)' },
+				{ value: 'explicit', label: 'Explicit values' }
+			]}
+		/>
 		{#if sweep.mode === 'linear'}
 			<div class="grid grid-cols-3 gap-2">
 				{#each ['start', 'stop', 'step'] as const as part (part)}
@@ -92,19 +102,37 @@
 					</label>
 				{/each}
 			</div>
+		{:else if sweep.mode === 'waypoints'}
+			<div class="grid grid-cols-[1fr_6rem] gap-2">
+				<label class="flex min-w-0 flex-col gap-1 text-xs text-muted">
+					turning points
+					<input
+						class="lw-input mono w-full"
+						value={(sweep.points ?? []).join(', ')}
+						onchange={(e) => onchange({ ...sweep, points: numbers(e.currentTarget.value) })}
+						placeholder="0, 1.4, 0, -1.4, 0"
+						aria-label="{label}: turning points"
+					/>
+				</label>
+				<label class="flex min-w-0 flex-col gap-1 text-xs text-muted">
+					step
+					<input
+						class="lw-input mono w-full"
+						value={sweep.step}
+						onchange={(e) => onchange({ ...sweep, step: num(e.currentTarget.value) })}
+						aria-label="{label}: step"
+					/>
+				</label>
+			</div>
+			<p class="text-fine text-muted">
+				Walked in straight legs; each point records its leg (0, 1, 2, …) as
+				<code>&lt;parameter&gt;_leg</code>, to draw or filter the legs apart.
+			</p>
 		{:else}
 			<input
 				class="lw-input mono min-w-0 w-full"
 				value={(sweep.values ?? []).join(', ')}
-				onchange={(e) =>
-					onchange({
-						mode: 'explicit',
-						values: e.currentTarget.value
-							.split(/[,\s]+/)
-							.filter(Boolean)
-							.map(Number)
-							.filter((n) => !Number.isNaN(n))
-					})}
+				onchange={(e) => onchange({ mode: 'explicit', values: numbers(e.currentTarget.value) })}
 				placeholder="0, 0.5, 1"
 				aria-label="{label}: values"
 			/>

@@ -7,16 +7,14 @@ import yaml
 from pydantic import BaseModel, Field, PrivateAttr, SerializeAsAny, model_validator
 from ruamel.yaml import YAML as RuamelYAML
 
-from lab_wizard.lib.utilities.resource_catalog import (
-    load_params_class,
-    load_saver_params_class,
-    load_plotter_params_class,
-)
+from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
 
 class ProjectInfo(BaseModel):
     schema_version: int = 1
     measurement_type: str
+    # What measurement_type names: a procedure, or a custom measurement file.
+    kind: Literal["procedure", "custom"] = "procedure"
     created_by: str = "lab_wizard"
 
 
@@ -34,9 +32,20 @@ class MeasurementConfig(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class OutputsConfig(BaseModel):
+    """What a run produces besides its record in the lab database, which is always written."""
+
+    # Also save each run as a folder of files, laid out by the workspace's
+    # data settings (lab_wizard.lib.data.settings).
+    files: bool = True
+    # How a run started from a terminal is drawn while it goes. A run the
+    # wizard launches is drawn on its Run page whatever this says.
+    live_plot: Literal["none", "window", "web"] = "none"
+    # Which of the procedure's plots: to draw live; empty for the first.
+    plot: str = ""
+
+
 class ResourceConfig(BaseModel):
-    savers: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
-    plotters: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
     instruments: dict[str, SerializeAsAny[BaseModel]] = Field(default_factory=dict)
 
     # Where each named instrument comes from: "local", or the name of a server
@@ -78,6 +87,7 @@ class ProjectConfig(BaseModel):
     project: ProjectInfo
     run: RunConfig = Field(default_factory=RunConfig)
     measurement: MeasurementConfig = Field(default_factory=MeasurementConfig)
+    outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
 
     @property
@@ -106,18 +116,6 @@ def _parse_instrument_tree(data: dict[str, Any]) -> Any:
     return params_cls(**data)
 
 
-def _parse_flat_resource(data: Any, kind: Literal["saver", "plotter"]) -> Any:
-    """Parse one entry of a flat resource dict (saver or plotter)."""
-    if not isinstance(data, dict) or "type" not in data:
-        return data
-    type_str = data["type"]
-    if kind == "saver":
-        params_cls = load_saver_params_class(type_str)
-    else:
-        params_cls = load_plotter_params_class(type_str)
-    return params_cls(**data)
-
-
 def _parse_resource_sections(data: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(data, dict):
         return data
@@ -132,13 +130,6 @@ def _parse_resource_sections(data: dict[str, Any]) -> dict[str, Any]:
             else:
                 parsed[key] = inst_data
         out["instruments"] = parsed
-
-    for kind, key_name in (("saver", "savers"), ("plotter", "plotters")):
-        if key_name in out and isinstance(out[key_name], dict):
-            parsed = {}
-            for key, entry in out[key_name].items():
-                parsed[key] = _parse_flat_resource(entry, kind)  # type: ignore[arg-type]
-            out[key_name] = parsed
 
     return out
 

@@ -4,8 +4,7 @@
     A procedure definition (see :mod:`lab_wizard.lib.procedures.definition`).
 
 ``lab_wizard/lib/procedures/library/<name>.yml``
-    **Built-in** procedures that ship with lab_wizard, like the hand-written
-    measurements under ``lib/measurements``. A workspace procedure of the same
+    **Built-in** procedures that ship with lab_wizard. A workspace procedure of the same
     name takes precedence, so a lab can adapt a built-in without editing the
     package; saving always writes to the workspace.
 

@@ -11,6 +11,8 @@
 	 * a transport is, *held* is whether a process actually has it open.
 	 */
 	import { fetchWithConfig } from '$lib/api';
+	import Tooltip from '$lib/components/Tooltip.svelte';
+	import { ask } from '$lib/confirm.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { untrack } from 'svelte';
@@ -80,9 +82,13 @@
 	}
 
 	async function forceRelease(url: string, unit: string, holder: string) {
-		if (!confirm(`End ${holder}'s claim on ${unit}? If that run is still going, its next write will be refused.`)) {
-			return;
-		}
+		const yes = await ask({
+			title: `End ${holder}'s claim on ${unit}?`,
+			description: 'If that run is still going, its next write will be refused.',
+			confirmLabel: 'End claim',
+			tone: 'danger'
+		});
+		if (!yes) return;
 		busy = true;
 		message = null;
 		try {
@@ -205,18 +211,17 @@
 											<span class="text-muted">free</span>
 										{/if}
 									</td>
-									<td class="mono text-[11px] text-muted">{r.transport_key ?? '—'}</td>
+									<td class="mono text-fine text-muted">{r.transport_key ?? '—'}</td>
 									<td>
 										{#if r.held_by_server && r.held_by && r.transport_sharing === 'exclusive'}
-											<button
+											<Tooltip text="Disconnect this rack so another process can use it. The server reopens it on the next call.">{#snippet child({ props })}<button {...props}
 												class="lw-btn lw-btn-sm"
-												title="Disconnect this rack so another process can use it. The server reopens it on the next call."
 												onclick={() => release(r.held_by!, r.root)}
 												disabled={busy}
 											>
 												<EjectSimpleIcon size={11} />
 												Release
-											</button>
+											</button>{/snippet}</Tooltip>
 										{/if}
 									</td>
 								</tr>
@@ -226,7 +231,7 @@
 				</div>
 
 				{#if heldRoots.length > 0}
-					<p class="border-t border-line px-3.5 py-2.5 text-[11.5px] text-muted">
+					<p class="border-t border-line px-3.5 py-2.5 text-fine text-muted">
 						<em>In use</em> means a server has actually opened that rack — not merely that it is
 						configured. A locally-run project needing an exclusive rack that is in use will refuse
 						to start and say so.
@@ -246,14 +251,14 @@
 					</Callout>
 					<!-- An ipc socket path is long and has no spaces, so it needs an
 				     explicit break rule or it runs straight out of the panel. -->
-				<p class="mono mt-2 break-all text-[11px] text-muted">{owner.url}</p>
+				<p class="mono mt-2 break-all text-fine text-muted">{owner.url}</p>
 				{:else}
 					<Callout tone="warn" title="The wizard owns this workspace's hardware. ">
 						No server is running, so it opens hardware in its own process. That works, but the
 						permission gate only sees calls made through a server — anything done here is invisible
 						to it.
 					</Callout>
-					<p class="mt-2 text-[11.5px] text-muted">
+					<p class="mt-2 text-fine text-muted">
 						<a class="text-accent hover:underline" href="/servers">Start one on This workspace →</a>
 					</p>
 				{/if}
@@ -274,15 +279,15 @@
 					{#each servers as s (s.pid)}
 						<li class="border-b border-line px-3.5 py-2.5 last:border-b-0">
 							<div class="flex items-baseline justify-between gap-2">
-								<span class="truncate text-[12.5px] font-medium" title={s.workspace_path}>
+								<span class="truncate text-body font-medium" title={s.workspace_path}>
 									{workspaceName(s.workspace_path)}
 								</span>
-								<span class="mono shrink-0 text-[11px] text-muted">pid {s.pid}</span>
+								<span class="mono shrink-0 text-fine text-muted">pid {s.pid}</span>
 							</div>
-							<p class="mono mt-0.5 break-all text-[10.5px] text-muted">
+							<p class="mono mt-0.5 break-all text-2xs text-muted">
 								{s.endpoints[0] ?? '—'}
 							</p>
-							<p class="mt-0.5 text-[11.5px] tabular-nums text-muted">
+							<p class="mt-0.5 text-fine tabular-nums text-muted">
 								holding {heldCount(s.pid)} rack{heldCount(s.pid) === 1 ? '' : 's'}
 							</p>
 						</li>
@@ -318,7 +323,7 @@
 						{#each claims as s (s.url)}
 							{#if s.error}
 								<tr>
-									<td colspan="5" class="text-[11.5px] text-muted">
+									<td colspan="5" class="text-fine text-muted">
 										{workspaceName(s.workspace_path)} did not answer: {s.error}
 									</td>
 								</tr>
@@ -327,14 +332,14 @@
 								<tr>
 									<td>
 										<span class="font-medium">{c.holder}</span>
-										<span class="mono block text-[10.5px] text-muted">{c.peer}</span>
+										<span class="mono block text-2xs text-muted">{c.peer}</span>
 									</td>
-									<td class="mono text-[11px]">
+									<td class="mono text-fine">
 										{#each c.units as unit (unit)}
 											<span class="block">{unit}</span>
 										{/each}
 									</td>
-									<td class="text-[11.5px]">{workspaceName(s.workspace_path)}</td>
+									<td class="text-fine">{workspaceName(s.workspace_path)}</td>
 									<td class="tabular-nums">
 										{#if c.restoring}
 											<Pill tone="accent" title="Released; being reset to baseline before anyone else can claim it">resetting</Pill>
@@ -344,15 +349,14 @@
 									</td>
 									<td>
 										{#if !c.restoring}
-											<button
+											<Tooltip text="End this claim. For a run that is stuck, or whose client has gone.">{#snippet child({ props })}<button {...props}
 												class="lw-btn lw-btn-sm"
-												title="End this claim. For a run that is stuck, or whose client has gone."
 												onclick={() => forceRelease(s.url, c.units[0], c.holder)}
 												disabled={busy}
 											>
 												<EjectSimpleIcon size={11} />
 												Force release
-											</button>
+											</button>{/snippet}</Tooltip>
 										{/if}
 									</td>
 								</tr>

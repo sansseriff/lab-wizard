@@ -188,7 +188,7 @@ def test_server_reload_and_audit_after_edit(config):
 
 
 def test_http_update_delegates_to_server(config, monkeypatch):
-    from lab_wizard.wizard.backend import hardware_access, main
+    from lab_wizard.wizard.backend import deps, hardware_access, main
     from lab_wizard.wizard.backend.models import Env
 
     path, node = selection(config)
@@ -206,7 +206,7 @@ def test_http_update_delegates_to_server(config, monkeypatch):
         yield Session()
 
     monkeypatch.setattr(hardware_access, "server_session", session)
-    main.app.dependency_overrides[main.get_env] = lambda: Env(config_dir=config)
+    main.app.dependency_overrides[deps.get_env] = lambda: Env(config_dir=config)
     try:
         client = TestClient(main.app, raise_server_exceptions=False)
         result = client.post(

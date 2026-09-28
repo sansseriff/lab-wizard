@@ -124,7 +124,8 @@ class Bench:
             f"  prologix_gpib    port: {self.prologix_port}   (-> {self._prologix.device})",
             f"    sim900         gpib_address: {c.prologix.gpib_address}",
             f"      sim928       slot: {c.prologix.source_slot}",
-            f"      sim970       slot: {c.prologix.voltmeter_slot}   (detector on channel {c.prologix.voltmeter_channel})",
+            f"      sim970       slot: {c.prologix.voltmeter_slot}   (detector on its channel {c.prologix.voltmeter_channel}:"
+            f" channel index {c.prologix.voltmeter_channel - 1} in lab_wizard)",
             f"  keysight53220A   ip_address: {self.counter_address[0]}  ip_port: {self.counter_address[1]}",
             f"  yokogawa_aq2212  ip_address: {self.aq2212_address[0]}  ip_port: {self.aq2212_address[1]}",
             f"    yoko_attenuator  slot: {c.attenuator.slot}",

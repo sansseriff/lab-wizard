@@ -4,26 +4,18 @@ icon: lucide/database
 
 # Data
 
-The **Data** section is where a run's output is configured and read back.
-Every run of a project is recorded in the workspace's
-[lab database](../data/database.md) without any configuring; **Savers** are the
-optional extra outputs, and **Database** is where recorded runs will be browsed.
+The **Data** page is where recorded runs are browsed and plotted. Every run of a project is
+recorded in the workspace's [lab database](../data/database.md) without any
+configuring.
 
-## Savers
+## Saving files
 
-A saver is a [flat resource](../concepts/config-and-discovery.md#flat-resources)
-— no hardware addressing, no hierarchy — stored as one YAML file per configured
-instance in `config/savers/`. Configure an instance here, then bind it while
-[creating a measurement](measurements.md).
-
-| Type | Class | Does |
-|---|---|---|
-| `file_saver` | [`FileSaver`](../../lab_wizard/lib/savers/file_saver.py) | writes each run as a folder of CSV and YAML |
-| — | `StandInSaver` | keeps the run's messages in memory, for tests |
-
-### The file saver
-
-For people who work with files. Each run becomes a folder:
+For people who work with files, a project can also save each run as a folder of
+plain files. It is on by default, chosen per project when the
+[measurement is created](measurements.md#outputs) (`outputs.files` in the
+project YAML). Where the folders go and how they are named is one choice for
+the whole workspace: **Saving files** on the [Settings](index.md) page, kept in
+`config/data.yaml`. Each run becomes a folder:
 
 ```text
 data/files/2026-09-22/mcr_curve_A7_143012/
@@ -40,7 +32,7 @@ data/files/2026-09-22/mcr_curve_A7_143012/
 one line, an empty cell for anything not recorded at that point. It is written a
 line at a time while the run goes, so a crash loses at most one line.
 
-Settings:
+Settings, in `config/data.yaml` under `files:`:
 
 - **`path`** — where each run goes, from the same keys the Data page filters
   by: `{date}`, `{time}`, `{procedure}`, `{device}`, `{device.<property>}`,
@@ -50,28 +42,77 @@ Settings:
   only be ordered one way, which is exactly what the Data page's filters are
   for. A run never overwrites another: a name already taken gets `_2`.
 - **`root`** — where the folders go; empty for the workspace's `data/files`. A
-  relative path is relative to the project.
+  relative path is relative to the workspace.
 - **`plot_png`** — also save the run's default plot.
 
-The folder is a complete copy of the run's rows in the database, and the same
-writer exports any recorded run (`export_run`). If the file saver fails (a full
-disk, an unwritable root), it logs why and stops; the run carries on and is
-still recorded in the database.
+A change applies to every project's next run; nothing is regenerated.
 
-### What a saver receives
+The folder is a complete copy of the run's rows in the database, and the same
+writer exports any recorded run (`export_run`). If the
+[file saver](../../lab_wizard/lib/savers/file_saver.py) fails (a full disk, an
+unwritable root), it logs why and stops; the run carries on and is still
+recorded in the database.
+
+### Writing another saver
 
 A saver is a sink on the run's messages, like the database recorder: it sees
 `RunStarted`, every `Point` (one row), every step's start and end, and
 `RunEnded`, in [`GenericSaver.handle`](../../lab_wizard/lib/savers/saver.py).
-A new saver is a `SaverParams`/`GenericSaver` pair dropped into `lib/savers/`,
-[discovered](../concepts/config-and-discovery.md#type-discovery) automatically.
+One written by hand is passed to `run_procedure(..., savers=[...])`, which
+replaces the ones the project's `outputs:` asks for.
 
 ## Database
 
-Every run is recorded in the workspace's `data/lab.db`; see
-[The lab database](../data/database.md) for what it holds and how to read it.
+Every run in the workspace, whichever project it came from, filtered by what
+it was and plotted by what it recorded. Runs are recorded in the workspace's
+`data/lab.db`; see [The lab database](../data/database.md) for what it holds
+and how to read it from Python.
 
-!!! warning "Browsing runs is not built yet"
-    The Database page says where runs are recorded; the viewer that filters and
-    plots them comes next (`plans/semantic_data_plan.md`). Until then, read runs
-    from Python with `lab_wizard.lib.data`, as the database page shows.
+The page has three panes.
+
+**Filters**, on the left. Every fact a run recorded is a filter: its
+procedure, device, and the device's properties; the run's metadata (the
+project's `run:` block, such as `cryostat`); every instrument's type and
+settings; every param; the operator, date and status; and the columns it
+recorded. Nothing is configured: a filter appears the first time a run records
+the fact behind it. Each value shows how many runs it would leave, and a key's
+counts ignore that key's own choice, so choosing one procedure still shows the
+others. A numeric filter with many values offers a range instead. Search finds
+a filter by its name or by a value.
+
+**Runs**, in the middle, newest first. Click one to look at it. Cmd/Ctrl-click
+adds or removes a run, and Shift-click takes a range; several chosen runs
+overlay on one plot, a line each. A run still being recorded is marked
+**running**, and the page follows it as it grows.
+
+**The chosen run**, on the right, has three tabs:
+
+- **Plot** draws the run with its procedure's plots, one tab each, as the
+  procedure defines them now. A plot added to a procedure later applies to the
+  runs recorded before it; a run whose procedure has been deleted keeps the
+  plots it was recorded with.
+    - **Edit plot** changes the axes, which rows are drawn, one line per what,
+      and the scales. An axis can be any expression of the columns:
+      `count_rate / 1000`, or
+      `counts - mean(counts, phase == "background")`. See
+      [derived columns](procedures.md).
+    - **Save to procedure** adds the plot to the procedure, for every run of
+      it. Saving to a built-in procedure makes this workspace's own copy of it.
+    - **Open in notebook** gives the Python that draws the same plot from the
+      database with matplotlib: the place for what this page does not do,
+      such as fits and arithmetic between runs.
+    - Click a point to see everything recorded with it and the steps that
+      recorded it.
+- **Timeline** shows every step the run executed, as a bar on the run's time
+  axis, nested as the procedure nests them. The steps behind a clicked point
+  are highlighted.
+- **Details** lists the run's metadata, params, each instrument's settings as
+  the run started, and its columns with their units.
+
+**Export run** downloads the run as a zipped folder, laid out exactly as the
+[file saver](#saving-files) writes one.
+
+**Devices** is where a device's properties live, such as its wafer, width or
+type. A run names only its device, so a property set here becomes a filter on
+every run of that device, past ones included. A device can be registered
+before it is ever measured.

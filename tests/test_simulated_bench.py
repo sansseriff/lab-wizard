@@ -29,7 +29,7 @@ from lab_wizard.lib.instruments.sim900.sim900 import Sim900, Sim900Params
 from lab_wizard.lib.server.registry import InstrumentRegistry
 from lab_wizard.lib.server.wire import WireServer
 from lab_wizard.lib.utilities.config_io import load_instruments, save_instruments_to_config
-from lab_wizard.lib.utilities import params_discovery
+from lab_wizard.lib.utilities import resource_catalog
 
 GPIB_ADDRESS = 5
 SOURCE_SLOT = 1
@@ -313,16 +313,16 @@ def test_missing_type_refreshes_a_stale_live_registry(monkeypatch: pytest.Monkey
 
     stale_map = {
         type_name: info
-        for type_name, info in params_discovery.get_type_to_module_map().items()
+        for type_name, info in resource_catalog.get_type_to_module_map().items()
         if type_name != "prologix_gpib"
     }
-    stale_loaded = dict(params_discovery._loaded_params["instrument"])
+    stale_loaded = dict(resource_catalog._loaded_params["instrument"])
     stale_loaded.pop("prologix_gpib", None)
-    monkeypatch.setitem(params_discovery._type_to_module, "instrument", stale_map)
-    monkeypatch.setitem(params_discovery._loaded_params, "instrument", stale_loaded)
+    monkeypatch.setitem(resource_catalog._source_maps, "instrument", stale_map)
+    monkeypatch.setitem(resource_catalog._loaded_params, "instrument", stale_loaded)
 
-    assert params_discovery.load_params_class("prologix_gpib") is PrologixGPIBParams
-    assert "prologix_gpib" in params_discovery.get_type_to_module_map()
+    assert resource_catalog.load_params_class("prologix_gpib") is PrologixGPIBParams
+    assert "prologix_gpib" in resource_catalog.get_type_to_module_map()
 
 
 def test_scan_gpib_finds_the_simulated_mainframe_over_the_wire(rig) -> None:

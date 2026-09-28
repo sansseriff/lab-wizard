@@ -33,27 +33,22 @@ config/
 │       └── sim900_key_d6f1dcc9/
 │           ├── sim928_key_c7fe1259.yml
 │           └── sim970_key_8a3b1f04.yml
-├── savers/                           # flat: one file per named instance
-│   └── file_saver_key_run_folders.yml
-├── plotters/
-│   └── mpl_plotter_key_iv_window.yml
+├── data.yaml                         # how runs are saved as files
 ├── server/
 │   └── server.yaml                   # this machine's server bind + permissions
 └── remote/
     └── servers.yaml                  # known remote servers (the address book)
 ```
 
-Two storage shapes coexist:
+Instruments are hierarchical:
 
-- **Instruments are hierarchical.** Each node is a `<type>_key_<hash>.yml` file.
+- Each node is a `<type>_key_<hash>.yml` file.
   A parent records its children as a mapping of `key → {type, ref}`, where `ref`
   points at the child's YAML file. Children live in a sibling folder named after
   the parent's file stem. This guarantees no key collisions even with multiple
   instances of the same type (two SIM900 racks each with a SIM928 in slot 1).
-- **Savers and plotters are flat.** Each entry is a single
-  `<type>_key_<name>.yml` file in `savers/` or `plotters/`, identified by a
-  user-given name (no hashing, no hierarchy). Handled by
-  [`flat_resource_io.py`](../../lab_wizard/lib/utilities/flat_resource_io.py).
+
+`data.yaml` holds the workspace's [file-saving settings](../wizard/data.md#saving-files).
 
 ## Hashing { #hashing }
 
@@ -119,7 +114,7 @@ maintains an automatic source index and a runtime-validated catalog.
 
 A class is registered if it:
 
-- lives under `lib/instruments/` (or `lib/savers/`, `lib/plotters/`),
+- lives under `lib/instruments/` (or `lib/procedures/steps/`, for procedure steps),
 - declares a `type: Literal["..."]` discriminator field.
 
 The first stage parses source with Python's AST and records only candidate
@@ -139,32 +134,11 @@ edits. Deleting it causes a rebuild from Python source.
 `key_hint`, Python-derived parent chain, child types, behaviors, channel
 behaviors, and discovery-action specs.
 
-!!! note "Three kinds, one mechanism"
-    The same discovery machinery serves instruments, savers, and plotters via a
-    `Kind` parameter. Instruments have a parent/child hierarchy; savers and
-    plotters are flat. Adding a new saver type is literally "drop a
-    `SaverParams` subclass with a `type` Literal into `lib/savers/`."
-
-## Flat resources { #flat-resources }
-
-Savers and plotters are configured the same way instruments are, minus the parts
-that only hardware needs. They have no address, no parent and no channels, so
-they are stored **flat**: one YAML file per configured instance under
-`config/savers/` or `config/plotters/`, named by a key you choose, handled by
-[`flat_resource_io.py`](../../lab_wizard/lib/utilities/flat_resource_io.py).
-
-Everything else is shared with instruments:
-
-- a `Params`/runtime pair — `SaverParams`/`GenericSaver`,
-  `PlotterParams`/`GenericPlotter` — with `enabled`, `attribute_name` and
-  `create_inst()`;
-- the same [type discovery](#type-discovery): a subclass with a
-  `type: Literal[...]` dropped into `lib/savers/` or `lib/plotters/` appears in
-  the GUI with nothing to register;
-- the same requirement matching when a measurement asks for one.
-
-The GUI surfaces them in two places, because they are used at different moments:
-[Data](../wizard/data.md) for savers and [Plotters](../wizard/plotters.md).
+!!! note "Two kinds, one mechanism"
+    The same discovery machinery serves instruments and procedure steps via a
+    `Kind` parameter. Savers and plotters are not discovered or configured
+    this way: a project turns them on in its [`outputs:`](../wizard/measurements.md#outputs)
+    block.
 
 ## Hardware discovery (probing) { #hardware-discovery }
 

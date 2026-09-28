@@ -1,6 +1,8 @@
 <script lang="ts">
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
 	import TreeNode from '$lib/components/TreeNode.svelte';
+	import Tabs from '$lib/components/Tabs.svelte';
 	import { type Claim, busyCounts, busyLabel } from '$lib/claims';
 	import type { TreeItem, TreePathRef } from '$lib/components/TreeNode.svelte';
 	import Trash from 'phosphor-svelte/lib/Trash';
@@ -57,10 +59,18 @@
 
 	let { data } = $props();
 	const sources: Source[] = $derived((data?.sources ?? []) as Source[]);
-	// Sources offering a browsable tree: this workspace, and other workspaces'
-	// daemons on this machine. A remote machine is flat by design.
-	const treeSources = $derived(sources.filter((s) => s.tree !== null));
-	const flatSources = $derived(sources.filter((s) => s.tree === null));
+	// The source whose tab is open. The embedded style opens every instrument
+	// itself, so while it is chosen only this workspace's tab can be open: the
+	// others are greyed, and whoever was on one lands back on this workspace.
+	// Falls back the same way when a source disappears on reload.
+	let sourceTab = $state('');
+	const tabDisabled = (s: Source) => embedded && s.kind !== 'local';
+	const activeSource = $derived(
+		sources.find((s) => s.name === sourceTab && !tabDisabled(s)) ??
+			sources.find((s) => s.kind === 'local') ??
+			sources[0] ??
+			null
+	);
 	const busyCount = $derived(busyCounts(sources));
 
 	let selections = $state<Selection[]>([]);
@@ -73,6 +83,14 @@
 		'production' | 'pedagogical_embedded'
 	>('production');
 	let fileStyle = $state<'dataclass' | 'simple'>('dataclass');
+
+	// The embedded style opens every instrument itself, so it cannot use one
+	// through a server: the server tabs are greyed while it is chosen,
+	// and it cannot be chosen once one is picked. The backend refuses it too.
+	const embedded = $derived(generationStyle === 'pedagogical_embedded');
+	const routedChosen = $derived(
+		selections.filter((s) => s.sourceKind !== 'local').map((s) => s.variableName)
+	);
 	let persistAttributeNames = $state(false);
 
 	let creating = $state(false);
@@ -285,8 +303,8 @@
 </script>
 
 <section class="space-y-4">
-	<h1 class="text-2xl font-semibold">Create Custom Resource</h1>
-	<p class="text-sm text-ink-2">
+	<h1 class="text-headline font-semibold">Create Custom Resource</h1>
+	<p class="text-body text-ink-2">
 		Pick any instruments or channels from your configured tree and generate a standalone setup file.
 	</p>
 
@@ -297,7 +315,7 @@
 		<label class="block">
 			<span class="text-xs text-ink-2">Project prefix</span>
 			<input
-				class="mt-1 w-full rounded-md border border-line-2 px-3 py-2 text-sm"
+				class="mt-1 w-full rounded-md border border-line-2 px-3 py-2 text-body"
 				bind:value={projectPrefix}
 				placeholder="custom_resource"
 			/>
@@ -306,7 +324,7 @@
 			<label class="block">
 				<span class="text-xs text-ink-2">Resource class name</span>
 				<input
-					class="mt-1 w-full rounded-md border border-line-2 px-3 py-2 text-sm"
+					class="mt-1 w-full rounded-md border border-line-2 px-3 py-2 text-body"
 					bind:value={resourceClassName}
 					placeholder="CustomResources"
 				/>
@@ -315,7 +333,7 @@
 
 		<div class="block">
 			<span class="text-xs text-ink-2">Codegen style</span>
-			<div class="mt-1 grid gap-2 text-sm">
+			<div class="mt-1 grid gap-2 text-body">
 				<label class="flex items-start gap-2">
 					<input type="radio" bind:group={generationStyle} value="production" />
 					<span>
@@ -326,8 +344,14 @@
 						</span>
 					</span>
 				</label>
-				<label class="flex items-start gap-2">
-					<input type="radio" bind:group={generationStyle} value="pedagogical_embedded" />
+				<label class="flex items-start gap-2 {routedChosen.length ? 'opacity-60' : ''}">
+					<input
+						type="radio"
+						bind:group={generationStyle}
+						value="pedagogical_embedded"
+						onchange={() => (sourceTab = '')}
+						disabled={routedChosen.length > 0}
+					/>
 					<span>
 						<span class="block font-medium">Escape hatch: embedded params</span>
 						<span class="block text-xs text-muted">
@@ -335,6 +359,12 @@
 							from. Breaks when an instrument is readdressed; cannot use instruments through a
 							server.
 						</span>
+						{#if routedChosen.length}
+							<span class="block text-xs text-warn">
+								Not available: {routedChosen.join(', ')} {routedChosen.length === 1 ? 'is' : 'are'} used through a
+								server.
+							</span>
+						{/if}
 					</span>
 				</label>
 			</div>
@@ -345,7 +375,7 @@
 				<input type="checkbox" class="mt-0.5" bind:checked={persistAttributeNames} />
 				<span class="text-xs text-ink-2">
 					Save auto-generated attribute names back to the instrument config
-					<span class="block text-[11px] text-muted">
+					<span class="block text-fine text-muted">
 						Leave off for one-off/project-specific names. Turn on to make them persistent
 						"favorites" reachable from any future project.
 					</span>
@@ -355,7 +385,7 @@
 
 		<div class="block">
 			<span class="text-xs text-ink-2">File style</span>
-			<div class="mt-1 flex gap-3 text-sm">
+			<div class="mt-1 flex gap-3 text-body">
 				<label class="flex items-center gap-1">
 					<input type="radio" bind:group={fileStyle} value="dataclass" />
 					Dataclass wrapper
@@ -378,9 +408,9 @@
 		class="space-y-2 rounded border border-line bg-surface p-3"
 	>
 		<div class="flex items-center justify-between">
-			<h2 class="text-lg font-medium">Selected resources</h2>
+			<h2 class="text-title font-medium">Selected resources</h2>
 			<button
-				class="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-sm text-white hover:brightness-110 disabled:opacity-50"
+				class="inline-flex items-center gap-1 rounded-md bg-accent px-3 py-1.5 text-body text-white hover:brightness-110 disabled:opacity-50"
 				onclick={startPicking}
 				disabled={pickingMode}
 			>
@@ -390,7 +420,7 @@
 		</div>
 
 		{#if selections.length === 0}
-			<div class="px-2 py-3 text-sm text-ink-2">
+			<div class="px-2 py-3 text-body text-ink-2">
 				No resources selected yet.
 			</div>
 		{:else}
@@ -401,14 +431,14 @@
 					>
 						<div class="flex-1 space-y-1">
 							<input
-								class="w-full rounded border border-line-2 px-2 py-1 text-sm"
+								class="w-full rounded border border-line-2 px-2 py-1 text-body"
 								bind:value={s.variableName}
 								placeholder="variable_name"
 							/>
-							<div class="text-[11px] text-ink-2">
+							<div class="text-fine text-ink-2">
 								{#if s.source !== 'local'}
 									<span
-										class="mr-1 rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium text-accent-strong"
+										class="mr-1 rounded bg-accent-wash px-1.5 py-0.5 text-2xs font-medium text-accent-strong"
 										title="Used through this server rather than opened by the generated file"
 									>
 										{s.sourceLabel}
@@ -422,13 +452,7 @@
 								{/if}
 							</div>
 						</div>
-						<button
-							class="rounded p-1 text-muted hover:bg-crit-wash hover:text-crit"
-							title="Remove"
-							onclick={() => removeSelection(s.id)}
-						>
-							<Trash size={16} />
-						</button>
+						<IconButton ghost label="Remove" onclick={() => removeSelection(s.id)}><Trash size={16} /></IconButton>
 					</div>
 				{/each}
 			</div>
@@ -438,7 +462,7 @@
 	<!-- Channel mode prompt -->
 	{#if pending}
 		<div
-			class="rounded-lg border border-accent bg-accent-wash p-3 text-sm"
+			class="rounded-lg border border-accent bg-accent-wash p-3 text-body"
 		>
 			{#if pending.mode === 'ask'}
 				<div class="mb-2 font-medium">
@@ -499,7 +523,7 @@
 	<!-- Sources -->
 	<section class="space-y-2" class:opacity-40={!pickingMode} class:pointer-events-none={!pickingMode}>
 		<div class="flex items-center justify-between">
-			<h2 class="text-lg font-medium">Where instruments come from</h2>
+			<h2 class="text-title font-medium">Where instruments come from</h2>
 			<div class="text-xs text-ink-2">
 				{#if pickingMode}
 					Selection mode: <span class="font-medium">click any node</span>
@@ -509,108 +533,132 @@
 			</div>
 		</div>
 
-		{#each treeSources as source (source.name)}
+		<!-- One tab per source: this workspace, the same instruments through its
+		     server, other workspaces' daemons on this machine, and remote machines. -->
+		{#if sources.length > 0}
 			<div class="rounded border border-line bg-surface shadow-sm">
-				<div class="flex items-center justify-between border-b border-line px-3 py-2">
-					<span class="text-sm font-medium">{source.label}</span>
-					<div class="flex items-center gap-2">
-						{#if source.kind === 'machine'}
-							<span
-								class="rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium text-accent-strong"
-								title="Used through that workspace's server, so it never contends with local hardware."
-							>
-								through server
-							</span>
-						{/if}
-						{#if busyCount.get(source.name)}
-							<span
-								class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
-								title="A measurement is running against these. Building a resource for them is allowed; using them at the same time is not."
-							>
-								{busyCount.get(source.name)} in use
-							</span>
-						{/if}
-					</div>
-				</div>
-				<ScrollArea
-					class="relative overflow-hidden p-3"
-					orientation="vertical"
-					viewportClasses="h-full max-h-[320px] w-full"
+				<Tabs
+					value={activeSource?.name ?? ''}
+					onValueChange={(v) => (sourceTab = v)}
+					tabs={sources.map((s) => ({
+						value: s.name,
+						label: s.label,
+						disabled: tabDisabled(s),
+						title: tabDisabled(s) ? 'Not with embedded params: the generated file opens every instrument itself.' : undefined
+					}))}
+					label="Instrument sources"
+					size="sm"
+					class="[&>.lw-tabs]:px-2"
 				>
-					{#if !source.reachable}
-						<div class="px-2 py-3 text-sm text-warn">
-							Not reachable: {source.error ?? 'no answer'}
+					{#if activeSource}
+						{@const source = activeSource}
+						<div class="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
+							<div class="flex flex-wrap items-center gap-2">
+								{#if source.kind === 'machine'}
+									<span
+										class="rounded bg-accent-wash px-1.5 py-0.5 text-2xs font-medium text-accent-strong"
+										title="Used through that workspace's server, so it never contends with local hardware."
+									>
+										through server
+									</span>
+								{:else if source.kind === 'remote'}
+									<span
+										class="rounded bg-surface-2 px-1.5 py-0.5 text-2xs font-medium text-ink-2"
+										title="Another machine. Its instruments can be used, but its configuration can only be changed there."
+									>
+										read &amp; control only
+									</span>
+								{:else}
+									<span class="text-xs text-ink-2">
+										Opened by the generated file itself{embedded ? ". The other sources are off with embedded params." : ""}
+									</span>
+								{/if}
+								{#if busyCount.get(source.name)}
+									<span
+										class="rounded bg-warn-wash px-1.5 py-0.5 text-2xs font-medium text-warn"
+										title="A measurement is running against these. Building a resource for them is allowed; using them at the same time is not."
+									>
+										{busyCount.get(source.name)} in use
+									</span>
+								{/if}
+							</div>
+							{#if source.url && source.tree === null}
+								<span class="shrink-0 font-mono text-2xs text-muted">{source.url}</span>
+							{/if}
 						</div>
-					{:else if (source.tree ?? []).length === 0}
-						<div class="px-2 py-3 text-sm text-ink-2">
-							No instruments configured here.
-						</div>
-					{:else}
-						{#each source.tree ?? [] as node (node.key)}
-							<TreeNode
-								{node}
-								isSelectable={pickingMode && pending === null}
-								isCompatible={() => true}
-								selectionLabel={(_n, p) => selectionLabelForAny(source, p)}
-								busyBadge={(_n, p) => busyLabel(source.claims, p)}
-								onSelect={(n, p) => onSelectTreeNode(source, n, p)}
-							/>
-						{/each}
-					{/if}
-				</ScrollArea>
-			</div>
-		{/each}
-
-		<!-- Remote machines: named leaves only. A tcp peer gets read + call, so
-		     there is no tree to browse and nothing to reconfigure. -->
-		{#each flatSources as source (source.name)}
-			<div class="rounded border border-line bg-surface shadow-sm">
-				<div class="flex items-center justify-between border-b border-line px-3 py-2">
-					<span class="text-sm font-medium">{source.label}</span>
-					<span class="font-mono text-[10px] text-muted">{source.url}</span>
-				</div>
-				<div class="max-h-[320px] overflow-y-auto p-3">
-					{#if !source.reachable}
-						<div class="px-2 py-2 text-sm text-warn">
-							Not reachable: {source.error ?? 'no answer'}
-						</div>
-					{:else if source.attributes.length === 0}
-						<div class="px-2 py-2 text-sm text-ink-2">
-							No named instruments there.
-						</div>
-					{:else}
-						<div class="grid gap-1.5 sm:grid-cols-2">
-							{#each source.attributes as entry (entry.attribute_name)}
-								<button
-									class="rounded border border-line px-3 py-2 text-left text-sm hover:border-accent disabled:opacity-50"
-									disabled={!pickingMode || pending !== null}
-									onclick={() => onSelectAttribute(source, entry)}
-								>
-									<div class="flex flex-wrap items-center gap-1.5">
-										<span class="font-mono text-xs font-medium">{entry.attribute_name}</span>
-										{#if entry.claimed_by}
-											<span
-												class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
-												title="A running measurement holds this. Building a resource for it is allowed; using it at the same time is not."
+						{#if source.tree !== null}
+							<ScrollArea
+								class="relative overflow-hidden p-3"
+								orientation="vertical"
+								viewportClasses="h-full max-h-[320px] w-full"
+							>
+								{#if !source.reachable}
+									<div class="px-2 py-3 text-body text-warn">
+										Not reachable: {source.error ?? 'no answer'}
+									</div>
+								{:else if source.tree.length === 0}
+									<div class="px-2 py-3 text-body text-ink-2">
+										No instruments configured here.
+									</div>
+								{:else}
+									{#each source.tree as node (node.key)}
+										<TreeNode
+											{node}
+											isSelectable={pickingMode && pending === null}
+											isCompatible={() => true}
+											selectionLabel={(_n, p) => selectionLabelForAny(source, p)}
+											busyBadge={(_n, p) => busyLabel(source.claims, p)}
+											onSelect={(n, p) => onSelectTreeNode(source, n, p)}
+										/>
+									{/each}
+								{/if}
+							</ScrollArea>
+						{:else}
+							<!-- A remote machine: named leaves only. A tcp peer gets read + call,
+							     so there is no tree to browse and nothing to reconfigure. -->
+							<div class="max-h-[320px] overflow-y-auto p-3">
+								{#if !source.reachable}
+									<div class="px-2 py-2 text-body text-warn">
+										Not reachable: {source.error ?? 'no answer'}
+									</div>
+								{:else if source.attributes.length === 0}
+									<div class="px-2 py-2 text-body text-ink-2">
+										No named instruments there.
+									</div>
+								{:else}
+									<div class="grid gap-1.5 sm:grid-cols-2">
+										{#each source.attributes as entry (entry.attribute_name)}
+											<button
+												class="rounded border border-line px-3 py-2 text-left text-body hover:border-accent disabled:opacity-50"
+												disabled={!pickingMode || pending !== null}
+												onclick={() => onSelectAttribute(source, entry)}
 											>
-												in use by {entry.claimed_by}
-											</span>
-										{/if}
+												<div class="flex flex-wrap items-center gap-1.5">
+													<span class="font-mono text-xs font-medium">{entry.attribute_name}</span>
+													{#if entry.claimed_by}
+														<span
+															class="rounded bg-warn-wash px-1.5 py-0.5 text-2xs font-medium text-warn"
+															title="A running measurement holds this. Building a resource for it is allowed; using it at the same time is not."
+														>
+															in use by {entry.claimed_by}
+														</span>
+													{/if}
+												</div>
+												<div class="text-fine text-muted">
+													{entry.type_hint ?? 'instrument'}
+													{#if entry.behavior_abc}· {entry.behavior_abc}{/if}
+												</div>
+											</button>
+										{/each}
 									</div>
-									<div class="text-[11px] text-muted">
-										{entry.type_hint ?? 'instrument'}
-										{#if entry.behavior_abc}· {entry.behavior_abc}{/if}
-									</div>
-								</button>
-							{/each}
-						</div>
+								{/if}
+							</div>
+						{/if}
 					{/if}
-				</div>
+				</Tabs>
 			</div>
-		{/each}
-
-		{#if treeSources.length === 0 && flatSources.length === 0}
-			<div class="rounded-xl border border-line px-3 py-4 text-sm text-ink-2">
+		{:else}
+			<div class="rounded-xl border border-line px-3 py-4 text-body text-ink-2">
 				No instrument sources found. Add instruments in
 				<a class="text-accent hover:underline" href="/instruments">Manage Instruments</a>,
 				or register a server on
@@ -621,7 +669,7 @@
 
 	{#if createResult}
 		<div
-			class="rounded-lg bg-ok-wash px-3 py-2 text-sm text-ok"
+			class="rounded-lg bg-ok-wash px-3 py-2 text-body text-ok"
 		>
 			Created project <span class="font-medium">{createResult.project_name}</span>
 			<div class="mt-1 text-xs">
@@ -634,7 +682,7 @@
 
 	{#if createError}
 		<div
-			class="rounded-lg bg-crit-wash px-3 py-2 text-sm text-crit"
+			class="rounded-lg bg-crit-wash px-3 py-2 text-body text-crit"
 		>
 			{createError}
 		</div>

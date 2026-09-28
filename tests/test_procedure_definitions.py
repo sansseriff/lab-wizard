@@ -102,7 +102,8 @@ def test_a_correct_definition_checks_and_renders():
     expr, _ctx = definition.render_body()
     assert expr == (
         "Sweep('bias', params.sweep.values(), lambda bias: Sequence("
-        "SetVoltage(source=source, voltage=bias), Count(counter=counter, gate_time=params.gate_s)))"
+        "SetVoltage(source=source, voltage=bias), Count(counter=counter, gate_time=params.gate_s)), "
+        "also=params.sweep.also('bias'))"
     )
     assert definition.emitted_fields() == ["bias", "counts", "int_time", "count_rate"]
 

@@ -4,9 +4,7 @@
 	 * Two rules govern everything on this page.
 	 *
 	 * First: say *configured* unless something actually reported in. Instruments
-	 * are entries in `config/instruments`, not open connections; a saver is a
-	 * YAML file with a path in it, and whether that path is writable is unknown
-	 * until a run. The one genuinely live number here is how many roots a server
+	 * are entries in `config/instruments`, not open connections. The one genuinely live number here is how many roots a server
 	 * is currently holding, because a server really does report that.
 	 *
 	 * Second: nothing here may describe other machines' relationship to us. A
@@ -57,8 +55,8 @@
 
 <section class="space-y-5">
 	<div>
-		<h1 class="text-[22px] font-semibold tracking-tight">Overview</h1>
-		<p class="mt-1 max-w-[64ch] text-[13px] text-muted">
+		<h1 class="text-headline font-semibold tracking-tight">Overview</h1>
+		<p class="mt-1 max-w-[64ch] text-body text-muted">
 			What this workstation has configured, what is actually open right now, and the two things you
 			start a session with.
 		</p>
@@ -67,28 +65,28 @@
 	<!-- Counts. Every label states which kind of fact it is. -->
 	<div class="grid grid-cols-2 overflow-hidden rounded border border-line bg-surface md:grid-cols-4">
 		<div class="flex flex-col gap-0.5 border-b border-r border-line px-4 py-3 md:border-b-0">
-			<span class="text-[10.5px] uppercase tracking-[0.09em] text-muted">Instruments</span>
+			<span class="text-2xs uppercase tracking-[0.09em] text-muted">Instruments</span>
 			<span class="text-xl font-semibold tabular-nums">{data.instrumentCount}</span>
-			<span class="text-[11.5px] text-muted">
+			<span class="text-fine text-muted">
 				configured · {data.roots.length} root transport{data.roots.length === 1 ? '' : 's'}
 			</span>
 		</div>
 		<div class="flex flex-col gap-0.5 border-b border-line px-4 py-3 md:border-b-0 md:border-r">
-			<span class="text-[10.5px] uppercase tracking-[0.09em] text-muted">Open now</span>
+			<span class="text-2xs uppercase tracking-[0.09em] text-muted">Open now</span>
 			<span class="text-xl font-semibold tabular-nums">{heldCount}</span>
-			<span class="text-[11.5px] text-muted">
+			<span class="text-fine text-muted">
 				{heldCount === 0 ? 'no server holds a rack' : 'held by a server'}
 			</span>
 		</div>
 		<div class="flex flex-col gap-0.5 border-r border-line px-4 py-3">
-			<span class="text-[10.5px] uppercase tracking-[0.09em] text-muted">Savers · Plotters</span>
-			<span class="text-xl font-semibold tabular-nums">{data.saverCount} · {data.plotterCount}</span>
-			<span class="text-[11.5px] text-muted">configured</span>
+			<span class="text-2xs uppercase tracking-[0.09em] text-muted">Projects</span>
+			<span class="text-xl font-semibold tabular-nums">{data.projectCount}</span>
+			<span class="text-fine text-muted">generated</span>
 		</div>
 		<div class="flex flex-col gap-0.5 px-4 py-3">
-			<span class="text-[10.5px] uppercase tracking-[0.09em] text-muted">Remote servers</span>
+			<span class="text-2xs uppercase tracking-[0.09em] text-muted">Remote servers</span>
 			<span class="text-xl font-semibold tabular-nums">{data.remoteCount}</span>
-			<span class="text-[11.5px] text-muted">in our address book</span>
+			<span class="text-fine text-muted">in our address book</span>
 		</div>
 	</div>
 
@@ -100,7 +98,7 @@
 			<div class="rounded border border-line bg-surface">
 				<div class="flex items-center justify-between gap-3 border-b border-line px-3.5 py-2.5">
 					<div>
-						<h2 class="text-[13.5px] font-semibold">This workstation</h2>
+						<h2 class="text-body font-semibold">This workstation</h2>
 						<p class="text-xs text-muted">
 							Who owns the hardware, and whether the permission gate can see anything.
 						</p>
@@ -135,27 +133,27 @@
 					{/if}
 
 					{#if workstation.phase === 'running'}
-						<div class="rounded border border-ok/30 bg-ok-wash px-3 py-2 text-[12.5px] text-ok">
+						<div class="rounded border border-ok/30 bg-ok-wash px-3 py-2 text-body text-ok">
 							<strong>The instrument server owns this workspace's hardware.</strong>
 							Calls route through it, so exactly one process holds each transport and permission rules
 							apply.
 						</div>
 					{:else if workstation.phase === 'stopped'}
-						<div class="rounded border border-warn/30 bg-warn-wash px-3 py-2 text-[12.5px] text-warn">
+						<div class="rounded border border-warn/30 bg-warn-wash px-3 py-2 text-body text-warn">
 							<strong>No server is running for this workspace.</strong>
 							The wizard opens hardware in its own process. That works, but the permission gate only
 							sees calls made through a server — anything done here is invisible to it.
 						</div>
 					{:else}
-						<div class="rounded border border-line bg-surface-2 px-3 py-2 text-[12.5px] text-ink-2">
+						<div class="rounded border border-line bg-surface-2 px-3 py-2 text-body text-ink-2">
 							<strong>This workspace is not a hardware host.</strong>
 							It has no server config, so it acts as a client of other servers. That is what keeps a
 							cloned workspace from racing the real host for the same instruments.
 						</div>
 					{/if}
 
-					<dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-3.5 gap-y-1 text-[12.5px]">
-						<dt class="text-[11.5px] text-muted">Serving</dt>
+					<dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-3.5 gap-y-1 text-body">
+						<dt class="text-fine text-muted">Serving</dt>
 						<dd>
 							{#if workstation.server?.bind}
 								<span class="mono">{workstation.server.bind}</span>
@@ -165,7 +163,7 @@
 								<span class="text-muted">—</span>
 							{/if}
 						</dd>
-						<dt class="text-[11.5px] text-muted">Rules</dt>
+						<dt class="text-fine text-muted">Rules</dt>
 						<dd>
 							{workstation.server?.rule_count ?? 0} safety rule{(workstation.server?.rule_count ??
 								0) === 1
@@ -180,7 +178,7 @@
 			     state here is a real answer, not a placeholder. -->
 			<div class="rounded border border-line bg-surface">
 				<div class="border-b border-line px-3.5 py-2.5">
-					<h2 class="text-[13.5px] font-semibold">Needs attention</h2>
+					<h2 class="text-body font-semibold">Needs attention</h2>
 				</div>
 				<div class="space-y-2 p-3.5">
 					{#if data.duplicates.length > 0}
@@ -233,7 +231,7 @@
 			     is a toggle, so it lives on the status panel above rather than
 			     pretending to be a destination. -->
 			<div>
-				<p class="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.11em] text-muted">
+				<p class="mb-2 text-2xs font-semibold uppercase tracking-[0.11em] text-muted">
 					Quick actions
 				</p>
 				<div class="space-y-2">
@@ -247,8 +245,8 @@
 							<PlusIcon size={14} weight="bold" />
 						</span>
 						<span class="min-w-0">
-							<span class="block text-[13px] font-semibold text-ink">New measurement</span>
-							<span class="block text-[11.5px] text-muted">
+							<span class="block text-body font-semibold text-ink">New measurement</span>
+							<span class="block text-fine text-muted">
 								Pick a type, assign resources, generate a project.
 							</span>
 						</span>
@@ -265,8 +263,8 @@
 							<CircuitryIcon size={14} />
 						</span>
 						<span class="min-w-0">
-							<span class="block text-[13px] font-semibold text-ink">Add instrument</span>
-							<span class="block text-[11.5px] text-muted">
+							<span class="block text-body font-semibold text-ink">Add instrument</span>
+							<span class="block text-fine text-muted">
 								Build a parent chain on this workspace's tree.
 							</span>
 						</span>
@@ -277,7 +275,7 @@
 
 			<div class="rounded border border-line bg-surface">
 				<div class="flex items-center justify-between border-b border-line px-3.5 py-2.5">
-					<h2 class="text-[13.5px] font-semibold">Recent projects</h2>
+					<h2 class="text-body font-semibold">Recent projects</h2>
 					<a class="text-xs text-accent no-underline hover:underline" href="/measurements/projects">
 						All →
 					</a>
@@ -289,7 +287,7 @@
 						{#each data.projects as p (p.name)}
 							<li class="border-b border-line px-3.5 py-2.5 last:border-b-0">
 								<div class="mono truncate text-xs font-semibold">{p.name}</div>
-								<div class="text-[11.5px] text-muted">
+								<div class="text-fine text-muted">
 									{p.measurement ?? 'unknown measurement'}{when(p.created)
 										? ` · ${when(p.created)}`
 										: ''}

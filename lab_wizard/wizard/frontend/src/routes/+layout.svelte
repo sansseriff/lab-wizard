@@ -5,6 +5,9 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Pill from '$lib/components/Pill.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { Tooltip } from 'bits-ui';
+	import { answer, pending } from '$lib/confirm.svelte';
 	import { workstation } from '$lib/stores/workstation.svelte';
 
 	let { children } = $props();
@@ -21,6 +24,7 @@
 		'/measurements/new': ['Measurements', 'Create'],
 		'/measurements/resources': ['Measurements', 'Create'],
 		'/measurements/projects': ['Measurements', 'Projects'],
+		'/measurements/run': ['Measurements', 'Run'],
 		'/procedures': ['Procedures'],
 		'/procedures/edit': ['Procedures', 'Edit'],
 		'/instruments': ['Instruments', 'Configured'],
@@ -29,9 +33,8 @@
 		'/servers/permissions': ['Servers', 'Permissions'],
 		'/servers/hardware': ['Servers', 'Hardware ownership'],
 		'/servers/remote': ['Servers', 'Remote servers'],
-		'/plotters': ['Plotters'],
-		'/data/savers': ['Data', 'Savers'],
-		'/data/database': ['Data', 'Database']
+		'/data': ['Data'],
+		'/settings': ['Settings']
 	};
 
 	// `trailingSlash: 'always'` means the router reports `/instruments/`; the
@@ -41,12 +44,19 @@
 		const key = p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p;
 		return crumbs[key] ?? ['Lab Wizard'];
 	});
+	const wide = $derived(['/data', '/measurements/run'].includes(page.url.pathname.replace(/\/$/, '')));
+	// The live page a web plotter opens shows one run and nothing of the wizard.
+	const bare = $derived(page.url.pathname.startsWith('/live'));
 </script>
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
+<Tooltip.Provider delayDuration={300}>
+{#if bare}
+	<div class="min-h-screen bg-ground text-ink">{@render children?.()}</div>
+{:else}
 <div class="flex min-h-screen items-stretch bg-ground text-ink">
 	<Sidebar />
 
@@ -86,8 +96,24 @@
 			</div>
 		</header>
 
-		<div class="w-full max-w-[1180px] px-6 pb-16 pt-6">
+		<!-- The Data page is a workbench of side-by-side panels and needs the
+		     whole window; everything else reads best at a comfortable width. -->
+		<div class={wide ? 'w-full px-4 pt-4' : 'w-full max-w-[1180px] px-6 pb-16 pt-6'}>
 			{@render children?.()}
 		</div>
 	</main>
 </div>
+{/if}
+</Tooltip.Provider>
+
+{#if pending.current}
+	<ConfirmDialog
+		open
+		title={pending.current.title}
+		description={pending.current.description}
+		confirmLabel={pending.current.confirmLabel}
+		tone={pending.current.tone}
+		onconfirm={() => answer(true)}
+		oncancel={() => answer(false)}
+	/>
+{/if}

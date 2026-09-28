@@ -46,7 +46,8 @@ class SweepStepParams(StepParams):
 
     ``values`` is a sweep param (``{param: bias.sweep}``) or a literal list.
     Inside ``body``, ``{swept: <parameter>}`` is the current value, and every
-    observation records it.
+    observation records it — and whatever the sweep's mode records beside it
+    (a waypoints sweep's ``<parameter>_leg``).
     """
 
     type: Literal["sweep"] = "sweep"
@@ -72,13 +73,16 @@ class SweepStepParams(StepParams):
                 ctx.problem(f"{where} reads param {self.values.param!r}, which is not declared")
             elif decl is not None and decl.type != "sweep":
                 ctx.problem(f"{where} reads {self.values.param!r}, which is not a sweep param")
-            values = f"{ctx.params_var}.{self.values.param}.values()"
+            sweep = f"{ctx.params_var}.{self.values.param}"
+            values = f"{sweep}.values()"
+            also = f", also={sweep}.also({self.parameter!r})"
         else:
             values = repr(list(self.values))
+            also = ""
         inner, ident = ctx.scoped(self.parameter)
         body = inner.step(self.body)
         name = f", name={self.name!r}" if self.name else ""
-        return f"{ctx.use(Sweep)}({self.parameter!r}, {values}, lambda {ident}: {body}{name})"
+        return f"{ctx.use(Sweep)}({self.parameter!r}, {values}, lambda {ident}: {body}{name}{also})"
 
 
 class WithParameterStepParams(StepParams):

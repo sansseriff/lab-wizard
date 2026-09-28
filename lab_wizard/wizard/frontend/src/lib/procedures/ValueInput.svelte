@@ -7,8 +7,10 @@
 	 * into a param with that default, which is the usual way one is born.
 	 */
 	import type { ProcedureEditor } from './editor.svelte';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 	import { type FieldSpec, type Path, getAt, isRef, paramLeaves, parseLiteral } from './model';
 	import { valueSummary } from './presentation';
+	import Select, { type SelectOption } from '$lib/components/Select.svelte';
 
 	let {
 		editor,
@@ -47,6 +49,13 @@
 
 	let promoting = $state(false);
 	let promoteName = $state('');
+
+	/** A name the definition refers to but no longer offers still shows, so it is not silently lost. */
+	function withCurrent(current: string, options: SelectOption[]): SelectOption[] {
+		return !current || options.some((o) => o.value === current)
+			? options
+			: [{ value: current, label: current }, ...options];
+	}
 
 	function setMode(next: string) {
 		if (next === mode) return;
@@ -105,54 +114,49 @@
 </script>
 
 <div class="flex min-w-0 flex-wrap items-center gap-1.5">
-	<select
-		class="lw-select w-auto shrink-0"
+	<Select
+		class="w-auto shrink-0"
 		value={mode}
-		onchange={(e) => setMode(e.currentTarget.value)}
+		onValueChange={setMode}
 		aria-label="{fieldName}: kind of value"
-	>
-		{#if sweepsOnly}
-			<option value="param">Sweep parameter</option>
-			<option value="list">fixed list</option>
-		{:else}
-			<option value="literal">Fixed value</option>
-			<option value="param">Parameter</option>
-			<option value="swept" disabled={!scope.length}>Current sweep value</option>
-		{/if}
-	</select>
+		options={sweepsOnly
+			? [
+					{ value: 'param', label: 'Sweep parameter' },
+					{ value: 'list', label: 'fixed list' }
+				]
+			: [
+					{ value: 'literal', label: 'Fixed value' },
+					{ value: 'param', label: 'Parameter' },
+					{ value: 'swept', label: 'Current sweep value', disabled: !scope.length }
+				]}
+	/>
 
 	{#if mode === 'param'}
-		<select
-			class="lw-select mono min-w-[10rem] flex-1"
+		<Select
+			mono
+			class="min-w-[10rem] flex-1"
 			value={(value as { param: string }).param}
-			onchange={(e) => editor.setAt(path, { param: e.currentTarget.value })}
+			onValueChange={(v) => editor.setAt(path, { param: v })}
 			aria-label="{fieldName}: param"
-		>
-			{#if !params.some((p) => p.name === (value as { param: string }).param)}
-				<option value={(value as { param: string }).param}>
-					{(value as { param: string }).param || '— choose —'}
-				</option>
-			{/if}
-			{#each params as p (p.name)}
-				<option value={p.name}>{p.name}{p.decl.unit ? ` (${p.decl.unit})` : ''}</option>
-			{/each}
-		</select>
+			placeholder="— choose —"
+			options={withCurrent(
+				(value as { param: string }).param,
+				params.map((p) => ({ value: p.name, label: p.name + (p.decl.unit ? ` (${p.decl.unit})` : '') }))
+			)}
+		/>
 	{:else if mode === 'swept'}
-		<select
-			class="lw-select mono min-w-[8rem] flex-1"
+		<Select
+			mono
+			class="min-w-[8rem] flex-1"
 			value={(value as { swept: string }).swept}
-			onchange={(e) => editor.setAt(path, { swept: e.currentTarget.value })}
+			onValueChange={(v) => editor.setAt(path, { swept: v })}
 			aria-label="{fieldName}: swept value"
-		>
-			{#if !scope.includes((value as { swept: string }).swept)}
-				<option value={(value as { swept: string }).swept}>
-					{(value as { swept: string }).swept || '— choose —'}
-				</option>
-			{/if}
-			{#each scope as name (name)}
-				<option value={name}>{name}</option>
-			{/each}
-		</select>
+			placeholder="— choose —"
+			options={withCurrent(
+				(value as { swept: string }).swept,
+				scope.map((name) => ({ value: name, label: name }))
+			)}
+		/>
 	{:else if mode === 'list'}
 		<input
 			class="lw-input mono min-w-[10rem] flex-1"
@@ -207,16 +211,15 @@
 				placeholder="group.name"
 				aria-label="New param name"
 			/>
-			<button class="lw-btn lw-btn-sm" onclick={promote}>Add</button>
-			<button class="lw-btn lw-btn-sm" onclick={() => (promoting = false)}>Cancel</button>
+			<button class="lw-btn" onclick={promote}>Add</button>
+			<button class="lw-btn" onclick={() => (promoting = false)}>Cancel</button>
 		{:else}
-			<button
-				class="lw-btn lw-btn-sm"
+			<Tooltip text="Expose this value as a param, with what you typed as its default">{#snippet child({ props })}<button {...props}
+				class="lw-btn"
 				onclick={startPromote}
-				title="Expose this value as a param, with what you typed as its default"
 			>
 				Make parameter
-			</button>
+			</button>{/snippet}</Tooltip>
 		{/if}
 	{/if}
 </div>

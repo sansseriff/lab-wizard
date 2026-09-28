@@ -309,7 +309,7 @@ Every step has a params model, and the generic renderer builds any of them.
   outside its sweep, a sweep param used as a scalar, a condition on a field no
   step records, unregistered behaviors. `save_procedure` refuses a definition
   that does not check. Names that would break generated code (non-identifiers,
-  pydantic attribute names, `params`/`resources`/`savers`/`plotters`/`project`
+  pydantic attribute names, `params`/`resources`/`project`
   as roles) are rejected on load.
 - **2.2 ✅ Presets** in `config/measurements/<measurement>/<preset>.yml`, for
   composed procedures **and hand-written measurements** — the defaults layer
@@ -320,7 +320,7 @@ Every step has a params model, and the generic renderer builds any of them.
   callers. Choosing a preset in the wizard is Phase 5.3.
 
 **Vocabulary:** *procedure* = reusable, instrument-generic definition.
-*measurement* = procedure + role bindings + params + savers/plotters = a project.
+*measurement* = procedure + role bindings + params + outputs = a project.
 
 ---
 

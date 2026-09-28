@@ -1,6 +1,7 @@
 <script lang="ts">
 	/** Build a complete instrument chain in a backend draft, then save it once. */
 	import InstrumentWorkbench from './InstrumentWorkbench.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import {
 		existingParentChain,
 		parentCandidates,
@@ -82,6 +83,67 @@
 	let draftTree = $state<TreeItem[] | null>(null);
 	let draftPath = $state<NodePath>([]);
 	let draftReadyToCommit = $state(false);
+
+	// Back: every step's state as it was on arrival, newest last. Back restores
+	// the one before; the draft is re-sent whole on the next step, so anything
+	// staged from a step undone is simply overwritten.
+	type Visit = {
+		step: AddStep;
+		index: number;
+		selectedType: string | null;
+		chainSteps: ChainStep[];
+		discoveryActions: DiscoveryAction[];
+		discoveryInputs: Record<string, any>;
+		discoveryTargetType: string | null;
+		draftReadyToCommit: boolean;
+	};
+	let visits = $state<Visit[]>([]);
+	const visitKey = (step: AddStep, index: number) => `${step}:${index}`;
+
+	$effect(() => {
+		if (!showAddWizard) return;
+		const key = visitKey(addStep, currentChainIndex);
+		untrack(() => {
+			const last = visits.at(-1);
+			if (last && visitKey(last.step, last.index) === key) return;
+			visits.push({
+				step: addStep,
+				index: currentChainIndex,
+				selectedType,
+				chainSteps: $state.snapshot(chainSteps),
+				discoveryActions: $state.snapshot(discoveryActions),
+				discoveryInputs: $state.snapshot(discoveryInputs),
+				discoveryTargetType,
+				draftReadyToCommit
+			});
+		});
+	});
+
+	function back() {
+		if (visits.length < 2 || addLoading || discoveryLoading) return;
+		visits.pop();
+		const to = visits.at(-1)!;
+		// Put back what was typed into the box being returned to.
+		tempKey =
+			to.step === 'leaf-key'
+				? chainSteps[0].key
+				: to.step === 'parent-key'
+					? (chainSteps[to.index]?.key ?? '')
+					: '';
+		addStep = to.step;
+		currentChainIndex = to.index;
+		selectedType = to.selectedType;
+		chainSteps = structuredClone(to.chainSteps);
+		discoveryActions = structuredClone(to.discoveryActions);
+		discoveryInputs = structuredClone(to.discoveryInputs);
+		discoveryInputsHaveChanged = false;
+		discoveryTargetType = to.discoveryTargetType;
+		discoveryResult = null;
+		draftReadyToCommit = to.draftReadyToCommit;
+		statusMessage = null;
+		if (to.step === 'choose-type') typeQuery = '';
+		if (to.step === 'discover' && discoveryActions.length) runDiscovery(discoveryActions[0].name);
+	}
 
 	async function stageDraft(chain: ChainStep[]) {
 		if (!draftId) {
@@ -241,6 +303,7 @@
 		addParent = parent;
 		tempKey = '';
 		showAddWizard = true;
+		visits = [];
 		addStep = 'choose-type';
 		typeQuery = '';
 		selectedType = null;
@@ -462,6 +525,17 @@
 		addStep = 'confirm'; // confirm
 	}
 
+	function submitLeafKey() {
+		if (!tempKey.trim()) return;
+		setLeafKey(tempKey.trim());
+		tempKey = '';
+	}
+
+	async function submitParentKey() {
+		if (!tempKey.trim() || addLoading) return;
+		if (await confirmNewParentKey(tempKey.trim())) tempKey = '';
+	}
+
 	async function runDiscovery(actionName: string) {
 		const targetType = discoveryTargetType ?? selectedType;
 		if (!targetType) return;
@@ -584,7 +658,7 @@
 
 	{#if statusMessage}
 		<div
-			class="rounded-lg px-3 py-2 text-sm {statusMessage.ok
+			class="rounded-lg px-3 py-2 text-body {statusMessage.ok
 				? 'bg-ok-wash text-ok'
 				: 'bg-crit-wash text-crit'}"
 		>
@@ -631,7 +705,7 @@
 					{@const isLast = i === chainSteps.length - 1}
 					<div class="flex items-center gap-2">
 						<div
-							class="shrink-0 rounded border px-2.5 py-1.5 text-[11.5px] transition-colors
+							class="shrink-0 rounded border px-2.5 py-1.5 text-fine transition-colors
 								{step.resolved
 								? 'border-ok/40 bg-ok-wash text-ok'
 								: 'border-dashed border-line-2 bg-surface-2 text-muted'}"
@@ -672,7 +746,7 @@
 
 				{#if topLevelTypes.length > 0}
 					<div>
-						<p class="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted">
+						<p class="mb-1.5 text-2xs font-semibold uppercase tracking-[0.09em] text-muted">
 							Racks &amp; standalone instruments
 						</p>
 						<div class="grid gap-1.5 sm:grid-cols-2">
@@ -683,11 +757,11 @@
 									onclick={() => selectTypeForAdd(m.type)}
 								>
 									<span class="min-w-0 flex-1">
-										<span class="block truncate text-[12.5px] font-semibold">{m.type}</span>
-										<span class="mono block truncate text-[11px] text-muted">{m.class_name}</span>
+										<span class="block truncate text-body font-semibold">{m.type}</span>
+										<span class="mono block truncate text-fine text-muted">{m.class_name}</span>
 									</span>
 									{#if count > 0}
-										<span class="shrink-0 text-[10.5px] text-muted">{count} configured</span>
+										<span class="shrink-0 text-2xs text-muted">{count} configured</span>
 									{/if}
 								</button>
 							{/each}
@@ -697,7 +771,7 @@
 
 				{#each Object.entries(parentGroups) as [parentType, children] (parentType)}
 					<div>
-						<p class="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted">
+						<p class="mb-1.5 text-2xs font-semibold uppercase tracking-[0.09em] text-muted">
 							Modules under <span class="mono normal-case">{parentType}</span>
 						</p>
 						<div class="grid gap-1.5 sm:grid-cols-2">
@@ -708,11 +782,11 @@
 									onclick={() => selectTypeForAdd(m.type)}
 								>
 									<span class="min-w-0 flex-1">
-										<span class="block truncate text-[12.5px] font-semibold">{m.type}</span>
-										<span class="mono block truncate text-[11px] text-muted">{m.class_name}</span>
+										<span class="block truncate text-body font-semibold">{m.type}</span>
+										<span class="mono block truncate text-fine text-muted">{m.class_name}</span>
 									</span>
 									{#if count > 0}
-										<span class="shrink-0 text-[10.5px] text-muted">{count} configured</span>
+										<span class="shrink-0 text-2xs text-muted">{count} configured</span>
 									{/if}
 								</button>
 							{/each}
@@ -724,13 +798,13 @@
 
 			<!-- Step 1: Parent selection (use existing or create new) -->
 			{#if addStep === 'choose-parent' && currentStepType}
-				<p class="mb-3 text-[12.5px] text-ink-2">
+				<p class="mb-3 text-body text-ink-2">
 					Choose the <span class="mono font-semibold">{currentStepType}</span> for this
 					<span class="mono font-semibold">{chainSteps[0].type}</span> instrument chain.
 				</p>
 
 				{#if currentExisting.length > 0}
-					<p class="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted">
+					<p class="mb-1.5 text-2xs font-semibold uppercase tracking-[0.09em] text-muted">
 						Use existing
 					</p>
 					<div class="mb-3 space-y-1.5">
@@ -739,16 +813,16 @@
 								class="flex w-full items-center gap-2 rounded border border-line bg-surface px-2.5 py-2 text-left transition-colors hover:border-accent hover:bg-accent-wash"
 								onclick={() => selectExistingParent(inst.key)}
 							>
-								<span class="text-[12.5px] font-semibold">{inst.node.type}</span>
-								<span class="text-[11.5px] text-muted">{nodeAddress(inst.node)}</span>
-								<span class="mono text-[11.5px] text-muted">{inst.key}</span>
+								<span class="text-body font-semibold">{inst.node.type}</span>
+								<span class="text-fine text-muted">{nodeAddress(inst.node)}</span>
+								<span class="mono text-fine text-muted">{inst.key}</span>
 							</button>
 						{/each}
 					</div>
 				{/if}
 
 				<button
-					class="w-full rounded border border-dashed border-line-2 px-2.5 py-2 text-left text-[12.5px] text-ink-2 transition-colors hover:border-accent hover:bg-accent-wash"
+					class="w-full rounded border border-dashed border-line-2 px-2.5 py-2 text-left text-body text-ink-2 transition-colors hover:border-accent hover:bg-accent-wash"
 					onclick={selectCreateNewParent}
 				>
 					+ Create a new {currentStepType}
@@ -757,29 +831,19 @@
 
 			<!-- Parent address: Key entry for a new parent being created -->
 			{#if addStep === 'parent-key' && currentStepType}
-				<p class="mb-3 text-[12.5px] text-ink-2">
+				<p class="mb-3 text-body text-ink-2">
 					<span class="mono font-semibold">{chainSteps[0].type}</span> needs a new
 					<span class="mono font-semibold">{currentStepType}</span> above it. Enter its
 					{metadata[currentStepType]?.key_hint?.toLowerCase() ?? 'address or slot'}.
 				</p>
-				<div class="flex gap-2">
-					<input
-						type="text"
-						bind:value={tempKey}
-						placeholder={metadata[currentStepType]?.key_hint ?? 'e.g. address or slot'}
-						class="lw-input mono flex-1"
-					/>
-					<button
-						class="lw-btn lw-btn-primary shrink-0"
-						disabled={!tempKey.trim() || addLoading}
-						onclick={async () => {
-							if (await confirmNewParentKey(tempKey.trim())) tempKey = '';
-						}}
-					>
-						{addLoading ? 'Checking…' : 'Next'}
-					</button>
-				</div>
-				<p class="mt-2 text-[11px] text-muted">
+				<input
+					type="text"
+					bind:value={tempKey}
+					onkeydown={(e) => e.key === 'Enter' && submitParentKey()}
+					placeholder={metadata[currentStepType]?.key_hint ?? 'e.g. address or slot'}
+					class="lw-input mono"
+				/>
+				<p class="mt-2 text-fine text-muted">
 				This parent stays in your draft. The complete chain is saved when you finish adding the instrument.
 				</p>
 			{/if}
@@ -787,7 +851,7 @@
 			<!-- Discover: Discovery — ask the hardware instead of typing an address. -->
 			{#if addStep === 'discover' && discoveryActions.length > 0}
 				{@const currentAction = discoveryActions[0]}
-				<p class="mb-3 text-[12.5px] text-ink-2">{currentAction.description}</p>
+				<p class="mb-3 text-body text-ink-2">{currentAction.description}</p>
 
 				<!-- When the action borrows its parent's connection there is nothing
 				     to fill in, so say where the scan is going instead. -->
@@ -831,20 +895,20 @@
 					{#if discoveryResult.result_type === 'children'}
 						{#if discoveryResult.children.length > 0}
 							<div class="mb-3">
-								<p class="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted">
+								<p class="mb-1.5 text-2xs font-semibold uppercase tracking-[0.09em] text-muted">
 									Found {discoveryResult.children.length} device{discoveryResult.children.length === 1
 										? ''
 										: 's'}
 								</p>
 								<ul class="divide-y divide-line rounded border border-line bg-surface">
 									{#each discoveryResult.children as child, i (i)}
-										<li class="flex flex-wrap items-baseline gap-x-2 px-2.5 py-1.5 text-[12px]">
+										<li class="flex flex-wrap items-baseline gap-x-2 px-2.5 py-1.5 text-xs">
 											<span class="font-semibold">{child.type}</span>
 											{#each Object.entries(child.key_fields) as [k, v] (k)}
 												<span class="mono text-muted">{k}: {v}</span>
 											{/each}
 											{#if child.idn}
-												<span class="mono w-full truncate text-[11px] text-muted">{child.idn}</span>
+												<span class="mono w-full truncate text-fine text-muted">{child.idn}</span>
 											{/if}
 										</li>
 									{/each}
@@ -864,7 +928,7 @@
 										: 's'} this build cannot drive. "
 								>
 									They are left out of the config; everything else is added normally.
-									<ul class="mono mt-1 space-y-0.5 text-[11px]">
+									<ul class="mono mt-1 space-y-0.5 text-fine">
 										{#each discoveryResult.warnings as warning, i (i)}
 											<li>{warning}</li>
 										{/each}
@@ -874,7 +938,7 @@
 						{/if}
 					{:else if discoveryResult.result_type === 'probe'}
 						{#if discoveryResult.found.length > 0}
-							<p class="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted">
+							<p class="mb-1.5 text-2xs font-semibold uppercase tracking-[0.09em] text-muted">
 								Found {discoveryResult.found.length} controller{discoveryResult.found.length === 1
 									? ''
 									: 's'} — pick one
@@ -885,9 +949,9 @@
 										class="flex w-full items-baseline gap-2 rounded border border-line bg-surface px-2.5 py-2 text-left transition-colors hover:border-accent hover:bg-accent-wash"
 										onclick={() => resolveDiscoverySelection(port_entry.port)}
 									>
-										<span class="mono text-[12.5px] font-semibold">{port_entry.port}</span>
+										<span class="mono text-body font-semibold">{port_entry.port}</span>
 										{#if port_entry.description}
-											<span class="truncate text-[11.5px] text-muted">{port_entry.description}</span>
+											<span class="truncate text-fine text-muted">{port_entry.description}</span>
 										{/if}
 									</button>
 								{/each}
@@ -899,7 +963,7 @@
 						{/if}
 					{:else if discoveryResult.result_type === 'self_candidates'}
 						{#if discoveryResult.found.length > 0}
-							<p class="mb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted">
+							<p class="mb-1.5 text-2xs font-semibold uppercase tracking-[0.09em] text-muted">
 								Found {discoveryResult.found.length} candidate{discoveryResult.found.length === 1
 									? ''
 									: 's'} — pick one
@@ -912,12 +976,12 @@
 										onclick={() => resolveDiscoverySelection(String(keyValue))}
 									>
 										{#each Object.entries(candidate.key_fields) as [k, v] (k)}
-											<span class="text-[12.5px]">
+											<span class="text-body">
 												{k}: <span class="mono font-semibold">{v}</span>
 											</span>
 										{/each}
 										{#if candidate.idn}
-											<span class="mono w-full truncate text-[11px] text-muted">{candidate.idn}</span>
+											<span class="mono w-full truncate text-fine text-muted">{candidate.idn}</span>
 										{/if}
 									</button>
 								{/each}
@@ -931,36 +995,25 @@
 
 			<!-- Leaf address: Key entry for the target leaf/child instrument -->
 			{#if addStep === 'leaf-key'}
-				<p class="mb-3 text-[12.5px] text-ink-2">
+				<p class="mb-3 text-body text-ink-2">
 					Enter the key for the new <span class="mono font-semibold">{chainSteps[0].type}</span>.
 				</p>
-				<div class="flex gap-2">
-					<input
-						type="text"
-						bind:value={tempKey}
-						placeholder={metadata[chainSteps[0].type]?.key_hint ?? 'e.g. 1, 5'}
-						class="lw-input mono flex-1"
-					/>
-					<button
-						class="lw-btn lw-btn-primary shrink-0"
-						disabled={!tempKey.trim()}
-						onclick={() => {
-							setLeafKey(tempKey.trim());
-							tempKey = '';
-						}}
-					>
-						Next
-					</button>
-				</div>
+				<input
+					type="text"
+					bind:value={tempKey}
+					onkeydown={(e) => e.key === 'Enter' && submitLeafKey()}
+					placeholder={metadata[chainSteps[0].type]?.key_hint ?? 'e.g. 1, 5'}
+					class="lw-input mono"
+				/>
 			{/if}
 
 			<!-- Confirm: Confirm. The chain is shown root-first, which is the order
 			     it will appear in the tree. -->
 			{#if addStep === 'confirm'}
-				<p class="mb-2 text-[12.5px] text-ink-2">This is what will be written:</p>
+				<p class="mb-2 text-body text-ink-2">This is what will be written:</p>
 				<ul class="divide-y divide-line rounded border border-line bg-surface">
 					{#each [...chainSteps].reverse() as step, i (step.type + i)}
-						<li class="flex items-center gap-2 px-2.5 py-2 text-[12.5px]">
+						<li class="flex items-center gap-2 px-2.5 py-2 text-body">
 							{#if step.action === 'create_new'}
 								<Pill tone="ok">new</Pill>
 							{:else}
@@ -974,10 +1027,14 @@
 			{/if}
 
 		{#snippet footer()}
+			<!-- Same order on every step: Back and any step-specific way out on the
+			     left; Cancel and the step's primary action on the right. -->
+			{#if visits.length > 1}
+				<button class="lw-btn" onclick={back} disabled={addLoading || discoveryLoading}>Back</button>
+			{/if}
 			{#if addStep === 'discover' && discoveryActions.length > 0}
-				{@const currentAction = discoveryActions[0]}
 				<button
-					class="lw-btn mr-auto"
+					class="lw-btn"
 					onclick={() => {
 						addStep = isParentDiscovery ? 'parent-key' : 'leaf-key';
 						discoveryResult = null;
@@ -987,6 +1044,11 @@
 				>
 					Enter it manually
 				</button>
+			{/if}
+			<span class="mr-auto"></span>
+			<button class="lw-btn" onclick={cancelAddWizard} disabled={addLoading}>Cancel</button>
+			{#if addStep === 'discover' && discoveryActions.length > 0}
+				{@const currentAction = discoveryActions[0]}
 				{#if discoveryInputsHaveChanged || !discoveryResult}
 					<button
 						class="lw-btn"
@@ -1019,104 +1081,88 @@
 								: `Add ${selectedType} and its modules`}
 					</button>
 				{/if}
+			{:else if addStep === 'parent-key'}
+				<button
+					class="lw-btn lw-btn-primary"
+					onclick={submitParentKey}
+					disabled={!tempKey.trim() || addLoading}
+				>
+					{addLoading ? 'Checking…' : 'Next'}
+				</button>
+			{:else if addStep === 'leaf-key'}
+				<button class="lw-btn lw-btn-primary" onclick={submitLeafKey} disabled={!tempKey.trim()}>
+					Next
+				</button>
 			{:else if addStep === 'confirm'}
-				{#if !draftReadyToCommit}
-					<button class="lw-btn mr-auto" disabled={addLoading} onclick={() => {
-						tempKey = chainSteps[0].key;
-						addStep = 'leaf-key';
-						statusMessage = null;
-					}}>Edit address</button>
-				{/if}
-				<button class="lw-btn" onclick={cancelAddWizard} disabled={addLoading}>Cancel</button>
 				<button class="lw-btn lw-btn-primary" onclick={executeAdd} disabled={addLoading}>
 					{addLoading ? 'Adding…' : 'Add instrument'}
 				</button>
-			{:else}
-				<button class="lw-btn" onclick={cancelAddWizard} disabled={addLoading}>Cancel</button>
 			{/if}
 		{/snippet}
 	</Modal>
 {/if}
 
 <!-- Confirmation Dialog -->
-{#if confirmAction && confirmTarget}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-		<div class="w-full max-w-sm rounded border border-line bg-surface p-5 shadow-2xl">
-			<h3 class="text-lg font-semibold">
-				{confirmAction === 'reset' ? 'Reset to defaults?' : 'Remove instrument?'}
-			</h3>
-			<p class="mt-2 text-sm text-ink-2">
-				{#if confirmAction === 'reset'}
-					This will reset <strong>{confirmTarget.type}</strong> ({confirmTarget.key}) to factory
-					defaults. Children will be preserved.
-				{:else}
-					This will permanently remove <strong>{confirmTarget.type}</strong> ({confirmTarget.key})
-					and all its children from the config.
-				{/if}
-			</p>
-
-			{#if confirmAction === 'remove'}
-				{#if impactLoading}
-					<p class="mt-3 text-xs text-muted">Checking permission rules and projects…</p>
-				{/if}
-				{#if !impactLoading && removalImpact && (removalImpact.projects ?? []).length > 0}
-					<div class="mt-3 rounded-md border border-crit/30 bg-crit-wash p-2.5 text-xs">
-						<div class="font-medium text-crit">
-							{removalImpact.projects!.length} project(s) use this instrument
-						</div>
-						<ul class="mt-1 space-y-0.5 text-crit">
-							{#each removalImpact.projects! as project (project.path)}
-								<li>
-									<span class="font-mono">{project.name}</span>
-									— <span class="font-mono">{project.attributes.join(', ')}</span>
-								</li>
-							{/each}
-						</ul>
-						<div class="mt-1.5 text-crit">
-							A project finds its instruments by name when it runs, so these will stop at startup
-							until the instrument is added back under the same name, or they are regenerated.
-						</div>
-					</div>
-				{/if}
-				{#if !impactLoading && removalImpact && removalImpact.rules.length > 0}
-					<div class="mt-3 rounded-md border border-warn/30 bg-warn-wash p-2.5 text-xs">
-						<div class="font-medium text-warn">
-							{removalImpact.rules.length} permission rule(s) reference this instrument
-						</div>
-						<ul class="mt-1 space-y-1 text-warn">
-							{#each removalImpact.rules as rule (rule.id)}
-								<li>
-									<span class="font-mono">{rule.id}</span>
-									{#if rule.blocks_methods.length > 0}
-										— blocks <span class="font-mono">{rule.blocks_methods.join(', ')}</span>
-									{/if}
-								</li>
-							{/each}
-						</ul>
-						<div class="mt-1.5 text-warn">
-							A rule whose instrument no longer exists fails closed: it denies every call it covers,
-							which may block instruments you did not remove. Edit these rules on
-							<a class="underline" href="/servers/permissions">Server &amp; Permissions</a> first.
-						</div>
-					</div>
-				{/if}
-			{/if}
-			<div class="mt-4 flex justify-end gap-2">
-				<button
-					class="rounded-md px-3 py-1.5 text-sm text-ink-2 hover:bg-surface-2"
-					onclick={cancelConfirm}
-					disabled={actionLoading}>Cancel</button
-				>
-				<button
-					class="rounded-md px-3 py-1.5 text-sm text-white {confirmAction === 'remove'
-						? 'bg-crit hover:brightness-110'
-						: 'bg-accent hover:brightness-110'} disabled:opacity-50"
-					onclick={executeConfirm}
-					disabled={actionLoading}
-				>
-					{actionLoading ? 'Working...' : confirmAction === 'reset' ? 'Reset' : 'Remove'}
-				</button>
+<ConfirmDialog
+	open={confirmAction !== null && confirmTarget !== null}
+	title={confirmAction === 'reset' ? 'Reset to defaults?' : 'Remove instrument?'}
+	confirmLabel={confirmAction === 'reset' ? 'Reset' : 'Remove'}
+	tone={confirmAction === 'reset' ? 'primary' : 'danger'}
+	busy={actionLoading}
+	onconfirm={executeConfirm}
+	oncancel={cancelConfirm}
+>
+	{#if confirmAction === 'reset'}
+		This will reset <strong>{confirmTarget?.type}</strong> ({confirmTarget?.key}) to factory defaults.
+		Children will be preserved.
+	{:else}
+		This will permanently remove <strong>{confirmTarget?.type}</strong> ({confirmTarget?.key}) and all
+		its children from the config.
+	{/if}
+	{#if confirmAction === 'remove'}
+		{#if impactLoading}
+			<p class="mt-3 text-xs text-muted">Checking permission rules and projects…</p>
+		{/if}
+		{#if !impactLoading && removalImpact && (removalImpact.projects ?? []).length > 0}
+			<div class="mt-3 rounded-md border border-crit/30 bg-crit-wash p-2.5 text-xs">
+				<div class="font-medium text-crit">
+					{removalImpact.projects!.length} project(s) use this instrument
+				</div>
+				<ul class="mt-1 space-y-0.5 text-crit">
+					{#each removalImpact.projects! as project (project.path)}
+						<li>
+							<span class="font-mono">{project.name}</span>
+							— <span class="font-mono">{project.attributes.join(', ')}</span>
+						</li>
+					{/each}
+				</ul>
+				<div class="mt-1.5 text-crit">
+					A project finds its instruments by name when it runs, so these will stop at startup
+					until the instrument is added back under the same name, or they are regenerated.
+				</div>
 			</div>
-		</div>
-	</div>
-{/if}
+		{/if}
+		{#if !impactLoading && removalImpact && removalImpact.rules.length > 0}
+			<div class="mt-3 rounded-md border border-warn/30 bg-warn-wash p-2.5 text-xs">
+				<div class="font-medium text-warn">
+					{removalImpact.rules.length} permission rule(s) reference this instrument
+				</div>
+				<ul class="mt-1 space-y-1 text-warn">
+					{#each removalImpact.rules as rule (rule.id)}
+						<li>
+							<span class="font-mono">{rule.id}</span>
+							{#if rule.blocks_methods.length > 0}
+								— blocks <span class="font-mono">{rule.blocks_methods.join(', ')}</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+				<div class="mt-1.5 text-warn">
+					A rule whose instrument no longer exists fails closed: it denies every call it covers,
+					which may block instruments you did not remove. Edit these rules on
+					<a class="underline" href="/servers/permissions">Server &amp; Permissions</a> first.
+				</div>
+			</div>
+		{/if}
+	{/if}
+</ConfirmDialog>

@@ -1,70 +1,80 @@
+"""Plotters: draw a run while it is going, when it is started from a terminal.
+
+A project picks one with ``outputs.live_plot`` (``window`` or ``web``), and
+``outputs.plot`` names which of the procedure's ``plots:`` it opens on (empty:
+the first). A run the wizard launches is drawn on its Run page instead, so it
+gets no plotter.
+
+Every plotter is a *viewer of the lab database*. The run already writes each
+point and each step there as it happens, so a plotter only needs to know which
+run to show: it opens its viewer, in a process of its own, when the run
+starts. That keeps drawing out of the process driving the instruments — a slow
+redraw can never delay a measurement, and a closed window never stops one —
+and it means the window, the web page and the wizard's Run page all show the
+same rows, computed the same way (``plans/runner_plan.md`` §7).
+"""
+
 from __future__ import annotations
 
-"""
-plotter.py
-
-Abstract base class for plotters and a stand-in implementation.
-"""
-
-from typing import Any, TYPE_CHECKING
+import os
+import sys
 from abc import ABC, abstractmethod
+from pathlib import Path
 
-if TYPE_CHECKING:
-    from lab_wizard.lib.plotters.base import PlotterParams
+__all__ = ["GenericPlotter", "StandInPlotter", "display_available", "is_ssh_session"]
+
+
+def is_ssh_session() -> bool:
+    return any(os.environ.get(var) for var in ("SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"))
+
+
+def display_available() -> bool:
+    """Whether a window opened here would be seen by the person running this.
+
+    On Linux a display (X forwarding included) is enough; on macOS and Windows
+    a session over SSH has no screen of its own.
+    """
+    if sys.platform.startswith("linux"):
+        return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return not is_ssh_session()
 
 
 class GenericPlotter(ABC):
-    """Abstract base class for all plotters."""
+    """Base class for plotters: told when a run starts, ends, and returns."""
+
+    def __init__(self, plot: str = "") -> None:
+        # A name from the procedure's plots:, or "" for the first.
+        self.plot_name = plot
 
     @abstractmethod
-    def plot(self, data: dict[str, Any]) -> None:
-        """Render the provided data."""
-        ...
+    def run_started(self, database: Path, run_id: int) -> None:
+        """The run is recorded as ``run_id`` in ``database``: open a view of it."""
 
-    @abstractmethod
-    def save_plot(self, filename: str) -> None:
-        """Persist the current plot to a file."""
-        ...
+    def run_ended(self, status: str) -> None:
+        """The run ended with ``status``."""
 
-    @classmethod
-    @abstractmethod
-    def from_params(cls, params: "PlotterParams") -> "GenericPlotter":
-        """Construct a runtime plotter from its Params object."""
-        ...
+    def finish(self) -> None:
+        """Called once the run has returned, before the process exits.
 
-    @classmethod
-    def from_config(cls, exp: Any, *, key: str) -> "GenericPlotter":
-        """Look up a plotter Params on ``exp.plotters`` by name and construct it.
-
-        Uses ``params.create_inst()`` for polymorphic dispatch so callers can
-        say ``MplPlotter.from_config(...)`` (concrete class) or
-        ``GenericPlotter.from_config(...)`` (base class) and get the right type.
+        A viewer that lives in this process's lifetime (the web plot's server)
+        waits here until it is closed.
         """
-        params = exp.plotters[key]
-        return params.create_inst()
 
 
 class StandInPlotter(GenericPlotter):
-    """A no-op plotter. Stores last payload in memory; useful for tests."""
+    """Remembers what it was told. Useful for tests."""
 
-    ignore_in_cli = True
+    def __init__(self, plot: str = "") -> None:
+        super().__init__(plot)
+        self.started: tuple[Path, int] | None = None
+        self.ended: str | None = None
+        self.finished = False
 
-    def __init__(self) -> None:
-        self.plotted_count: int = 0
-        self.last_data: dict[str, Any] | None = None
-        self.last_saved_filename: str | None = None
-        print("Stand-in plotter initialized.")
+    def run_started(self, database: Path, run_id: int) -> None:
+        self.started = (database, run_id)
 
-    def plot(self, data: dict[str, Any]) -> None:
-        keys = list(data.keys())
-        print(f"Stand-in: Plotting data (no-op). Keys: {keys}")
-        self.last_data = data
-        self.plotted_count += 1
+    def run_ended(self, status: str) -> None:
+        self.ended = status
 
-    def save_plot(self, filename: str) -> None:
-        print(f"Stand-in: Saving plot to '{filename}' (no-op)")
-        self.last_saved_filename = filename
-
-    @classmethod
-    def from_params(cls, params: "PlotterParams") -> "StandInPlotter":
-        return cls()
+    def finish(self) -> None:
+        self.finished = True

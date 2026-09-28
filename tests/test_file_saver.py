@@ -8,7 +8,7 @@ produce identical files.
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,8 +20,11 @@ from lab_procedure import Point, RunStarted, Sequence, Status, Step, Sweep, With
 from lab_wizard.lib.data import PlotSpec, find
 from lab_wizard.lib.data.plot import default_plot
 from lab_wizard.lib.data.run_folder import export_run, folder_name
-from lab_wizard.lib.savers import FileSaver, FileSaverParams, SaverContext, StandInSaver
-from lab_wizard.lib.task_adapters.run import run_procedure
+from lab_wizard.lib.data.settings import DataSettings, FileSettings, save_data_settings
+from lab_wizard.lib.plotters import MplPlotter, WebPlotter
+from lab_wizard.lib.savers import FileSaver, SaverContext, StandInSaver
+from lab_wizard.lib.task_adapters.run import project_outputs, run_procedure
+from lab_wizard.lib.workspace import initialize_workspace
 
 DEFINITION: dict[str, Any] = {
     "name": "probe",
@@ -54,24 +57,25 @@ def tree() -> Step:
 
 @dataclass
 class Resources:
-    savers: list = field(default_factory=list)
-    plotters: list = field(default_factory=list)
     params: Any = None
 
 
-def _project(tmp_path: Path, device: str = "A7") -> Path:
+def _project(tmp_path: Path, device: str = "A7", outputs: str = "") -> Path:
     project_dir = tmp_path / "probe_1"
-    project_dir.mkdir()
+    project_dir.mkdir(parents=True)
     (project_dir / "probe_1.yaml").write_text(
-        f"project: {{measurement_type: probe}}\nrun: {{device: {device}, operator: andrew, metadata: {{cryostat: BF1}}}}\n",
+        f"project: {{measurement_type: probe}}\nrun: {{device: {device}, operator: andrew, metadata: {{cryostat: BF1}}}}\n"
+        + (f"outputs: {outputs}\n" if outputs else ""),
         encoding="utf-8",
     )
     return project_dir
 
 
-def _run(tmp_path: Path, saver: FileSaver, **kwargs: Any) -> Path:
+def _run(tmp_path: Path, saver: FileSaver | None, **kwargs: Any) -> Path:
+    """Run the probe in a project; ``saver`` replaces the ones its outputs: asks for."""
     project_dir = kwargs.pop("project_dir", None) or _project(tmp_path)
-    status = run_procedure(tree(), Resources(savers=[saver]), procedure="probe", definition=DEFINITION, project_dir=project_dir)
+    savers = None if saver is None else [saver]
+    status = run_procedure(tree(), Resources(), procedure="probe", definition=DEFINITION, project_dir=project_dir, savers=savers)
     assert status is Status.SUCCESS
     return project_dir
 
@@ -164,10 +168,45 @@ def test_a_template_using_a_device_property_reads_it_from_the_lab_database(tmp_p
     assert second.folder.path.name == "A7_2"  # never overwrites a run
 
 
-def test_a_relative_root_is_relative_to_the_project(tmp_path: Path):
-    saver = FileSaver(root="runs", path="{procedure}")
-    project_dir = _run(tmp_path, saver)
-    assert saver.folder.path == project_dir / "runs" / "probe"
+# --------------------------- a project's outputs ---------------------------
+
+
+def test_a_project_saves_files_by_default_laid_out_by_its_workspace(tmp_path: Path):
+    workspace, _ = initialize_workspace(tmp_path / "lab")
+    save_data_settings(workspace.config_dir, DataSettings(files=FileSettings(path="{device}/{procedure}")))
+    _run(tmp_path, None, project_dir=_project(workspace.projects_dir))
+
+    folder = workspace.data_dir / "files" / "A7" / "probe"
+    assert yaml.safe_load((folder / "run.yaml").read_text())["status"] == "success"
+    assert (folder / "plot.png").is_file()
+
+
+def test_a_relative_root_is_relative_to_the_workspace(tmp_path: Path):
+    workspace, _ = initialize_workspace(tmp_path / "lab")
+    files = FileSettings(root="runs", path="{procedure}", plot_png=False)
+    save_data_settings(workspace.config_dir, DataSettings(files=files))
+    _run(tmp_path, None, project_dir=_project(workspace.projects_dir))
+
+    folder = workspace.root / "runs" / "probe"
+    assert (folder / "points.csv").is_file()
+    assert not (folder / "plot.png").exists()
+
+
+def test_a_project_with_files_off_is_only_recorded_in_the_database(tmp_path: Path):
+    project_dir = _run(tmp_path, None, project_dir=_project(tmp_path, outputs="{files: false}"))
+    assert find(db=project_dir / "data" / "lab.db").table()["status"].to_list() == ["success"]
+    assert not (project_dir / "data" / "files").exists()
+
+
+def test_a_projects_live_plot_is_the_one_it_names(tmp_path: Path):
+    none = project_outputs(_project(tmp_path / "a", outputs="{files: false}"))
+    assert none == ([], [])
+
+    _savers, [window] = project_outputs(_project(tmp_path / "b", outputs="{live_plot: window, plot: Counts}"))
+    assert isinstance(window, MplPlotter) and window.plot_name == "Counts"
+
+    _savers, [web] = project_outputs(_project(tmp_path / "c", outputs="{live_plot: web}"))
+    assert isinstance(web, WebPlotter) and web.plot_name == ""
 
 
 def test_a_crash_mid_run_leaves_a_readable_folder(tmp_path: Path):
@@ -201,19 +240,12 @@ def test_a_saver_that_fails_does_not_fail_the_run(tmp_path: Path, caplog):
     assert find(db=project_dir / "data" / "lab.db").table()["status"].to_list() == ["success"]
 
 
-def test_the_file_saver_is_a_configurable_saver():
-    params = FileSaverParams(path="{device}/{date}", plot_png=False)
-    saver = params.create_inst()
-    assert isinstance(saver, FileSaver)
-    assert (saver.template, saver.plot_png) == ("{device}/{date}", False)
-
-
 # --------------------------- savers as sinks ---------------------------
 
 
 def test_a_saver_sees_every_run_message(tmp_path: Path):
     saver = StandInSaver()
-    run_procedure(tree(), Resources(savers=[saver]), procedure="probe")
+    run_procedure(tree(), Resources(), procedure="probe", savers=[saver])
     kinds = {type(m).__name__ for m in saver.messages}
     assert kinds == {"RunStarted", "StepBegan", "StepEnded", "Point", "RunEnded"}
     assert saver.run_started.procedure == "probe"
@@ -229,10 +261,13 @@ def test_the_default_plot_is_the_first_declared_one():
 
 
 def test_without_plots_the_default_is_the_first_recorded_column_against_the_innermost_sweep():
+    """One line per value of the sweep around it: nested sweeps never zigzag as one line."""
     definition = {"body": {"type": "sweep", "parameter": "outer", "values": [1], "body": {
         "type": "with_parameter", "parameter": "phase", "value": "x", "body": {
             "type": "sweep", "parameter": "inner", "values": [1], "body": {"type": "count"}}}}}
     spec = default_plot(definition, ["outer", "phase", "inner", "counts", "count_rate"])
-    assert (spec.x, spec.y) == ("inner", ["counts"])
+    assert (spec.x, spec.y, spec.series) == ("inner", ["counts"], "outer")
     assert default_plot(None, ["a", "b"]) == PlotSpec(x="a", y=["b"], series=None)
+    one_sweep = {"body": {"type": "sweep", "parameter": "bias", "values": [1], "body": {"type": "count"}}}
+    assert default_plot(one_sweep, ["bias", "counts"]).series is None
     assert default_plot(None, ["a"]) is None

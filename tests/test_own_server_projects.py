@@ -25,8 +25,7 @@ from ruamel.yaml import YAML
 
 from lab_wizard.lib.client.session import Session
 from lab_wizard.lib.procedures.storage import load_procedure, save_preset
-from lab_wizard.lib.savers.file_saver import FileSaverParams
-from lab_wizard.lib.utilities.flat_resource_io import save_resource
+from lab_wizard.lib.data.settings import DataSettings, FileSettings, save_data_settings
 from lab_wizard.wizard.backend.main import app
 from lab_wizard.wizard.backend.server_control import set_server_bind, start_server, stop_server
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
@@ -58,7 +57,8 @@ def served(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rig) -> Iterator[tup
         definition.params_model(),
     )
 
-    save_resource(ws.config_dir, "saver", "files", FileSaverParams(path="{device}/{procedure}"))
+    # How this lab lays out its run folders; every project with files on uses it.
+    save_data_settings(ws.config_dir, DataSettings(files=FileSettings(path="{device}/{procedure}")))
 
     set_server_bind(ws.config_dir, f"tcp://127.0.0.1:{_free_port()}")
     start_server(ws.config_dir, detached=False)
@@ -104,10 +104,7 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
             "measurement_name": "mcr_curve",
             "kind": "procedure",
             "params_preset": "quick",
-            "selected_resources": [
-                *selections,
-                {"variable_name": "savers", "resource_kind": "saver", "type": "file_saver", "key": "files"},
-            ],
+            "selected_resources": selections,
         },
     )
     assert created.status_code == 200, created.text
@@ -116,6 +113,7 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
     assert "instruments" not in payload["resources"]
     assert set(payload["resources"]["instrument_sources"].values()) == {own["name"]}
+    assert payload["outputs"]["files"] is True  # the default
 
     # Name the device under test and where it sat, as a person does before a run.
     payload["run"] = {"device": "A7", "operator": "andrew", "notes": None, "metadata": {"cryostat": "BlueFors1"}}
@@ -169,8 +167,8 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
     } <= facets
     db.close()
 
-    # The project also asked for files: the same run as a folder, under the
-    # workspace's data/files, laid out by the saver's template.
+    # Files are on by default: the same run as a folder, under the workspace's
+    # data/files, laid out by the workspace's template.
     folder = ws.data_dir / "files" / "A7" / "mcr_curve"
     assert yaml.safe_load((folder / "run.yaml").read_text())["status"] == "success"
     assert len((folder / "points.csv").read_text().splitlines()) == 1 + len(rows)

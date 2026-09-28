@@ -4,13 +4,13 @@ import { fetchWithConfig } from '$lib/api';
 
 /** One thing a measurement can be created from. See api_measurement_choices.
  *
- * `measurement` is hand-written Python under lib/measurements; `procedure` is a
- * definition — this workspace's own, or built into lab_wizard. To the person
- * creating a measurement both are roles to bind and params to set.
+ * `procedure` is a definition — this workspace's own, or built into lab_wizard;
+ * `custom` is a Python file in this workspace's measurements folder. To the
+ * person creating a measurement both are roles to bind and params to set.
  */
 export type MeasurementChoice = {
 	name: string;
-	kind: 'measurement' | 'procedure';
+	kind: 'procedure' | 'custom';
 	origin: 'builtin' | 'workspace' | null;
 	description: string;
 	roles?: Record<string, string>;

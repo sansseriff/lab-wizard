@@ -30,13 +30,11 @@ from lab_wizard.lib.instruments.general.parent_child import (
 )
 
 
-Kind = Literal["instrument", "saver", "plotter", "step"]
+Kind = Literal["instrument", "step"]
 SCHEMA_VERSION = 4
 
 _KIND_DIRS = {
     "instrument": "instruments",
-    "saver": "savers",
-    "plotter": "plotters",
     # Procedure step schemas (``*StepParams``), discovered the same way so a new
     # step is picked up by dropping a file in — see lab_wizard.lib.procedures.
     "step": "procedures/steps",
@@ -271,14 +269,8 @@ def get_source_map(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
 def _runtime_base(kind: Kind) -> type:
     if kind == "instrument":
         return BaseModel
-    if kind == "step":
-        from lab_wizard.lib.procedures.spec import StepParams
-        return StepParams
-    if kind == "saver":
-        from lab_wizard.lib.savers.base import SaverParams
-        return SaverParams
-    from lab_wizard.lib.plotters.base import PlotterParams
-    return PlotterParams
+    from lab_wizard.lib.procedures.spec import StepParams
+    return StepParams
 
 
 def _validate_params_class(type_str: str, cls: type, kind: Kind) -> None:
@@ -368,18 +360,9 @@ def _validate_resource_class(params_cls: type, resource_cls: type | None, kind: 
             f"{params_cls.__module__}.{params_cls.__name__}.resource_class() "
             "did not return a class"
         )
-    if kind == "instrument":
-        from lab_wizard.lib.instruments.general.parent_child import Instrument
+    from lab_wizard.lib.instruments.general.parent_child import Instrument
 
-        expected = Instrument
-    elif kind == "saver":
-        from lab_wizard.lib.savers.saver import GenericSaver
-
-        expected = GenericSaver
-    else:
-        from lab_wizard.lib.plotters.plotter import GenericPlotter
-
-        expected = GenericPlotter
+    expected = Instrument
     if not issubclass(resource_cls, expected):
         raise ResourceAuditError(
             f"{params_cls.__module__}.{params_cls.__name__}.resource_class() returned "
@@ -537,25 +520,8 @@ def list_available_types(kind: Kind = "instrument") -> list[str]:
     return sorted(get_source_map(kind))
 
 
-# Readable kind-specific entry points used by configuration and API layers.
-def load_saver_params_class(type_str: str, verbose: bool = False) -> type:
-    return load_params_class(type_str, "saver", verbose)
-
-
-def load_plotter_params_class(type_str: str, verbose: bool = False) -> type:
-    return load_params_class(type_str, "plotter", verbose)
-
-
 def get_instrument_metadata() -> dict[str, dict[str, Any]]:
     return get_metadata("instrument")
-
-
-def get_saver_metadata() -> dict[str, dict[str, Any]]:
-    return get_metadata("saver")
-
-
-def get_plotter_metadata() -> dict[str, dict[str, Any]]:
-    return get_metadata("plotter")
 
 
 def get_type_to_module_map(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:

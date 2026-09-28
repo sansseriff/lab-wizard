@@ -15,7 +15,7 @@ from collections.abc import Iterator, Mapping
 from datetime import datetime
 from typing import Any
 
-__all__ = ["facet_value", "run_facets", "write_run_facets"]
+__all__ = ["facet_value", "is_quantity", "metadata_units", "run_facets", "write_run_facets"]
 
 Facet = tuple[str, str, float | None]
 
@@ -39,8 +39,29 @@ def facet_value(value: Any) -> tuple[str, float | None] | None:
     return None
 
 
+def is_quantity(data: Any) -> bool:
+    """Whether ``data`` is a value with a unit, ``{value: 1.2, unit: K}``: one leaf, not a group."""
+    return isinstance(data, Mapping) and set(data) == {"value", "unit"} and isinstance(data["unit"], str)
+
+
+def metadata_units(data: Any, prefix: str = "run") -> dict[str, str]:
+    """``{"run.temperature": "K"}``: the unit of every quantity in a run's metadata."""
+    if is_quantity(data):
+        return {prefix: data["unit"]} if data["unit"] else {}
+    out: dict[str, str] = {}
+    if isinstance(data, Mapping):
+        for key, value in data.items():
+            out.update(metadata_units(value, f"{prefix}.{key}"))
+    return out
+
+
 def _leaves(prefix: str, data: Any) -> Iterator[Facet]:
-    """One facet per scalar leaf of nested dicts; lists are skipped."""
+    """One facet per scalar leaf of nested dicts; lists are skipped.
+
+    A quantity (``{value, unit}``) is one leaf: its value is what is filtered by.
+    """
+    if is_quantity(data):
+        data = data["value"]
     if isinstance(data, Mapping):
         for key, value in data.items():
             yield from _leaves(f"{prefix}.{key}", value)

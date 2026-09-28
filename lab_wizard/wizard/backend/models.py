@@ -1,29 +1,20 @@
 from dataclasses import dataclass, field
 from pydantic import BaseModel
 from pathlib import Path
-from typing import Any, Literal
-
-ResourceKind = Literal["instrument", "saver", "plotter"]
-
-
-class MeasurementInfo(BaseModel):
-    """Information about available measurements"""
-
-    name: str
-    description: str
-    measurement_dir: Path
+from typing import Any
 
 
 class Env(BaseModel):
 
     base_dir: Path = Path(__file__).parent.parent.parent / "lib"
     instruments_dir: Path = base_dir / "instruments"
-    measurements_dir: Path = base_dir / "measurements"
     workspace_dir: Path | None = None
     config_dir: Path | None = None
     projects_dir: Path | None = None
     logs_dir: Path | None = None
     data_dir: Path | None = None
+    # The workspace's custom measurements (lib/custom_measurements.py).
+    measurements_dir: Path | None = None
 
     @classmethod
     def from_current_workspace(cls) -> "Env":
@@ -36,6 +27,7 @@ class Env(BaseModel):
             projects_dir=workspace.projects_dir,
             logs_dir=workspace.logs_dir,
             data_dir=workspace.data_dir,
+            measurements_dir=workspace.measurements_dir,
         )
 
 
@@ -50,14 +42,6 @@ class MatchingReq(BaseModel):
     qualname: str
     file_path: Path
     friendly_name: str
-
-
-class ConfiguredResource(BaseModel):
-    """A configured saver or plotter instance from the global registry."""
-
-    type: str
-    key: str
-    fields: dict[str, Any]
 
 
 class RemoteMatch(BaseModel):
@@ -77,20 +61,16 @@ class RemoteMatch(BaseModel):
 
 @dataclass
 class FilledReq:
-    """In-memory requirement, populated by extraction and matching.
+    """In-memory requirement: one instrument role, populated by extraction and matching.
 
-    For instrument resources, ``base_type`` is the Python class object and
+    ``base_type`` is the behavior class the role needs, and
     ``matching_instruments`` is filled by class-hierarchy discovery.
-    For saver/plotter resources, ``matching_resources`` is filled from the
-    configured registry.
     """
 
     variable_name: str
     base_type: Any
-    resource_kind: ResourceKind = "instrument"
     is_list: bool = False
     matching_instruments: list[MatchingReq] = field(default_factory=list)
-    matching_resources: list[ConfiguredResource] = field(default_factory=list)
 
 
 class OutputReq(BaseModel):
@@ -98,8 +78,6 @@ class OutputReq(BaseModel):
 
     variable_name: str
     base_type: str
-    resource_kind: ResourceKind = "instrument"
     is_list: bool = False
     matching_instruments: list[MatchingReq] = []
-    matching_resources: list[ConfiguredResource] = []
     matching_remote: list[RemoteMatch] = []

@@ -48,8 +48,7 @@ R = TypeVar("R")
 def bound_instruments(resources: object) -> list[InstrumentBehavior]:
     """Instruments bound to a resources object's fields, in field order.
 
-    Fields holding a behavior, or a list of them, count; savers, plotters and
-    params do not. One instrument bound to two roles appears once. A remote
+    Fields holding a behavior, or a list of them, count; params do not. One instrument bound to two roles appears once. A remote
     proxy is a behavior too, so baseline and safe state reach the server's
     instrument. A ``RemoteOpaque`` is not — nothing is known about what it
     does, so nothing is done to it.

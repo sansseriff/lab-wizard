@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { ask } from '$lib/confirm.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import Callout from '$lib/components/Callout.svelte';
 	import Panel from '$lib/components/Panel.svelte';
@@ -76,8 +77,9 @@
 		for (const part of parts.slice(0, -1)) node = node[part] ??= {};
 		node[parts[parts.length - 1]] = value;
 	}
-	function open(preset: string | null) {
-		if (dirty && !confirm('Discard the unsaved preset draft?')) return;
+	async function open(preset: string | null) {
+		if (dirty && !(await ask({ title: 'Discard the unsaved preset draft?', confirmLabel: 'Discard', tone: 'danger' })))
+			return;
 		message = null;
 		selected = preset;
 		editing = true;
@@ -123,7 +125,13 @@
 		}
 	}
 	async function remove(preset: string) {
-		if (!confirm(`Delete preset ${preset}? Existing measurements keep their values.`)) return;
+		const yes = await ask({
+			title: `Delete preset ${preset}?`,
+			description: 'Existing measurements keep their values.',
+			confirmLabel: 'Delete',
+			tone: 'danger'
+		});
+		if (!yes) return;
 		busy = true;
 		try {
 			await fetchWithConfig(`${url}/${encodeURIComponent(preset)}`, 'DELETE');
@@ -259,7 +267,7 @@
 							disabled={busy}>Delete preset</button
 						>{/if}
 				</div>
-			{:else}<p class="text-sm text-muted">
+			{:else}<p class="text-body text-muted">
 					Select a preset to edit its values, or create one from the defaults.
 				</p>{/if}
 		</aside>

@@ -29,9 +29,14 @@ from typing import Any, Literal
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
 
-from lab_wizard.lib.data.expressions import ExpressionError, Params, compile_expression, derive
+from lab_wizard.lib.data.expressions import (
+    ExpressionError,
+    Params,
+    compile_expression,
+    derive,
+)
 
-__all__ = ["PlotSpec", "default_plot", "evaluate_plot", "load_plot", "notebook_source", "to_series"]
+__all__ = ["PlotSpec", "default_plot", "evaluate_plot", "line_shape", "load_plot", "notebook_source", "run_plots", "to_series"]
 
 _PER_RUN = {"min", "max", "first", "last"}
 
@@ -95,24 +100,38 @@ def _where(spec: PlotSpec, columns: list[str], params: Params | None) -> pl.Expr
 _BINDING_STEPS = {"sweep": "parameter", "repeat": "parameter", "with_parameter": "parameter"}
 
 
-def _bindings(step: Any, depth: int = 0) -> list[tuple[int, str, str]]:
-    """``(depth, step type, name)`` for every parameter a definition's steps bind."""
-    out: list[tuple[int, str, str]] = []
+def _bindings(step: Any, depth: int = 0, enclosing: tuple[str, ...] = ()) -> list[tuple[int, str, str, tuple[str, ...]]]:
+    """``(depth, step type, name, enclosing sweeps)`` for every parameter a definition's steps bind.
+
+    ``enclosing`` names the sweeps the binding step runs inside, outermost first.
+    """
+    out: list[tuple[int, str, str, tuple[str, ...]]] = []
     if isinstance(step, dict):
-        name_field = _BINDING_STEPS.get(step.get("type", ""))
+        kind = step.get("type", "")
+        name_field = _BINDING_STEPS.get(kind)
+        inner = enclosing
         if name_field and isinstance(step.get(name_field), str):
-            out.append((depth, step["type"], step[name_field]))
+            out.append((depth, kind, step[name_field], enclosing))
+            if kind == "sweep":
+                inner = (*enclosing, step[name_field])
         for value in step.values():
-            out.extend(_bindings(value, depth + 1))
+            out.extend(_bindings(value, depth + 1, inner))
     elif isinstance(step, list):
         for item in step:
-            out.extend(_bindings(item, depth))
+            out.extend(_bindings(item, depth, enclosing))
     return out
 
 
 def default_plot(definition: dict[str, Any] | None, columns: list[str]) -> PlotSpec | None:
-    """What a run is drawn as when nobody chose: the procedure's first plot, or else
-    its first recorded column against its innermost sweep.
+    """What a run is drawn as when nobody chose.
+
+    The procedure's first plot, if it declares one: with two sweeps, which one
+    goes across and which becomes one line each is a choice the rows cannot
+    make (``plans/semantic_data_plan.md`` §9), so a procedure says it.
+
+    Otherwise a guess: the first recorded column against the innermost sweep,
+    one line for each value of the sweep around it, so nested sweeps never
+    draw as one line zigzagging through every point.
 
     ``definition`` is a run's recorded definition (``None`` for a run without
     one); ``columns`` are the run's columns, in order.
@@ -121,14 +140,31 @@ def default_plot(definition: dict[str, Any] | None, columns: list[str]) -> PlotS
     if plots:
         return PlotSpec.model_validate(plots[0])
     bound = _bindings((definition or {}).get("body"))
-    sweeps = [(depth, name) for depth, kind, name in bound if kind == "sweep" and name in columns]
-    bound_names = {name for _depth, _kind, name in bound}
+    sweeps = [(depth, name, around) for depth, kind, name, around in bound if kind == "sweep" and name in columns]
+    bound_names = {name for _depth, _kind, name, _around in bound}
     recorded = [c for c in columns if c not in bound_names]
-    x = max(sweeps)[1] if sweeps else (columns[0] if columns else None)
+    if sweeps:
+        _depth, x, around = max(sweeps, key=lambda s: s[0])
+        series = next((name for name in reversed(around) if name in columns), None)
+    else:
+        x, series = (columns[0] if columns else None), None
     y = next((c for c in recorded if c != x), None)
     if x is None or y is None:
         return None
-    return PlotSpec(x=x, y=[y], series=None)
+    return PlotSpec(x=x, y=[y], series=series)
+
+
+def run_plots(definition: dict[str, Any] | None, columns: list[str]) -> list[PlotSpec]:
+    """What a run is drawn as: its procedure's ``plots:``, or else the default plot.
+
+    The Data page, a live view and a plot window all start from this list, so
+    they draw the same plots of the same run.
+    """
+    plots = [PlotSpec.model_validate(p) for p in (definition or {}).get("plots") or []]
+    if plots:
+        return plots
+    fallback = default_plot(definition, columns)
+    return [fallback] if fallback is not None else []
 
 
 def _labels(spec: PlotSpec, run_labels: dict[int, str] | None) -> pl.Expr:
@@ -232,6 +268,18 @@ def to_series(rows: pl.DataFrame) -> list[dict[str, Any]]:
             "run_id": part["run_id"].to_list(), "seq": part["seq"].to_list(),
         })
     return out
+
+
+def line_shape(rows: pl.DataFrame) -> dict[str, Any]:
+    """How ``evaluate_plot``'s rows fall into lines, so the page can say what it drew.
+
+    ``lines`` is how many lines are drawn, and ``points`` the fewest and most
+    points on one: "6 scans of count_rate against bias_voltage, 20 points each".
+    """
+    if rows.is_empty():
+        return {"lines": 0, "points": [0, 0]}
+    sizes = rows.group_by(["series", "axis", "y_name"]).len()["len"]
+    return {"lines": sizes.len(), "points": [int(sizes.min() or 0), int(sizes.max() or 0)]}
 
 
 def load_plot(

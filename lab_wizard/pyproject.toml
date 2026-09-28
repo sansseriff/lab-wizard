@@ -52,8 +52,6 @@ packages = [
     "lab_wizard.lib.instruments.sim900.modules",
     "lab_wizard.lib.instruments.yokogawaAQ2212",
     "lab_wizard.lib.instruments.yokogawaAQ2212.modules",
-    "lab_wizard.lib.measurements",
-    "lab_wizard.lib.measurements.general",
     "lab_wizard.lib.plotters",
     "lab_wizard.lib.procedures",
     "lab_wizard.lib.procedures.steps",
@@ -63,6 +61,7 @@ packages = [
     "lab_wizard.lib.utilities",
     "lab_wizard.wizard",
     "lab_wizard.wizard.backend",
+    "lab_wizard.wizard.backend.routes",
 ]
 
 [tool.setuptools.package-data]
@@ -70,6 +69,7 @@ lab_wizard = [
     "wizard/backend/static/*",
     "wizard/backend/static/**/*",
     "lib/procedures/library/*.yml",
+    "lib/examples/measurements/*.py",
 ]
 
 [project.scripts]

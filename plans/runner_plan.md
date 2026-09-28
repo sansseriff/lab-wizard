@@ -1,13 +1,37 @@
 # Running measurements, and plotting them live
 
-> **Status: planned, nothing built.** `/api/projects` lists generated projects
-> and the Projects page renders them, but nothing runs one: there is no launch
-> endpoint and no run view. Both plotters
-> ([`mpl_plotter.py`](../lab_wizard/lib/plotters/mpl_plotter.py),
-> [`bokeh_plotter.py`](../lab_wizard/lib/plotters/bokeh_plotter.py)) are
-> placeholders that store the last payload and print. Nothing outside the tests
-> consumes the procedure's status bus, so there is no live progress view either.
+> **Status: first working version built.** Cases A–D all work. What changed
+> from the design below, and why, is in **As built** at the end of this block;
+> read it before §3–§7, which describe the design as first proposed.
 >
+> **As built** (see `docs/wizard/measurements.md`, "The Run page"):
+>
+> - **The lab database is the bus, not a websocket the run process serves.**
+>   The recorder already commits every point and every step start/end as it
+>   happens (WAL mode, so readers never block it). Every live view is a
+>   *reader* of the database: no `EventPublisher` sink, no replay buffer, no
+>   wire format of the run's own (R1–R2 dropped). The run process needs no
+>   address and serves nothing, and a wizard restarted mid-run just reads on.
+> - **`backend/live.py` `LiveFeed`** turns "what changed in run N" into
+>   messages (`run`, `status`, `steps` by id, `plots` recomputed with the Data
+>   page's own `data_api.plot`, `end`); **`routes/live.py`** pushes them over
+>   `/api/live/runs/{id}`. R3 holds: one page (`routes/live`, and
+>   `lib/live/LiveRunView.svelte` inside the Run page), two hosts (the wizard,
+>   and `backend/live_server.py` for a web plotter). R4 holds.
+> - **Plotters are viewers in processes of their own** (`lib/plotters/`):
+>   `MplPlotter` starts `lib/plotters/window.py`; `WebPlotter` starts
+>   `live_server` with a pywebview window locally, or prints the link and the
+>   `ssh -L` command over SSH and keeps serving until Enter. So the procedure
+>   never moves thread and no GUI shares its process (R7 superseded); a closed
+>   window never stops a run.
+> - **Case A**: `backend/launcher.py` starts the project's setup file detached
+>   (R5), with `LAB_WIZARD_LAUNCH_FILE` set: the run writes its id there once
+>   recorded, and opens no plot of its own (R6). Stop is SIGINT to its process
+>   group. The Run page (`routes/measurements/run`) edits `run:`, params and
+>   `outputs:` (`backend/project_config.py`) and shows the live view.
+> - Not built: `step_progress` (a Wait's fraction) in the live view; the plot
+>   window draws one plot, not tabs.
+
 > **This is a startup document**, written for an engineer or agent picking this
 > up cold. The original brief is kept word for word in §11.
 >
@@ -22,13 +46,14 @@
 | Case | How the run starts | What the user sees |
 |---|---|---|
 | **A** | **Run** button in the wizard | A Run page in the wizard: progress, live plots, log, Stop, and a link to the run in the Data viewer afterwards |
-| **B** | `python <project>_setup.py` at the lab computer, with a **matplotlib** plotter configured | A native plot window updating live; no browser |
-| **C** | Same, with the **web** plotter configured, **locally** | A window (pywebview) with the live web plot |
+| **B** | `python <project>_setup.py` at the lab computer, with `outputs.live_plot: window` | A native plot window updating live; no browser |
+| **C** | Same, with `outputs.live_plot: web`, **locally** | A window (pywebview) with the live web plot |
 | **D** | Same, with the web plotter, **over SSH** | A printed link, and the `ssh -L` command that makes it reachable |
 
 In every case the plot drawn is the procedure's **first `plots:` entry**
 (semantic_data_plan §9), and the other entries are available as tabs where
-there is a page to put tabs on. A plotter can name a different plot.
+there is a page to put tabs on. A project can name a different plot
+(`outputs.plot`).
 
 ---
 
@@ -41,7 +66,7 @@ there is a page to put tabs on. A plotter can name a different plot.
 | R3 | **One live page, two hosts.** A single frontend route renders progress and plots from an event stream. The wizard serves it in case A (relaying the child's stream); the run process serves it in cases C and D. | The live view is written once. |
 | R4 | **Plot series are computed in Python** by the shared plot evaluator and sent ready to draw. The browser and matplotlib only draw. | Derived columns and `where` filters behave identically live, afterwards in the viewer, and in the notebook. |
 | R5 | **Wizard-launched runs are detached subprocesses**, found again after a wizard restart, and stopped with SIGINT. | A wizard crash must not kill a run mid-sweep; SIGINT already reaches the safe-state guards. |
-| R6 | **In case A, a configured web plotter does nothing extra.** The Run page already shows the plots. | No duplicate windows. |
+| R6 | **In case A, a project's live plot does nothing extra.** The Run page already shows the plots. | No duplicate windows. |
 | R7 | **A window that needs the main thread runs there, and the procedure moves to a worker thread.** | macOS requires GUI windows (matplotlib, pywebview) on the main thread. |
 
 ---
@@ -75,7 +100,7 @@ database recorder, which handles `RunStarted` first
 ## 4. The `EventPublisher` sink
 
 - Enabled when the environment has `LAB_WIZARD_EVENTS=127.0.0.1:<port>` (case A)
-  or a web plotter is configured outside the wizard (cases C, D).
+  or a project with `outputs.live_plot: web` runs outside the wizard (cases C, D).
 - Runs a small Starlette/uvicorn app on a background thread (FastAPI and uvicorn
   are already dependencies), with one websocket route, `/events`.
 - **Replays on connect.** It keeps every message of the run, so a page opened
@@ -145,13 +170,14 @@ Never SIGKILL first.
 
 ## 7. The plotters
 
-Both plotters are sinks. Each takes a `plot` param naming a `plots:` entry
-(empty means the first) and draws the evaluator's series. Neither touches raw
+Both plotters are sinks, built by `run_procedure` from the project's
+`outputs:` block: `live_plot` picks one, and `plot` names a `plots:` entry
+(empty means the first). Each draws the evaluator's series. Neither touches raw
 points.
 
 ### `MplPlotter`: a native window (case B)
 
-- If the plotter is configured and a display is available, the generated
+- If the project asks for it and a display is available, the generated
   entry point runs the procedure on a worker thread (`ProcedureRunner.start`
   exists) and keeps the main thread for matplotlib: a loop that drains the
   plotter's queue, redraws, and calls `plt.pause`.
@@ -168,8 +194,7 @@ points.
   - **locally**, opens the live page in a pywebview window (already a
     dependency; the wizard itself uses it in `backend/main.py`). That window
     takes the main thread, so the procedure moves to a worker thread exactly as
-    for matplotlib. If a matplotlib window is also configured, only one can have
-    the main thread, so the web plot opens in the default browser instead.
+    for matplotlib.
   - **over SSH** (`SSH_CONNECTION` is set): prints the URL and the tunnel
     command, for example
     `ssh -L 8765:127.0.0.1:8765 lab-computer`, then
@@ -177,7 +202,7 @@ points.
 - After the run ends, the process keeps serving until the window is closed, or
   until Enter or Ctrl-C in the terminal case (§9, Q2).
 
-The Bokeh `url` param (a Bokeh server address) goes away: there is no Bokeh
+The Bokeh `url` param (a Bokeh server address) is gone: there is no Bokeh
 server in this design.
 
 ---

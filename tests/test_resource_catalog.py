@@ -8,7 +8,7 @@ from lab_wizard.lib.utilities import resource_catalog
 
 
 def _reset_process_state() -> None:
-    for kind in ("instrument", "saver", "plotter"):
+    for kind in ("instrument", "step"):
         resource_catalog._source_maps[kind] = None
         resource_catalog._source_signatures[kind] = None
         resource_catalog._source_fingerprints[kind] = None
@@ -50,23 +50,23 @@ class NewDriverParams(
 
 
 def test_source_index_notices_a_file_added_after_first_lookup(tmp_path, monkeypatch):
-    root = tmp_path / "savers"
+    root = tmp_path / "steps"
     root.mkdir()
     monkeypatch.setenv("LAB_WIZARD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(resource_catalog, "_root_dir", lambda kind: root)
     _reset_process_state()
-    assert resource_catalog.get_source_map("saver") == {}
+    assert resource_catalog.get_source_map("step") == {}
 
     (root / "later.py").write_text(
         'from typing import Literal\nclass LaterParams:\n    type: Literal["later"] = "later"\n',
         encoding="utf-8",
     )
 
-    assert "later" in resource_catalog.get_source_map("saver")
+    assert "later" in resource_catalog.get_source_map("step")
 
 
 def test_source_index_reparses_only_changed_files(tmp_path, monkeypatch):
-    root = tmp_path / "plotters"
+    root = tmp_path / "steps"
     root.mkdir()
     for name in ("first", "second"):
         (root / f"{name}.py").write_text(
@@ -77,7 +77,7 @@ def test_source_index_reparses_only_changed_files(tmp_path, monkeypatch):
     monkeypatch.setenv("LAB_WIZARD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(resource_catalog, "_root_dir", lambda kind: root)
     _reset_process_state()
-    resource_catalog.get_source_map("plotter")
+    resource_catalog.get_source_map("step")
 
     original_scan = resource_catalog._scan_file
     scanned: list[str] = []
@@ -90,7 +90,7 @@ def test_source_index_reparses_only_changed_files(tmp_path, monkeypatch):
     second = root / "second.py"
     second.write_text(second.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
-    assert set(resource_catalog.get_source_map("plotter")) == {"first", "second"}
+    assert set(resource_catalog.get_source_map("step")) == {"first", "second"}
     assert scanned == ["second.py"]
 
 
@@ -119,20 +119,20 @@ def test_changed_already_loaded_module_requires_process_restart(tmp_path, monkey
 def test_warm_metadata_cache_does_not_import_resource_modules(tmp_path, monkeypatch):
     monkeypatch.setenv("LAB_WIZARD_CACHE_DIR", str(tmp_path))
     _reset_process_state()
-    expected = resource_catalog.get_metadata("saver")
-    resource_catalog._metadata["saver"] = None
-    resource_catalog._metadata_signatures["saver"] = None
-    resource_catalog._source_maps["saver"] = None
-    resource_catalog._source_signatures["saver"] = None
-    resource_catalog._source_fingerprints["saver"] = None
-    resource_catalog._loaded_params["saver"] = {}
+    expected = resource_catalog.get_metadata("instrument")
+    resource_catalog._metadata["instrument"] = None
+    resource_catalog._metadata_signatures["instrument"] = None
+    resource_catalog._source_maps["instrument"] = None
+    resource_catalog._source_signatures["instrument"] = None
+    resource_catalog._source_fingerprints["instrument"] = None
+    resource_catalog._loaded_params["instrument"] = {}
 
     def unexpected_import(_name: str):
         raise AssertionError("warm metadata lookup imported a resource module")
 
     monkeypatch.setattr(resource_catalog.importlib, "import_module", unexpected_import)
 
-    assert resource_catalog.get_metadata("saver") == expected
+    assert resource_catalog.get_metadata("instrument") == expected
 
 
 def test_runtime_catalog_uses_python_hierarchy_and_inherited_channel_class(

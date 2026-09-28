@@ -101,6 +101,29 @@ measured voltage is a normal plot. A plot can also keep only some rows (`phase`
 equals `signal`, or each run's own lowest trigger level), draw one line per run
 or per value of a column, and use log axes.
 
+**Two sweeps, one plot.** Take `pcr_trigger_levels`, which sweeps the bias
+and, at every bias, the counter's trigger level. Each (bias, trigger level)
+pair is one row holding both values and its count, whichever sweep is outside,
+so the rows say nothing about how to look at them. Bias across with a line per
+trigger level (a PCR curve per trigger) and trigger level across with a line
+per bias (a discriminator curve per bias) are both right; they answer different
+questions. The procedure's plot chooses one:
+
+```yaml
+plots:
+  - name: PCR at each trigger level
+    x: bias_voltage
+    y: [count_rate]
+    series: trigger_mV        # one line per trigger level
+```
+
+A procedure with no plot gets a guess: its first recorded column against its
+innermost sweep, one line for each value of the sweep around that. For
+`pcr_trigger_levels` that guess would be the discriminator curves, which is
+why it declares its plot. Loop order does change one thing: a step that moves
+to the outer loop runs once per outer value, so what it records lands on a row
+of its own rather than beside every count.
+
 **Derived columns** sit on the same tab: expressions computed from the recorded
 columns whenever a run is read, never stored. Fixing an expression fixes every
 past run. See [Plots and derived columns](../concepts/procedures.md#plots-and-derived-columns).

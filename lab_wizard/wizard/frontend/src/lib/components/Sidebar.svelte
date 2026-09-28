@@ -18,8 +18,8 @@
 	import TreeStructureIcon from 'phosphor-svelte/lib/TreeStructure';
 	import CircuitryIcon from 'phosphor-svelte/lib/Circuitry';
 	import HardDrivesIcon from 'phosphor-svelte/lib/HardDrives';
-	import ChartLineIcon from 'phosphor-svelte/lib/ChartLine';
 	import DatabaseIcon from 'phosphor-svelte/lib/Database';
+	import GearSixIcon from 'phosphor-svelte/lib/GearSix';
 	import CaretRightIcon from 'phosphor-svelte/lib/CaretRight';
 
 	type SubItem = { href: string; label: string };
@@ -41,7 +41,8 @@
 			match: '/measurements',
 			children: [
 				{ href: '/measurements/new', label: 'Create' },
-				{ href: '/measurements/projects', label: 'Projects' }
+				{ href: '/measurements/projects', label: 'Projects' },
+				{ href: '/measurements/run', label: 'Run' }
 			]
 		},
 		// Beside Measurements: a procedure is what a measurement is created from.
@@ -68,17 +69,8 @@
 				{ href: '/servers/remote', label: 'Remote servers' }
 			]
 		},
-		{ href: '/plotters', label: 'Plotters', icon: ChartLineIcon, match: '/plotters' },
-		{
-			href: '/data/savers',
-			label: 'Data',
-			icon: DatabaseIcon,
-			match: '/data',
-			children: [
-				{ href: '/data/savers', label: 'Savers' },
-				{ href: '/data/database', label: 'Database' }
-			]
-		}
+		{ href: '/data', label: 'Data', icon: DatabaseIcon, match: '/data' },
+		{ href: '/settings', label: 'Settings', icon: GearSixIcon, match: '/settings' }
 	];
 
 	// `trailingSlash: 'always'` means the router reports `/instruments/`, while
@@ -112,7 +104,7 @@
 		</a>
 
 		<div class="flex flex-col gap-0.5 rounded border border-line bg-surface-2 px-2.5 py-1.5">
-			<span class="text-[10px] uppercase tracking-[0.09em] text-muted">Workspace</span>
+			<span class="text-2xs uppercase tracking-[0.09em] text-muted">Workspace</span>
 			<span class="mono truncate text-xs font-semibold" title={workstation.workspaceDir}>
 				{workstation.workspaceName}
 			</span>
@@ -126,7 +118,7 @@
 			<a
 				href={section.href}
 				aria-current={active ? 'page' : undefined}
-				class="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-[13.5px] no-underline transition-colors
+				class="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-body no-underline transition-colors
 					{active
 					? 'bg-accent-wash font-semibold text-accent-strong'
 					: 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
@@ -162,7 +154,7 @@
 	</nav>
 
 	<div class="border-t border-line px-4 py-3">
-		<p class="text-[11px] leading-relaxed text-muted">
+		<p class="text-fine leading-relaxed text-muted">
 			{#if workstation.error}
 				Wizard backend unreachable.
 			{:else if workstation.phase === 'running'}

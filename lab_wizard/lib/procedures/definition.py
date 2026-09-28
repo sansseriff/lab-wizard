@@ -45,7 +45,7 @@ from lab_wizard.lib.data.expressions import (
     expression_params,
 )
 from lab_wizard.lib.data.plot import PlotSpec
-from lab_wizard.lib.measurements.general.sweep_params import SweepParams
+from lab_wizard.lib.procedures.sweep_params import SweepParams
 from lab_wizard.lib.procedures.spec import (
     AnyStep,
     ParamRef,
@@ -64,7 +64,7 @@ _PY_TYPES: dict[str, type] = {"float": float, "int": int, "bool": bool, "str": s
 _SWEEP_ADAPTER: TypeAdapter[Any] = TypeAdapter(SweepParams)
 
 # Names a role or param cannot take, because the generated code already uses them.
-_RESERVED_ROLES = {"params", "resources", "savers", "plotters", "project"}
+_RESERVED_ROLES = {"params", "resources", "project"}
 
 
 def _check_name(name: str, what: str) -> None:
@@ -247,17 +247,34 @@ class ProcedureDefinition(BaseModel):
             decl = tree.find(values.param) if isinstance(values, ParamRef) else None
             for name in step.swept_parameters():
                 out.setdefault(name, {"unit": decl.unit if decl is not None else None})
+            for name in self._sweep_also(step, tree):
+                out.setdefault(name, {"unit": None})
             for name, unit in step.emitted_units().items():
                 out.setdefault(name, {"unit": unit})
         return out
 
     def emitted_fields(self) -> list[str]:
         """Every column this procedure's rows can carry, in tree order."""
+        tree = self.param_tree
         seen: dict[str, None] = {}
         for step in self.body.walk():
-            for name in (*step.swept_parameters(), *step.emitted_fields()):
+            for name in (*step.swept_parameters(), *self._sweep_also(step, tree), *step.emitted_fields()):
                 seen.setdefault(name, None)
         return list(seen)
+
+    @staticmethod
+    def _sweep_also(step: Any, tree: ParamTree) -> list[str]:
+        """What a sweep records beside its value, going by its param's default mode.
+
+        A waypoints sweep records ``<parameter>_leg``. A run whose params pick
+        another mode simply records no leg; a plot of it then draws one line.
+        """
+        values = getattr(step, "values", None)
+        decl = tree.find(values.param) if isinstance(values, ParamRef) else None
+        if decl is None or decl.type != "sweep":
+            return []
+        also = _SWEEP_ADAPTER.validate_python(decl.default).also(step.parameter)
+        return list(also)
 
     # ------------------------- checking -------------------------
 

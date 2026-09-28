@@ -6,9 +6,10 @@ workbench. This reads `projects/` back so a generated project stays a thing you
 can find.
 
 Everything here is derived from files that generation already writes; no new
-state is recorded. The project YAML carries `project.measurement_type` and a
-`resources:` block naming the savers, plotters and instruments the project was
-bound to, which is enough to describe a project without opening it.
+state is recorded. The project YAML carries `project.measurement_type`, a
+`resources:` block naming the instruments the project was bound to, and an
+`outputs:` block saying what its runs produce, which is enough to describe a
+project without opening it.
 
 A directory that is not a wizard project, or whose YAML is unreadable, is
 reported with what could be determined rather than skipped: a project the user
@@ -23,6 +24,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 import yaml
+
+from lab_wizard.lib.utilities.model_tree import OutputsConfig
 
 
 logger = logging.getLogger("lab_wizard.wizard.backend.projects")
@@ -51,22 +54,25 @@ def _read_project_yaml(project_dir: Path) -> Optional[dict[str, Any]]:
     return loaded if isinstance(loaded, dict) else None
 
 
-def _resource_names(resources: Any) -> dict[str, list[str]]:
-    """Keys of each resource kind the project bound, for a one-line summary."""
-    out: dict[str, list[str]] = {"savers": [], "plotters": [], "instruments": []}
+def _instrument_names(resources: Any) -> list[str]:
+    """The instruments the project is bound to, for a one-line summary."""
     if not isinstance(resources, dict):
-        return out
-    for kind in out:
-        block = resources.get(kind)
-        if isinstance(block, dict):
-            out[kind] = sorted(str(k) for k in block)
+        return []
     # A current project copies no instrument params; it names its instruments
     # in instrument_sources, and those names are what it is bound to.
-    if not out["instruments"]:
-        sources = resources.get("instrument_sources")
-        if isinstance(sources, dict):
-            out["instruments"] = sorted(str(k) for k in sources)
-    return out
+    for key in ("instruments", "instrument_sources"):
+        block = resources.get(key)
+        if isinstance(block, dict) and block:
+            return sorted(str(k) for k in block)
+    return []
+
+
+def _outputs(data: Any) -> dict[str, Any]:
+    """The project's outputs: block, with defaults for what it leaves out."""
+    try:
+        return OutputsConfig.model_validate(data or {}).model_dump(mode="json")
+    except ValueError:
+        return OutputsConfig().model_dump(mode="json")
 
 
 def list_projects(projects_dir: str | Path) -> list[dict[str, Any]]:
@@ -106,7 +112,8 @@ def list_projects(projects_dir: str | Path) -> list[dict[str, Any]]:
                 "measurement": project_block.get("measurement_type"),
                 "schema_version": project_block.get("schema_version"),
                 "created": created_iso,
-                "resources": _resource_names((data or {}).get("resources")),
+                "instruments": _instrument_names((data or {}).get("resources")),
+                "outputs": _outputs((data or {}).get("outputs")),
                 "setup_file": setup_files[0] if setup_files else None,
                 # A directory with no readable project YAML is still listed, but
                 # the UI needs to know not to promise anything about it.

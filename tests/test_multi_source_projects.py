@@ -33,13 +33,17 @@ from lab_wizard.lib.utilities.config_io import (
     save_instruments_to_config,
 )
 from lab_wizard.wizard.backend import instrument_sources as sources_mod
+from lab_wizard.wizard.backend.custom_resource_generation import (
+    CustomResourceSelection,
+    GenerateCustomResourceRequest,
+    generate_custom_resource_project,
+)
 from lab_wizard.wizard.backend.instrument_sources import ensure_source_registered
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     SelectedNodeRef,
     SelectedResource,
-    generate_measurement_project,
 )
 from lab_wizard.wizard.backend.remote_servers import load_remote_servers
 
@@ -373,19 +377,49 @@ def test_the_embedded_style_still_carries_its_own_copy(workspace):
     assert "instrument_sources" not in data["resources"]
 
 
-def test_the_yaml_expanded_style_is_retired_with_a_reason(workspace):
+def test_the_embedded_style_refuses_an_instrument_through_a_server(
+    workspace, fake_source
+):
+    """Embedding would open, locally, hardware a server owns. Refused outright —
+    not quietly generated in another style — and before the server is written
+    into the address book."""
     config_dir, projects_dir, instruments = workspace
-    with pytest.raises(ValueError, match="has been retired"):
+    with pytest.raises(ValueError, match="cannot use an instrument through a server"):
         generate_procedure_project(
             config_dir=config_dir,
             projects_dir=projects_dir,
             req=GenerateProjectRequest(
                 measurement_name="iv_curve",
                 kind="procedure",
-                selected_resources=[_local_sense(instruments)],
-                generation_style="pedagogical_yaml_expanded",
+                selected_resources=[_routed_source(), _local_sense(instruments)],
+                generation_style="pedagogical_embedded",
             ),
         )
+    assert load_remote_servers(config_dir) == []
+    assert not any(projects_dir.iterdir())
+
+
+def test_an_embedded_custom_resource_refuses_an_instrument_through_a_server(
+    workspace, fake_source
+):
+    config_dir, projects_dir, _instruments = workspace
+    with pytest.raises(ValueError, match="voltage_source is chosen from one"):
+        generate_custom_resource_project(
+            config_dir=config_dir,
+            projects_dir=projects_dir,
+            req=GenerateCustomResourceRequest(
+                selections=[
+                    CustomResourceSelection(
+                        variable_name="voltage_source",
+                        source=_REMOTE_SOURCE,
+                        attribute="master_vsource",
+                    )
+                ],
+                generation_style="pedagogical_embedded",
+            ),
+        )
+    assert load_remote_servers(config_dir) == []
+    assert not any(projects_dir.iterdir())
 
 
 # --------------------------- address book ---------------------------

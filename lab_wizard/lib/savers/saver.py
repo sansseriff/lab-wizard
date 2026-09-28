@@ -1,8 +1,10 @@
 """Savers: optional extra outputs of a run, beside the lab database.
 
 Every run of a project is recorded in the lab database whether or not it has a
-saver (``lab_wizard.lib.data``). A saver is something more a project asks for,
-such as a folder of CSV files for people who work with files.
+saver (``lab_wizard.lib.data``). A saver is something more a run writes, such
+as a folder of CSV files for people who work with files. A project asks for the
+file saver with ``outputs.files``; any other saver is handed to
+:func:`~lab_wizard.lib.task_adapters.run.run_procedure` directly.
 
 A saver is a sink on the run's message stream, like the database recorder. It
 sees ``RunStarted``, every ``Point``, every step's start and end, and
@@ -23,7 +25,6 @@ from lab_procedure import MessageBus, Point, RunEnded, RunStarted, StepBegan, St
 
 if TYPE_CHECKING:
     from lab_wizard.lib.data.recorder import DatabaseRecorder
-    from lab_wizard.lib.savers.base import SaverParams
 
 __all__ = ["GenericSaver", "SaverContext", "StandInSaver"]
 
@@ -91,26 +92,9 @@ class GenericSaver(ABC):
     def handle(self, message: Any) -> None:
         """Handle one ``RunStarted``, ``Point``, ``StepBegan``, ``StepEnded`` or ``RunEnded``."""
 
-    @classmethod
-    @abstractmethod
-    def from_params(cls, params: "SaverParams") -> "GenericSaver":
-        """Construct a runtime saver from its Params object."""
-
-    @classmethod
-    def from_config(cls, exp: Any, *, key: str) -> "GenericSaver":
-        """Look up a saver Params on ``exp.savers`` by name and construct it.
-
-        Uses ``params.create_inst()`` for polymorphic dispatch, so
-        ``GenericSaver.from_config(...)`` gets the configured type.
-        """
-        params = exp.savers[key]
-        return params.create_inst()
-
 
 class StandInSaver(GenericSaver):
     """Keeps every message in memory. Useful for tests."""
-
-    ignore_in_cli = True
 
     def __init__(self) -> None:
         self.messages: list[Any] = []
@@ -129,7 +113,3 @@ class StandInSaver(GenericSaver):
     @property
     def points(self) -> list[Point]:
         return [m for m in self.messages if isinstance(m, Point)]
-
-    @classmethod
-    def from_params(cls, params: "SaverParams") -> "StandInSaver":
-        return cls()

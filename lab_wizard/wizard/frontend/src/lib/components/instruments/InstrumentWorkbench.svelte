@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { beforeNavigate } from '$app/navigation';
+	import { ask, guardNavigation } from '$lib/confirm.svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
 	import '$lib/procedures/composer.css';
 	import '$lib/instruments/editor.css';
 	import Panel from '$lib/components/Panel.svelte';
@@ -48,7 +49,7 @@
 	let revision = $state(0);
 	let refreshError = $state('');
 	async function refresh() {
-		if (!canLeave()) return;
+		if (!(await canLeave())) return;
 		dirty = false;
 		revision++;
 		busy = true;
@@ -63,24 +64,22 @@
 	}
 	const selected = $derived(nodeAt(tree, selectedPath));
 	const visible = $derived(tree.filter((node) => matchesTree(node, query)));
-	function canLeave() {
-		return !busy && (!dirty || confirm('Discard unsaved instrument parameters?'));
+	async function canLeave() {
+		return !busy && (!dirty || (await ask({ title: 'Discard unsaved instrument parameters?', confirmLabel: 'Discard', tone: 'danger' })));
 	}
-	function select(path: NodePath) {
-		if (pathKey(path) === pathKey(selectedPath) || !canLeave()) return;
+	async function select(path: NodePath) {
+		if (pathKey(path) === pathKey(selectedPath) || !(await canLeave())) return;
 		dirty = false;
 		selectedPath = path;
 	}
-	function action(run: () => void) {
-		if (canLeave()) {
+	async function action(run: () => void) {
+		if (await canLeave()) {
 			dirty = false;
 			revision++;
 			run();
 		}
 	}
-	beforeNavigate((navigation) => {
-		if ((dirty || busy) && !canLeave()) navigation.cancel();
-	});
+	guardNavigation(() => dirty, { title: 'Discard unsaved instrument parameters?', confirmLabel: 'Discard', tone: 'danger' });
 </script>
 
 <div class="instrument-editor">
@@ -90,13 +89,7 @@
 			description="Select an instrument to edit its settings. Add modules directly under their parent."
 			flush
 		>
-			{#snippet actions()}<button
-					class="lw-btn"
-					title="Reload saved instruments"
-					aria-label="Reload saved instruments"
-					disabled={busy}
-					onclick={refresh}><ArrowClockwise size={14} /></button
-				><button class="lw-btn lw-btn-primary" disabled={busy} onclick={() => action(onadd)}
+			{#snippet actions()}<IconButton label="Reload saved instruments" disabled={busy} onclick={refresh}><ArrowClockwise size={14} /></IconButton><button class="lw-btn lw-btn-primary" disabled={busy} onclick={() => action(onadd)}
 					><Plus size={14} /> Add instrument</button
 				>{/snippet}
 			<div class="border-b border-line p-3">
@@ -118,6 +111,8 @@
 						{query}
 						onselect={select}
 						onadd={(parent, path) => action(() => onaddparent(parent, path))}
+						onreset={(target, path) => action(() => onreset(target, path))}
+						onremove={(target, path) => action(() => onremove(target, path))}
 						{transportBadge}
 						disabled={busy}
 					/>
@@ -160,11 +155,11 @@
 					>
 				</div>
 			{:else}
-				<p class="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-muted">
+				<p class="mb-2 text-2xs font-semibold uppercase tracking-[0.09em] text-muted">
 					Instrument settings
 				</p>
 				<h3>Select an instrument</h3>
-				<p class="mt-2 text-[13px] leading-relaxed text-muted">
+				<p class="mt-2 text-body leading-relaxed text-muted">
 					Inspect its connection, edit parameters and channel settings, or view its saved YAML.
 				</p>
 				<p class="mt-4 text-xs text-muted">

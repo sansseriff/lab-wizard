@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import IconButton from '$lib/components/IconButton.svelte';
 	import { fetchWithConfig } from '$lib/api';
 	import { workstation } from '$lib/stores/workstation.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Callout from '$lib/components/Callout.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import TrashIcon from 'phosphor-svelte/lib/TrashIcon';
 	import PlusIcon from 'phosphor-svelte/lib/PlusIcon';
 	import type {
@@ -255,26 +257,20 @@
 				{#each rules as rule, idx (rule.id + idx)}
 					<li class="flex items-start justify-between gap-3 border-b border-line px-3.5 py-3 last:border-b-0">
 						<div class="min-w-0 space-y-1">
-							<div class="mono text-[13px] font-semibold">{rule.id}</div>
+							<div class="mono text-body font-semibold">{rule.id}</div>
 							{#if rule.message}
-								<p class="text-[12px] text-muted">“{rule.message}”</p>
+								<p class="text-xs text-muted">“{rule.message}”</p>
 							{/if}
-							<div class="text-[12px]">
+							<div class="text-xs">
 								<span class="mr-1.5 font-semibold uppercase tracking-wide text-warn">when</span>
 								<span class="mono">{summarizeCondition(rule.when)}</span>
 							</div>
-							<div class="text-[12px]">
+							<div class="text-xs">
 								<span class="mr-1.5 font-semibold uppercase tracking-wide text-crit">deny</span>
 								<span class="mono">{rule.deny.map(summarizeDeny).join(' ; ')}</span>
 							</div>
 						</div>
-						<button
-							class="lw-btn lw-btn-sm shrink-0"
-							title="Delete this rule"
-							onclick={() => deleteRule(idx)}
-						>
-							<TrashIcon size={13} />
-						</button>
+						<IconButton small class="shrink-0" label="Delete this rule" onclick={() => deleteRule(idx)}><TrashIcon size={13} /></IconButton>
 					</li>
 				{/each}
 			</ul>
@@ -310,7 +306,7 @@
 		<!-- When -->
 		<div class="mt-4 space-y-2 border-t border-line pt-3">
 			<div class="flex items-center justify-between gap-3">
-				<h3 class="text-[11px] font-semibold uppercase tracking-[0.09em] text-warn">
+				<h3 class="text-fine font-semibold uppercase tracking-[0.09em] text-warn">
 					When — all conditions hold
 				</h3>
 				<button class="lw-btn lw-btn-sm" onclick={addCondition}>
@@ -327,38 +323,38 @@
 			{#each draftConds as cond, idx (idx)}
 				{@const inst = selectedCondInst(cond)}
 				<div class="grid items-center gap-2 sm:grid-cols-[1.4fr_1fr_auto_1fr_auto]">
-					<select bind:value={cond.instKey} class="lw-select">
-						<option value="" disabled>Instrument…</option>
-						{#each instruments.filter((i) => i.state_keys.length > 0) as i (i.path)}
-							<option value={i.attribute ?? i.path}>{instLabel(i)}</option>
-						{/each}
-					</select>
-					<select bind:value={cond.key} disabled={!inst} class="lw-select">
-						<option value="" disabled>State key…</option>
-						{#each inst?.state_keys ?? [] as k (k)}
-							<option value={k}>{k}</option>
-						{/each}
-					</select>
-					<select bind:value={cond.op} class="lw-select w-auto">
-						<option value="equals">=</option>
-						<option value="not_equals">≠</option>
-						<option value="greater_than">&gt;</option>
-						<option value="less_than">&lt;</option>
-						<option value="in">in</option>
-					</select>
+					<Select
+						bind:value={cond.instKey}
+						placeholder="Instrument…"
+						options={instruments
+							.filter((i) => i.state_keys.length > 0)
+							.map((i) => ({ value: i.attribute ?? i.path, label: instLabel(i) }))}
+					/>
+					<Select
+						bind:value={cond.key}
+						disabled={!inst}
+						placeholder="State key…"
+						options={(inst?.state_keys ?? []).map((k) => ({ value: k, label: k }))}
+					/>
+					<Select
+						value={cond.op}
+						onValueChange={(v) => (cond.op = v as Operator)}
+						class="w-auto"
+						options={[
+							{ value: 'equals', label: '=' },
+							{ value: 'not_equals', label: '≠' },
+							{ value: 'greater_than', label: '>' },
+							{ value: 'less_than', label: '<' },
+							{ value: 'in', label: 'in' }
+						]}
+					/>
 					<input
 						type="text"
 						bind:value={cond.value}
 						placeholder={cond.op === 'in' ? 'a, b, c' : 'value'}
 						class="lw-input mono"
 					/>
-					<button
-						class="lw-btn lw-btn-sm"
-						title="Remove condition"
-						onclick={() => removeCondition(idx)}
-					>
-						<TrashIcon size={13} />
-					</button>
+					<IconButton label="Remove condition" onclick={() => removeCondition(idx)}><TrashIcon size={13} /></IconButton>
 				</div>
 			{/each}
 		</div>
@@ -366,7 +362,7 @@
 		<!-- Deny -->
 		<div class="mt-4 space-y-2 border-t border-line pt-3">
 			<div class="flex items-center justify-between gap-3">
-				<h3 class="text-[11px] font-semibold uppercase tracking-[0.09em] text-crit">
+				<h3 class="text-fine font-semibold uppercase tracking-[0.09em] text-crit">
 					Deny — these methods
 				</h3>
 				<button class="lw-btn lw-btn-sm" onclick={addDeny}>
@@ -382,25 +378,21 @@
 				{@const inst = selectedDenyInst(deny)}
 				<div class="space-y-2 rounded border border-line bg-surface-2 p-2.5">
 					<div class="flex items-center gap-2">
-						<select bind:value={deny.instKey} class="lw-select flex-1">
-							<option value="" disabled>Instrument…</option>
-							{#each instruments.filter((i) => i.methods.length > 0) as i (i.path)}
-								<option value={i.attribute ?? i.path}>{instLabel(i)}</option>
-							{/each}
-						</select>
-						<button
-							class="lw-btn lw-btn-sm shrink-0"
-							title="Remove deny clause"
-							onclick={() => removeDeny(idx)}
-						>
-							<TrashIcon size={13} />
-						</button>
+						<Select
+							bind:value={deny.instKey}
+							class="flex-1"
+							placeholder="Instrument…"
+							options={instruments
+								.filter((i) => i.methods.length > 0)
+								.map((i) => ({ value: i.attribute ?? i.path, label: instLabel(i) }))}
+						/>
+						<IconButton class="shrink-0" label="Remove deny clause" onclick={() => removeDeny(idx)}><TrashIcon size={13} /></IconButton>
 					</div>
 					{#if inst}
 						<div class="flex flex-wrap gap-1.5">
 							{#each inst.methods as m (m)}
 								<label
-									class="flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-[11.5px] transition-colors {deny.methods.has(
+									class="flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-fine transition-colors {deny.methods.has(
 										m
 									)
 										? 'border-crit/40 bg-crit-wash text-crit'
@@ -416,7 +408,7 @@
 							{/each}
 						</div>
 					{:else}
-						<p class="text-[11px] text-muted">Pick an instrument to see the methods it exposes.</p>
+						<p class="text-fine text-muted">Pick an instrument to see the methods it exposes.</p>
 					{/if}
 				</div>
 			{/each}
@@ -424,7 +416,7 @@
 
 		<div class="mt-4 flex items-center gap-3 border-t border-line pt-3">
 			<button class="lw-btn" onclick={addRule}>Add rule</button>
-			<span class="text-[11px] text-muted">
+			<span class="text-fine text-muted">
 				Added rules are held here until you press <strong>Save permissions</strong>.
 			</span>
 		</div>

@@ -1,121 +1,49 @@
-from fastapi import FastAPI, Request
-from contextlib import asynccontextmanager
+"""The wizard's process: the FastAPI app, its startup, and the window it opens.
+
+The HTTP API itself lives in ``routes/``, one router per section of the GUI;
+what every route needs to find its workspace is in ``deps.py``.
+"""
+
 import asyncio
-import multiprocessing
 import logging
+import multiprocessing
 import os
+import signal
 import sys
-from fastapi.staticfiles import StaticFiles
-from fastapi import Depends
 import time
 import urllib.request
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 
 try:
     import webview  # type: ignore
 except Exception:  # ImportError or runtime issues shouldn't block headless mode
     webview = None  # type: ignore
+import argparse
 import tempfile
 from multiprocessing.connection import Connection
-from fastapi import HTTPException
-import argparse
+from pathlib import Path
 from typing import Any
-from uvicorn import Config, Server
 from uuid import uuid4
-from lab_wizard.wizard.backend.models import (
-    Env,
-    OutputReq,
-    ConfiguredResource,
-    RemoteMatch,
+
+from uvicorn import Config, Server
+
+from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
+from lab_wizard.wizard.backend.location import WEB_DIR
+from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
+from lab_wizard.wizard.backend.models import Env
+from lab_wizard.wizard.backend.server_control import (
+    ensure_server,
+    stop_managed_children,
 )
 from lab_wizard.wizard.backend.utils_runtime import (
-    has_gui_context,
-    green,
     get_ipv4_addresses,
+    green,
+    has_gui_context,
     is_ssh_session,
 )
-
-
-from lab_wizard.wizard.backend.get_measurements import (
-    get_measurements,
-    reqs_from_measurement,
-    discover_matching_instruments,
-)
-from lab_wizard.lib.utilities.config_io import (
-    get_configured_tree,
-    add_instrument_chain,
-    reinitialize_instrument,
-    remove_instrument,
-    load_instruments,
-)
-from lab_wizard.lib.utilities.flat_resource_io import (
-    add_resource as _flat_add_resource,
-    reset_resource as _flat_reset_resource,
-    remove_resource as _flat_remove_resource,
-    update_resource_fields as _flat_update_resource_fields,
-    get_configured_resources_tree,
-)
-from lab_wizard.lib.utilities.resource_catalog import (
-    get_instrument_metadata,
-    get_saver_metadata,
-    get_plotter_metadata,
-)
-from lab_wizard.wizard.backend.project_generation import (
-    GenerateProjectRequest,
-    generate_measurement_project,
-)
-from lab_wizard.wizard.backend.custom_resource_generation import (
-    GenerateCustomResourceRequest,
-    generate_custom_resource_project,
-)
-from lab_wizard.wizard.backend.permissions_api import (
-    attributes_under,
-    get_permissions_model,
-    rules_referencing,
-    save_permissions,
-)
-from lab_wizard.wizard.backend.remote_servers import (
-    load_remote_servers,
-    add_remote_server,
-    remove_remote_server,
-    test_connection as test_remote_connection,
-    list_remote_attributes,
-)
-from lab_wizard.wizard.backend.server_control import (
-    disable_hosting,
-    enable_hosting,
-    ensure_server,
-    server_status,
-    start_server,
-    stop_server,
-    restart_server,
-    stop_managed_children,
-    set_server_bind,
-    suggest_free_bind,
-)
-from pydantic import BaseModel as _PermBM, Field as _PermField
-from pathlib import Path
-from lab_wizard.wizard.backend.hardware_access import (
-    apply_tree_edit,
-    hardware_owner,
-    run_discovery,
-)
-from lab_wizard.wizard.backend.instrument_sources import list_instrument_sources
-from lab_wizard.wizard.backend.remote_tree import (
-    remote_discover,
-    remote_events,
-    remote_tree,
-    remote_tree_edit,
-)
-from lab_wizard.wizard.backend.projects import list_projects, projects_referencing
-from lab_wizard.wizard.backend.transport_status import (
-    conflicts_for_selection,
-    duplicate_transport_check,
-    transport_overview,
-)
-from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
-
-
-from lab_wizard.wizard.backend.location import WEB_DIR
 
 FRAMELESS = False
 ICON_PATH = Path(WEB_DIR) / "icon.png"
@@ -170,16 +98,6 @@ async def lifespan(app: FastAPI):
         logger.exception("Unhandled shutdown error: %s", e)
 
 
-def get_env(request: Request) -> Env:
-    """Dependency to provide process-wide Env stored on app.state."""
-    env = getattr(request.app.state, "env", None)
-    if env is None:
-        # Fallback: create once if not present (e.g., during tests)
-        env = Env.from_current_workspace()
-        request.app.state.env = env
-    return env
-
-
 # Pass the lifespan manager to the FastAPI app
 app = FastAPI(lifespan=lifespan)
 
@@ -211,17 +129,50 @@ async def request_logging_middleware(request: Request, call_next):  # type: igno
     return response
 
 
+# ---- stopping cleanly ----
+#
+# The terminal sends Ctrl-C (SIGINT) to every process in the foreground group:
+# the launcher, the server child and the window child alike. The launcher
+# stops the other two in order; the server also shuts itself down gracefully
+# on hearing it, and the window ignores it and waits to be closed.
+
+_STOP_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP")
+
+
+class _StopRequested(Exception):
+    """A signal asked the wizard to stop."""
+
+
+def _raise_stop(signum: int, _frame: Any) -> None:
+    raise _StopRequested(signal.Signals(signum).name)
+
+
+def _set_signals(names: tuple[str, ...], handler: Any) -> None:
+    for name in names:
+        sig = getattr(signal, name, None)  # SIGHUP does not exist on Windows
+        if sig is not None:
+            signal.signal(sig, handler)
+
+
 class UvicornServer(multiprocessing.Process):
     def __init__(self, config: Config):
         super().__init__()
         self.server = Server(config=config)
         self.config = config
 
-    def stop(self):
-        self.terminate()
+    def stop(self, timeout: float = 15.0):
+        """SIGTERM is uvicorn's graceful path: in-flight requests finish and the
+        lifespan shutdown (stopping managed children) runs. Killed only if it
+        will not go."""
+        if self.is_alive():
+            self.terminate()
+            self.join(timeout)
+        if self.is_alive():
+            logger.warning("Wizard server did not stop within %.0fs; killing it", timeout)
+            self.kill()
+            self.join()
 
     def run(self):
-        # print("running server")
         self.server.run()
 
 
@@ -245,1290 +196,11 @@ def health(request: Request):
     }
 
 
-# --- Placeholder API routes for frontend pages ---
-@app.get("/api/get-measurements")
-def get_measurements_meta(env: Env = Depends(get_env), verbose: bool = False):
-    res = get_measurements(env)
-    if verbose:
-        logger.info("Measurements metadata requested: %s", list(res.keys()))
-    return res
+from lab_wizard.wizard.backend.routes import ROUTERS  # noqa: E402
 
+for _router in ROUTERS:
+    app.include_router(_router)
 
-@app.get("/api/measurement-choices")
-def api_measurement_choices(env: Env = Depends(get_env)):
-    """Everything a measurement can be created from, in one list.
-
-    Hand-written measurements under ``lib/measurements`` and procedures —
-    this workspace's own, and the ones built into lab_wizard — are offered
-    side by side, because to the person creating a measurement they are the
-    same kind of thing: roles to bind, params to set.
-    """
-    from lab_wizard.lib.procedures.storage import list_presets, list_procedures, load_procedure, procedure_origin
-
-    config_dir = _config_dir(env)
-    choices: list[dict] = []
-    for name, info in sorted(get_measurements(env).items()):
-        choices.append(
-            {
-                "name": name,
-                "kind": "measurement",
-                "origin": "builtin",
-                "description": info.description,
-                "presets": list_presets(config_dir, name),
-            }
-        )
-    for name in list_procedures(config_dir):
-        try:
-            definition = load_procedure(config_dir, name)
-        except Exception as e:  # noqa: BLE001 - a broken definition is listed, not hidden
-            choices.append({"name": name, "kind": "procedure", "origin": procedure_origin(config_dir, name),
-                            "description": "", "error": str(e), "presets": []})
-            continue
-        choices.append(
-            {
-                "name": name,
-                "kind": "procedure",
-                "origin": procedure_origin(config_dir, name),
-                "description": definition.description,
-                "roles": {role: decl.behavior for role, decl in definition.roles.items()},
-                "records": definition.emitted_fields(),
-                "presets": list_presets(config_dir, name),
-            }
-        )
-    return {"choices": choices}
-
-
-# --------------------------- Procedures section ---------------------------
-
-
-class _DefinitionBody(_PermBM):
-    definition: dict[str, Any]
-
-
-class _YamlBody(_PermBM):
-    yaml: str
-
-
-class _PresetBody(_PermBM):
-    values: dict[str, Any]
-
-
-@app.get("/api/procedures")
-def api_procedures(env: Env = Depends(get_env)):
-    """Every procedure — built in and this workspace's — with whether it checks."""
-    from lab_wizard.wizard.backend.procedures_api import procedure_summaries
-
-    return {"procedures": procedure_summaries(_config_dir(env))}
-
-
-@app.get("/api/procedures/catalog")
-def api_procedure_catalog(env: Env = Depends(get_env)):
-    """Step types, behaviors, and which of this workspace's instruments fill each."""
-    from lab_wizard.wizard.backend.procedures_api import composer_catalog
-
-    return composer_catalog(_config_dir(env))
-
-
-@app.post("/api/procedures/check")
-def api_procedure_check(body: _DefinitionBody):
-    """Problems with a definition being edited, each with its path, and its Python."""
-    from lab_wizard.wizard.backend.procedures_api import check_definition
-
-    return check_definition(body.definition)
-
-
-@app.post("/api/procedures/to-yaml")
-def api_procedure_to_yaml(body: _DefinitionBody):
-    from lab_wizard.wizard.backend.procedures_api import definition_to_yaml
-
-    return {"yaml": definition_to_yaml(body.definition)}
-
-
-@app.post("/api/procedures/from-yaml")
-def api_procedure_from_yaml(body: _YamlBody):
-    from lab_wizard.wizard.backend.procedures_api import definition_from_yaml
-
-    try:
-        return {"definition": definition_from_yaml(body.yaml)}
-    except Exception as e:  # noqa: BLE001 - any YAML error is the user's to fix
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/procedures/{name}")
-def api_procedure_detail(name: str, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend.procedures_api import procedure_detail
-
-    try:
-        return procedure_detail(_config_dir(env), name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"No procedure named {name!r}")
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-
-@app.put("/api/procedures/{name}")
-def api_procedure_save(name: str, body: _DefinitionBody, env: Env = Depends(get_env)):
-    """Save to this workspace. A built-in's name saves a workspace override of it."""
-    from lab_wizard.lib.procedures.spec import ProcedureError
-    from lab_wizard.wizard.backend.procedures_api import save_workspace_procedure
-
-    if body.definition.get("name") != name:
-        raise HTTPException(
-            status_code=400,
-            detail=f"The definition is named {body.definition.get('name')!r}, not {name!r}",
-        )
-    try:
-        return save_workspace_procedure(_config_dir(env), body.definition)
-    except ProcedureError as e:
-        raise HTTPException(status_code=422, detail="; ".join(e.problems))
-
-
-@app.delete("/api/procedures/{name}")
-def api_procedure_delete(name: str, env: Env = Depends(get_env)):
-    """Delete this workspace's copy. Deleting an override brings the built-in back."""
-    from lab_wizard.wizard.backend.procedures_api import delete_workspace_procedure
-
-    try:
-        return delete_workspace_procedure(_config_dir(env), name)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"This workspace has no procedure named {name!r}")
-
-
-@app.get("/api/procedures/{name}/presets")
-def api_procedure_presets(name: str, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend.procedures_api import procedure_presets
-
-    try:
-        return procedure_presets(_config_dir(env), name)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@app.put("/api/procedures/{name}/presets/{preset}")
-def api_procedure_preset_save(name: str, preset: str, body: _PresetBody, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend.procedures_api import save_procedure_preset
-
-    try:
-        return save_procedure_preset(_config_dir(env), name, preset, body.values)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-
-
-@app.delete("/api/procedures/{name}/presets/{preset}")
-def api_procedure_preset_delete(name: str, preset: str, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend.procedures_api import delete_procedure_preset
-
-    if not delete_procedure_preset(_config_dir(env), name, preset):
-        raise HTTPException(status_code=404, detail=f"No preset {preset!r} for {name!r}")
-    return {"deleted": preset}
-
-
-class _SavePlotBody(_PermBM):
-    plot: dict[str, Any]
-    # The plot to replace; by default, the one with the saved plot's own name.
-    replace: str | None = None
-
-
-@app.post("/api/procedures/{name}/plots")
-def api_procedure_save_plot(name: str, body: _SavePlotBody, env: Env = Depends(get_env)):
-    """Save a plot built on the Data page into its procedure."""
-    from lab_wizard.wizard.backend import data_api
-
-    try:
-        return data_api.save_plot_to_procedure(_config_dir(env), name, body.plot, replace=body.replace)
-    except data_api.DataRequestError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-# --------------------------- data: the lab database ---------------------------
-
-
-class _SpecBody(_PermBM):
-    spec: dict[str, Any]
-
-
-class _DeviceBody(_PermBM):
-    properties: dict[str, Any] = _PermField(default_factory=dict)
-    notes: str | None = None
-
-
-def _database(env: Env) -> Path:
-    from lab_wizard.lib.data.schema import DATABASE_NAME
-
-    if env.data_dir is None:
-        raise RuntimeError("Workspace data directory was not resolved")
-    return env.data_dir / DATABASE_NAME
-
-
-def _data(call, *args: Any, **kwargs: Any) -> Any:
-    """Run a ``data_api`` call, turning what it raises into HTTP errors."""
-    from lab_wizard.wizard.backend.data_api import DataRequestError
-
-    try:
-        return call(*args, **kwargs)
-    except DataRequestError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="No runs have been recorded in this workspace yet")
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e.args[0]) if e.args else "Not found")
-
-
-@app.get("/api/data/facets")
-def api_data_facets(filters: str | None = None, env: Env = Depends(get_env)):
-    """Every filter, with how many runs each value leaves under ``filters`` (JSON)."""
-    from lab_wizard.wizard.backend import data_api
-
-    return _data(lambda: data_api.facet_list(_database(env), data_api.parse_filters(filters)))
-
-
-@app.get("/api/data/runs")
-def api_data_runs(filters: str | None = None, page: int = 1, page_size: int = 100, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend import data_api
-
-    return _data(
-        lambda: data_api.run_list(_database(env), data_api.parse_filters(filters), page=page, page_size=page_size)
-    )
-
-
-@app.get("/api/data/runs/{run_id}")
-def api_data_run(run_id: int, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend import data_api
-
-    return _data(data_api.run_detail, _database(env), _config_dir(env), run_id)
-
-
-@app.get("/api/data/runs/{run_id}/steps")
-def api_data_run_steps(run_id: int, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend import data_api
-
-    return {"steps": _data(data_api.run_steps, _database(env), run_id)}
-
-
-@app.get("/api/data/runs/{run_id}/points/{seq}")
-def api_data_point(run_id: int, seq: int, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend import data_api
-
-    return _data(data_api.point_detail, _database(env), run_id, seq)
-
-
-@app.post("/api/data/runs/{run_id}/export")
-def api_data_export(run_id: int, env: Env = Depends(get_env)):
-    """The run as a zipped folder of CSV and YAML, as the file saver writes it."""
-    from fastapi.responses import Response
-
-    from lab_wizard.wizard.backend import data_api
-
-    content, filename = _data(data_api.export_zip, _database(env), run_id)
-    return Response(
-        content=content,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@app.post("/api/data/plot")
-def api_data_plot(body: _SpecBody, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend import data_api
-
-    return _data(data_api.plot, _database(env), _config_dir(env), body.spec)
-
-
-@app.post("/api/data/plot/notebook")
-def api_data_plot_notebook(body: _SpecBody, env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend import data_api
-
-    return _data(data_api.notebook, _database(env), _config_dir(env), body.spec)
-
-
-@app.get("/api/data/devices")
-def api_data_devices(env: Env = Depends(get_env)):
-    from lab_wizard.wizard.backend import data_api
-
-    return {"devices": _data(data_api.device_list, _database(env))}
-
-
-@app.put("/api/data/devices/{name}")
-def api_data_device_save(name: str, body: _DeviceBody, env: Env = Depends(get_env)):
-    """Create or update a device; its properties become filters on all its runs."""
-    from lab_wizard.wizard.backend import data_api
-
-    return _data(data_api.save_device, _database(env), name, body.properties, body.notes)
-
-
-def _requirements_for(name: str, kind: str, env: Env):
-    """``FilledReq``s for a measurement or a procedure, or a 404."""
-    if kind == "procedure":
-        from lab_wizard.lib.procedures.storage import load_procedure
-        from lab_wizard.wizard.backend.procedure_generation import procedure_requirements
-
-        try:
-            return procedure_requirements(load_procedure(_config_dir(env), name))
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-    all_meas = get_measurements(env)
-    if name not in all_meas:
-        raise HTTPException(status_code=404, detail=f"Unknown measurement: {name}")
-    return reqs_from_measurement(all_meas[name])
-
-
-@app.get("/api/get-resources/{name}")
-def get_resources(
-    name: str,
-    kind: str = "measurement",
-    env: Env = Depends(get_env),
-    verbose: bool = False,
-):
-    """Return all required resources (instruments, savers, plotters) for a measurement.
-
-    ``kind`` is ``measurement`` for one under ``lib/measurements`` or
-    ``procedure`` for a procedure definition; both answer the same shape. Each
-    entry carries a ``resource_kind`` discriminator and the relevant matching
-    list — ``matching_instruments`` for instrument requirements (populated by
-    class-hierarchy discovery) or ``matching_resources`` for saver/plotter
-    requirements (populated from the configured registry).
-    """
-    logger.info("Getting resources for %s '%s'", kind, name)
-    reqs = _requirements_for(name, kind, env)
-    config_dir = _config_dir(env)
-
-    try:
-        # Pre-load saver/plotter registries once.
-        saver_tree = get_configured_resources_tree(config_dir, "saver")
-        plotter_tree = get_configured_resources_tree(config_dir, "plotter")
-
-        # Enumerate remote attributes once (best-effort; unreachable servers are
-        # skipped) so each instrument requirement can offer remote matches.
-        try:
-            remote_attrs = list_remote_attributes(config_dir)
-        except Exception as e:
-            logger.warning("Could not enumerate remote attributes: %s", e)
-            remote_attrs = []
-
-        outputs: list[OutputReq] = []
-        for req in reqs:
-            if req.resource_kind == "instrument":
-                try:
-                    matches = discover_matching_instruments(env, req.base_type)
-                except Exception as e:
-                    logger.exception(
-                        "Discovery error for requirement '%s': %s", req.variable_name, e
-                    )
-                    matches = []
-                base_name = getattr(req.base_type, "__name__", str(req.base_type))
-                remote_matches = [
-                    RemoteMatch(**attr)
-                    for attr in remote_attrs
-                    if attr.get("behavior_abc") == base_name and attr.get("attribute")
-                ]
-                outputs.append(
-                    OutputReq(
-                        variable_name=req.variable_name,
-                        base_type=str(req.base_type),
-                        resource_kind="instrument",
-                        is_list=req.is_list,
-                        matching_instruments=matches,
-                        matching_resources=[],
-                        matching_remote=remote_matches,
-                    )
-                )
-            elif req.resource_kind in ("saver", "plotter"):
-                tree = saver_tree if req.resource_kind == "saver" else plotter_tree
-                outputs.append(
-                    OutputReq(
-                        variable_name=req.variable_name,
-                        base_type=str(req.base_type),
-                        resource_kind=req.resource_kind,
-                        is_list=req.is_list,
-                        matching_instruments=[],
-                        matching_resources=[
-                            ConfiguredResource(
-                                type=item["type"],
-                                key=item["key"],
-                                fields=item["fields"],
-                            )
-                            for item in tree
-                        ],
-                    )
-                )
-
-        if verbose:
-            logger.debug("Final resource requirements for '%s': %s", name, outputs)
-        return outputs
-
-    except Exception as e:
-        logger.exception("Error getting resources for measurement '%s': %s", name, e)
-        return {"error": str(e)}
-
-
-# -------------------- Manage Instruments --------------------
-
-
-def _config_dir(env: Env) -> str:
-    if env.config_dir is None:
-        raise RuntimeError("Workspace config directory was not resolved")
-    return str(env.config_dir)
-
-
-def _projects_dir(env: Env) -> Path:
-    if env.projects_dir is None:
-        raise RuntimeError("Workspace projects directory was not resolved")
-    return env.projects_dir
-
-
-@app.get("/api/projects")
-def api_list_projects(env: Env = Depends(get_env)):
-    """Projects this workspace has already generated, newest first.
-
-    Read back off disk from the YAML generation already writes, so this records
-    no new state and cannot disagree with what is actually there.
-    """
-    return {"projects": list_projects(_projects_dir(env))}
-
-
-@app.get("/api/manage-instruments")
-def api_manage_instruments(env: Env = Depends(get_env)):
-    """Return the configured tree and metadata for all discoverable types."""
-    config_dir = _config_dir(env)
-    tree = get_configured_tree(config_dir)
-    metadata = get_instrument_metadata()
-    return {"tree": tree, "metadata": metadata}
-
-
-@app.get("/api/instrument-sources")
-def api_instrument_sources(env: Env = Depends(get_env)):
-    """Every place this workspace can get an instrument from.
-
-    Local tree, other workspaces' daemons on this machine (full trees, editable),
-    and registered remote servers (named leaves only — a remote peer gets read +
-    call, never reconfiguration). Unreachable sources are reported rather than
-    raised so one rack being off does not block authoring against the others.
-    """
-    return list_instrument_sources(_config_dir(env))
-
-
-@app.get("/api/transport-status")
-def api_transport_status(env: Env = Depends(get_env)):
-    """Per-root sharing/authority declarations plus what the server holds now.
-
-    Lets the tree show whether a rack is exclusive or shared, and whether it is
-    currently in use, without the user having to run anything to find out.
-    """
-    return transport_overview(_config_dir(env))
-
-
-class _ConflictCheckRequest(_PermBM):
-    paths: list[str] = _PermField(default_factory=list)
-
-
-@app.post("/api/transport-status/check")
-def api_transport_conflicts(
-    req: _ConflictCheckRequest, env: Env = Depends(get_env)
-):
-    """Would a *local* project using these instruments contend with the server?
-
-    Used during measurement creation so a conflict is a design-time answer
-    rather than a 2am failure.
-    """
-    return conflicts_for_selection(_config_dir(env), req.paths)
-
-
-@app.get("/api/local-servers")
-def api_local_servers(env: Env = Depends(get_env)):
-    """Every instrument server running on this machine.
-
-    Not just this workspace's. A server started from another workspace holds
-    real hardware and its endpoint is not derivable from here, so the UI needs
-    the machine-local registry to say which workspace owns which rack.
-    """
-    from lab_wizard.lib.client.server_registry import (
-        list_local_servers,
-        local_server_endpoints,
-    )
-
-    # Flagged so the UI can distinguish "our own server" from "another
-    # workspace's" — the two mean different things to a user, and only the
-    # latter has a tree they cannot already see under Manage Instruments.
-    own = str(env.config_dir) if env.config_dir else None
-    return {
-        "servers": [
-            {
-                **entry,
-                "endpoints": local_server_endpoints(entry),
-                "is_this_workspace": entry.get("config_dir") == own,
-            }
-            for entry in list_local_servers()
-        ]
-    }
-
-
-@app.get("/api/local-servers/claims")
-def api_local_server_claims():
-    """Run claims held on every instrument server on this machine.
-
-    A claim is how a running measurement keeps other runs off the instruments
-    it drives (``plans/server_plan.md`` Phase 9), so this answers "why was my
-    run refused" and "is something still holding that counter". A server that
-    does not answer is reported rather than raised: one stopped daemon must not
-    blank the page.
-    """
-    from lab_wizard.lib.client.server_registry import (
-        list_local_servers,
-        local_server_endpoints,
-    )
-    from lab_wizard.lib.client.session import Session
-
-    out = []
-    for entry in list_local_servers():
-        endpoints = local_server_endpoints(entry)
-        if not endpoints:
-            continue
-        url = endpoints[0]
-        row = {
-            "url": url,
-            "pid": entry.get("pid"),
-            "workspace_path": entry.get("workspace_path"),
-            "claims": [],
-            "error": None,
-        }
-        try:
-            session = Session(url, timeout_ms=2_000, auto_reconnect=False)
-            try:
-                row["claims"] = session.call("claim_list") or []
-            finally:
-                session.close()
-        except Exception as e:  # noqa: BLE001 - reported per server
-            row["error"] = str(e)
-        out.append(row)
-    return {"servers": out}
-
-
-class _ForceReleaseClaimRequest(_PermBM):
-    url: str
-    unit: str
-
-
-@app.post("/api/local-servers/claims/force-release")
-def api_force_release_claim(req: _ForceReleaseClaimRequest):
-    """End every claim touching ``unit`` on one server.
-
-    For a run that is stuck, or whose client disappeared. The server resets the
-    released instruments to baseline before anyone else can claim them.
-    """
-    from lab_wizard.lib.client.session import Session
-
-    try:
-        session = Session(req.url, timeout_ms=10_000)
-        try:
-            result = session.call("claim_force_release", {"unit": req.unit})
-        finally:
-            session.close()
-    except Exception as e:  # noqa: BLE001 - surfaced to the UI
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "ok", **(result or {})}
-
-
-class _ReleaseRequest(_PermBM):
-    url: str
-    path: str
-
-
-@app.post("/api/local-servers/release")
-def api_release_hardware(req: _ReleaseRequest):
-    """Ask a server to disconnect and evict one root.
-
-    Hands a rack back without stopping the whole server, which is what a user
-    wants when a local project needs the bus. The path stays servable — the next
-    call through the server reopens it.
-    """
-    from lab_wizard.lib.client.session import Session
-
-    try:
-        session = Session(req.url, timeout_ms=10_000)
-        try:
-            released = session.call("release", {"path": req.path})
-        finally:
-            session.close()
-    except Exception as e:  # noqa: BLE001 - surfaced to the UI
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "ok", "released": released}
-
-
-class _RemoteTreeRequest(_PermBM):
-    config_dir: str
-
-
-class _RemoteEditRequest(_PermBM):
-    config_dir: str
-    operation: str
-    payload: dict = _PermField(default_factory=dict)
-
-
-@app.post("/api/remote-tree")
-def api_remote_tree(req: _RemoteTreeRequest):
-    """Tree, schema and recent activity of another workspace's server.
-
-    The schema comes from that server, not this build: it decides which
-    instrument types exist and what fields they take.
-    """
-    try:
-        return remote_tree(req.config_dir)
-    except Exception as e:  # noqa: BLE001 - surfaced to the UI
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/remote-tree/edit")
-def api_remote_tree_edit(req: _RemoteEditRequest):
-    """Add, remove, or reset an instrument on another workspace's server.
-
-    The server enforces both rules that matter — same-machine only, and not
-    while the rack is open — so a refusal here is its answer, not ours.
-    """
-    try:
-        return remote_tree_edit(req.config_dir, req.operation, req.payload)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class _RemoteDiscoverRequest(_PermBM):
-    config_dir: str
-    type: str
-    action: str
-    params: dict = _PermField(default_factory=dict)
-    parent_chain: list = _PermField(default_factory=list)
-
-
-@app.post("/api/remote-tree/discover")
-def api_remote_discover(req: _RemoteDiscoverRequest):
-    """Run a discovery scan on another workspace's server.
-
-    The scan has to happen where the hardware is. Without it, adding an
-    instrument to another workspace would mean knowing its bus address by heart.
-    """
-    try:
-        return remote_discover(
-            req.config_dir,
-            type=req.type,
-            action=req.action,
-            params=req.params,
-            parent_chain=req.parent_chain,
-        )
-    except Exception as e:  # noqa: BLE001 - surfaced to the UI
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class _DuplicateCheckRequest(_PermBM):
-    type: str
-    key: str = ""
-    # Present when checking a local add; omitted when the target is a server.
-    include_local: bool = True
-
-
-@app.post("/api/transport-status/duplicate-check")
-def api_duplicate_transport(
-    req: _DuplicateCheckRequest, env: Env = Depends(get_env)
-):
-    """Would adding this instrument point a second config at one device?
-
-    Asked before the write. Two workspaces naming one serial port is a mistake
-    whose first symptom is otherwise a lease refusal in the middle of a run.
-    """
-    return duplicate_transport_check(
-        req.type,
-        req.key,
-        config_dir=_config_dir(env) if req.include_local else None,
-    )
-
-
-@app.post("/api/remote-tree/events")
-def api_remote_events(req: _RemoteTreeRequest):
-    """Recent notable events recorded by that server."""
-    try:
-        return {"events": remote_events(req.config_dir)}
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/hardware-owner")
-def api_hardware_owner(env: Env = Depends(get_env)):
-    """Which process currently owns this workspace's hardware.
-
-    ``server`` means the wizard routes hardware operations through it; the UI
-    should say so, since it explains why discovery behaves differently.
-    """
-    return hardware_owner(_config_dir(env))
-
-
-@app.get("/api/permissions")
-def api_get_permissions(env: Env = Depends(get_env)):
-    """Return the local instrument tree + permission vocabulary + current rules.
-
-    ``tree`` mirrors manage-instruments; ``instruments`` carries the state keys
-    and methods the rule builder offers per node; ``permissions`` is the current
-    ``permissions:`` block from server.yaml.
-    """
-    config_dir = _config_dir(env)
-    model = get_permissions_model(config_dir)
-    return {"tree": get_configured_tree(config_dir), **model}
-
-
-class _SavePermissionsRequest(_PermBM):
-    permissions: dict = _PermField(default_factory=dict)
-
-
-@app.put("/api/permissions")
-def api_save_permissions(req: _SavePermissionsRequest, env: Env = Depends(get_env)):
-    """Validate and persist the ``permissions:`` block to server.yaml."""
-    config_dir = _config_dir(env)
-    try:
-        saved = save_permissions(config_dir, req.permissions)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "ok", "permissions": saved}
-
-
-# -------------------- Remote Servers (consuming side) --------------------
-
-
-class _RemoteServerRequest(_PermBM):
-    name: str
-    url: str
-
-
-class _RemoteTestRequest(_PermBM):
-    url: str
-
-
-@app.get("/api/remote-servers")
-def api_get_remote_servers(env: Env = Depends(get_env)):
-    """Return the registered remote servers (the client address book)."""
-    return {"servers": load_remote_servers(_config_dir(env))}
-
-
-@app.post("/api/remote-servers")
-def api_add_remote_server(req: _RemoteServerRequest, env: Env = Depends(get_env)):
-    """Add (or update by name) a remote server."""
-    try:
-        servers = add_remote_server(_config_dir(env), req.name.strip(), req.url.strip())
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    return {"status": "ok", "servers": servers}
-
-
-@app.delete("/api/remote-servers/{name}")
-def api_remove_remote_server(name: str, env: Env = Depends(get_env)):
-    """Remove a remote server by name."""
-    return {"status": "ok", "servers": remove_remote_server(_config_dir(env), name)}
-
-
-@app.post("/api/remote-servers/test")
-def api_test_remote_server(req: _RemoteTestRequest):
-    """Live-test a remote server URL and return its attributes (never errors)."""
-    return test_remote_connection(req.url.strip())
-
-
-# -------------------- Instrument Server lifecycle (hosting side) --------------------
-
-
-class _ServerStartRequest(_PermBM):
-    # When true, the server is detached and survives wizard close (daemon).
-    detached: bool = False
-
-
-@app.get("/api/server/status")
-def api_server_status(env: Env = Depends(get_env)):
-    """Return whether this workstation's instrument server is running."""
-    return server_status(_config_dir(env))
-
-
-@app.post("/api/server/enable-hosting")
-def api_enable_hosting(env: Env = Depends(get_env)):
-    """Make this workspace a hardware host, serving this machine over ipc.
-
-    Creating the server config is the opt-in; a workspace without one is a
-    client, which is what keeps a cloned workspace from racing the host for the
-    same instruments. No address is chosen — add a bind only when another
-    machine needs to connect.
-    """
-    return enable_hosting(_config_dir(env))
-
-
-@app.post("/api/server/disable-hosting")
-def api_disable_hosting(env: Env = Depends(get_env)):
-    """Stop hosting and return this workspace to being a client."""
-    try:
-        return disable_hosting(_config_dir(env))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/server/start")
-def api_server_start(req: _ServerStartRequest, env: Env = Depends(get_env)):
-    """Start the instrument server (managed child or detached daemon)."""
-    try:
-        return start_server(_config_dir(env), detached=req.detached)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/server/stop")
-def api_server_stop(env: Env = Depends(get_env)):
-    """Stop the running instrument server (any mode)."""
-    return stop_server(_config_dir(env))
-
-
-@app.post("/api/server/restart")
-def api_server_restart(req: _ServerStartRequest, env: Env = Depends(get_env)):
-    """Restart the server — used to apply edited permission rules."""
-    try:
-        return restart_server(_config_dir(env), detached=req.detached)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class _ServerBindRequest(_PermBM):
-    bind: str
-
-
-@app.get("/api/server/suggest-port")
-def api_server_suggest_port(prefer_default: bool = False, env: Env = Depends(get_env)):
-    """Return a tcp://host:port bind on a currently-free port (not persisted).
-
-    ``prefer_default=true`` offers the standard/existing port first when free —
-    used for the initial suggestion before the server is configured.
-    """
-    return {"bind": suggest_free_bind(_config_dir(env), prefer_default=prefer_default)}
-
-
-@app.put("/api/server/bind")
-def api_server_set_bind(req: _ServerBindRequest, env: Env = Depends(get_env)):
-    """Persist this workstation's server bind address."""
-    try:
-        return set_server_bind(_config_dir(env), req.bind)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-from pydantic import BaseModel as _BM, Field as _Field
-from typing import List as _List
-
-
-class _ChainStep(_BM):
-    type: str
-    key: str
-    action: str  # "create_new" | "use_existing"
-    extra: dict = _Field(
-        default_factory=dict
-    )  # optional extra fields to set on newly-created params
-
-    children: list[dict] = _Field(default_factory=list)
-
-
-class _AddBody(_BM):
-    chain: _List[_ChainStep]
-
-
-class _ResetBody(_BM):
-    type: str
-    key: str
-    path: list[dict[str, str]] | None = None
-
-
-class _RemoveBody(_BM):
-    type: str
-    key: str
-    path: list[dict[str, str]] | None = None
-
-
-@app.post("/api/manage-instruments/add")
-def api_add_instrument(body: _AddBody, env: Env = Depends(get_env)):
-    """Add an instrument (with optional parent chain creation).
-
-    Routed through this workspace's server when one is running, so a local edit
-    gets the same held-rack refusal, registry reload and audit entry that an
-    edit from another workspace already got.
-    """
-    config_dir = _config_dir(env)
-    try:
-        chain_dicts = [s.model_dump() for s in body.chain]
-        return apply_tree_edit(
-            config_dir,
-            "add",
-            {"chain": chain_dicts},
-            lambda: add_instrument_chain(config_dir, chain_dicts),
-        )
-    except Exception as e:
-        logger.exception("Add instrument API failed: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class _InstrumentPath(_BM):
-    type: str
-    key: str
-
-
-class _UpdateInstrumentBody(_BM):
-    path: list[_InstrumentPath]
-    fields: dict
-    expected_fields: dict
-
-
-@app.post("/api/manage-instruments/update")
-def api_update_instrument(body: _UpdateInstrumentBody, env: Env = Depends(get_env)):
-    from lab_wizard.lib.utilities.config_io import update_instrument_params
-
-    config_dir = _config_dir(env)
-    payload = body.model_dump()
-    try:
-        return apply_tree_edit(
-            config_dir,
-            "update",
-            payload,
-            lambda: update_instrument_params(config_dir, **payload),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/api/manage-instruments/reset")
-def api_reset_instrument(body: _ResetBody, env: Env = Depends(get_env)):
-    """Reset an instrument's config to factory defaults (preserves children)."""
-    config_dir = _config_dir(env)
-    try:
-        return apply_tree_edit(
-            config_dir,
-            "reset",
-            {
-                "type": body.type,
-                "key": body.key,
-                **({"path": body.path} if body.path else {}),
-            },
-            lambda: reinitialize_instrument(
-                config_dir, body.type, body.key, path=body.path
-            ),
-        )
-    except Exception as e:
-        logger.exception("Reset instrument API failed: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/manage-instruments/removal-impact")
-def api_removal_impact(body: _RemoveBody, env: Env = Depends(get_env)):
-    """What breaks if this instrument is removed.
-
-    A rule referencing a vanished attribute fails closed — it denies everything
-    it covered — so removing one instrument can make a *different* one
-    un-callable. Surfaced before the confirm, not discovered later.
-    """
-    config_dir = _config_dir(env)
-    try:
-        attributes = attributes_under(config_dir, body.type, body.key, path=body.path)
-        return {
-            "attributes": sorted(attributes),
-            "rules": rules_referencing(config_dir, attributes) if attributes else [],
-            # A project names its instruments and resolves them when it runs, so
-            # removing one breaks every project that uses it.
-            "projects": projects_referencing(_projects_dir(env), attributes),
-        }
-    except Exception as e:  # noqa: BLE001 - the dialog must still open
-        logger.warning("Could not compute removal impact: %s", e)
-        return {"attributes": [], "rules": [], "projects": [], "error": str(e)}
-
-
-@app.post("/api/manage-instruments/remove")
-def api_remove_instrument(body: _RemoveBody, env: Env = Depends(get_env)):
-    """Remove an instrument from config."""
-    config_dir = _config_dir(env)
-    try:
-        return apply_tree_edit(
-            config_dir,
-            "remove",
-            {
-                "type": body.type,
-                "key": body.key,
-                **({"path": body.path} if body.path else {}),
-            },
-            lambda: remove_instrument(config_dir, body.type, body.key, path=body.path),
-        )
-    except Exception as e:
-        logger.exception("Remove instrument API failed: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class _DiscoverBody(_BM):
-    type: str
-    action: str
-    params: dict = _Field(default_factory=dict)
-    # Resolved ancestor chain, ordered root-first.
-    # e.g. [{"type": "prologix_gpib", "key": "a1b2c3d4"}]
-    parent_chain: list[dict] = _Field(default_factory=list)
-    draft_id: str | None = None
-
-
-@app.post("/api/manage-instruments/discover")
-def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
-    """Run a discovery action defined on an instrument's Params class."""
-    from lab_wizard.lib.utilities.resource_catalog import load_params_class
-
-    cls = load_params_class(body.type)
-    actions = {a.name: a for a in getattr(cls, "discovery_actions", lambda: [])()}
-    action = actions.get(body.action)
-    if action is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Type '{body.type}' has no discovery action '{body.action}'",
-        )
-
-    try:
-        draft_chain = (
-            _instrument_drafts.chain(_config_dir(env), body.draft_id)
-            if body.draft_id
-            else None
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-    def _in_process() -> dict:
-        from lab_wizard.lib.server.registry import InstrumentRegistry
-        from lab_wizard.lib.utilities.instrument_discovery import (
-            draft_discovery_tree,
-            discover_with_registry,
-        )
-
-        if draft_chain:
-            registry, path = draft_discovery_tree(_config_dir(env), draft_chain)
-        else:
-            registry = InstrumentRegistry.from_config_dir(_config_dir(env))
-            path = body.parent_chain
-        return discover_with_registry(
-            registry, path, body.type, body.action, body.params
-        )
-
-    try:
-        # If a server is running it owns the transport, so it runs the scan —
-        # two processes on one serial handle is exactly what this avoids, and
-        # it keeps the permission gate's view of the hardware complete.
-        return run_discovery(
-            _config_dir(env),
-            type=body.type,
-            action=body.action,
-            params=body.params,
-            parent_chain=body.parent_chain,
-            in_process_fallback=_in_process,
-            draft_chain=draft_chain,
-        )
-    except HTTPException:
-        logger.exception(
-            "Discovery action failed (HTTPException): %s/%s parent_chain=%s",
-            body.type,
-            body.action,
-            body.parent_chain,
-        )
-        raise
-    except Exception as e:
-        logger.exception(
-            "Discovery action failed: %s/%s — %s", body.type, body.action, e
-        )
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-class _ApplyChildrenBody(_BM):
-    parent_type: str
-    parent_key: str
-    children: list[dict]
-    path: list[dict[str, str]] | None = None
-
-
-@app.post("/api/manage-instruments/apply-children")
-def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
-    from lab_wizard.lib.utilities.config_io import apply_discovered_children
-
-    config_dir = _config_dir(env)
-    payload = body.model_dump()
-    try:
-        return apply_tree_edit(
-            config_dir,
-            "apply_children",
-            payload,
-            lambda: apply_discovered_children(config_dir, **payload),
-        )
-    except Exception as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-# Absolute, like every import here: build_ui_and_run.sh runs this file as a
-# script (``uv run main.py``), where a relative import has no package.
-from lab_wizard.wizard.backend.instrument_drafts import drafts as _instrument_drafts
-
-
-@app.post("/api/manage-instruments/drafts")
-def api_create_instrument_draft(env: Env = Depends(get_env)):
-    try:
-        return {"id": _instrument_drafts.create(_config_dir(env))}
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.put("/api/manage-instruments/drafts/{draft_id}")
-def api_stage_instrument_draft(
-    draft_id: str, body: _AddBody, env: Env = Depends(get_env)
-):
-    try:
-        return _instrument_drafts.stage(
-            _config_dir(env), draft_id, [s.model_dump() for s in body.chain]
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.delete("/api/manage-instruments/drafts/{draft_id}")
-def api_cancel_instrument_draft(draft_id: str, env: Env = Depends(get_env)):
-    try:
-        _instrument_drafts.cancel(_config_dir(env), draft_id)
-        return {"status": "ok"}
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@app.post("/api/manage-instruments/drafts/{draft_id}/commit")
-def api_commit_instrument_draft(draft_id: str, env: Env = Depends(get_env)):
-    config_dir = _config_dir(env)
-    try:
-        return _instrument_drafts.commit(
-            config_dir,
-            draft_id,
-            lambda chain: apply_tree_edit(
-                config_dir,
-                "add",
-                {"chain": chain},
-                lambda: add_instrument_chain(config_dir, chain),
-            ),
-        )
-    except Exception as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-# -------------------- Manage Savers / Plotters --------------------
-
-
-class _AddResourceBody(_BM):
-    type: str
-    key: str
-    fields: dict = _Field(default_factory=dict)
-
-
-class _ResourceTypeKeyBody(_BM):
-    type: str
-    key: str
-
-
-class _UpdateResourceBody(_BM):
-    type: str
-    key: str
-    fields: dict
-
-
-def _make_resource_endpoints(kind: str, metadata_fn):  # noqa: ANN001
-    """Register four CRUD endpoints for a flat resource registry under
-    /api/manage-{kind}s/...  ``metadata_fn`` returns the discovery metadata."""
-    plural = f"{kind}s"
-
-    @app.get(f"/api/manage-{plural}", name=f"api_manage_{plural}")
-    def _list(env: Env = Depends(get_env)):
-        config_dir = _config_dir(env)
-        return {
-            "tree": get_configured_resources_tree(config_dir, kind),  # type: ignore[arg-type]
-            "metadata": metadata_fn(),
-        }
-
-    @app.post(f"/api/manage-{plural}/add", name=f"api_add_{kind}")
-    def _add(body: _AddResourceBody, env: Env = Depends(get_env)):
-        config_dir = _config_dir(env)
-        try:
-            return _flat_add_resource(config_dir, kind, body.type, body.key, body.fields)  # type: ignore[arg-type]
-        except Exception as e:
-            logger.exception("Add %s API failed: %s", kind, e)
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @app.post(f"/api/manage-{plural}/reset", name=f"api_reset_{kind}")
-    def _reset(body: _ResourceTypeKeyBody, env: Env = Depends(get_env)):
-        config_dir = _config_dir(env)
-        try:
-            return _flat_reset_resource(config_dir, kind, body.type, body.key)  # type: ignore[arg-type]
-        except Exception as e:
-            logger.exception("Reset %s API failed: %s", kind, e)
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @app.post(f"/api/manage-{plural}/remove", name=f"api_remove_{kind}")
-    def _remove(body: _ResourceTypeKeyBody, env: Env = Depends(get_env)):
-        config_dir = _config_dir(env)
-        try:
-            return _flat_remove_resource(config_dir, kind, body.type, body.key)  # type: ignore[arg-type]
-        except Exception as e:
-            logger.exception("Remove %s API failed: %s", kind, e)
-            raise HTTPException(status_code=400, detail=str(e))
-
-    @app.post(f"/api/manage-{plural}/update", name=f"api_update_{kind}")
-    def _update(body: _UpdateResourceBody, env: Env = Depends(get_env)):
-        config_dir = _config_dir(env)
-        try:
-            return _flat_update_resource_fields(
-                config_dir, kind, body.type, body.key, body.fields  # type: ignore[arg-type]
-            )
-        except Exception as e:
-            logger.exception("Update %s API failed: %s", kind, e)
-            raise HTTPException(status_code=400, detail=str(e))
-
-
-_make_resource_endpoints("saver", get_saver_metadata)
-_make_resource_endpoints("plotter", get_plotter_metadata)
-
-
-@app.post("/api/create-measurement-project")
-def api_create_measurement_project(
-    body: GenerateProjectRequest,
-    env: Env = Depends(get_env),
-):
-    """Create a project from a measurement or a procedure (``body.kind``)."""
-    try:
-        if body.kind == "procedure":
-            from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
-
-            return generate_procedure_project(
-                config_dir=Path(_config_dir(env)),
-                projects_dir=_projects_dir(env),
-                req=body,
-            )
-        return generate_measurement_project(
-            config_dir=Path(_config_dir(env)),
-            projects_dir=_projects_dir(env),
-            req=body,
-        )
-    except Exception as e:
-        logger.exception("Create measurement project API failed: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/create-custom-resource-project")
-def api_create_custom_resource_project(
-    body: GenerateCustomResourceRequest,
-    env: Env = Depends(get_env),
-):
-    """Create a new timestamped project containing a programmatically built setup file."""
-    try:
-        return generate_custom_resource_project(
-            config_dir=Path(_config_dir(env)),
-            projects_dir=_projects_dir(env),
-            req=body,
-        )
-    except Exception as e:
-        logger.exception("Create custom resource project API failed: %s", e)
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-# Serve SvelteKit static build from resolved directory at root (mounted last)
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="frontend")
 
 
@@ -1666,12 +338,19 @@ def _resolve_webview_icon_path(icon_path: Path, temp_dir: str) -> str | None:
 def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
     if webview is None:
         raise RuntimeError("pywebview is not available; cannot start UI window")
+    # The launcher decides when the window goes; a Ctrl-C here would only
+    # print a traceback.
+    _set_signals(("SIGINT",), signal.SIG_IGN)
 
     health_url = url_to_load.rstrip("/") + "/api/health"
     _wait_for_server(health_url)
 
     def on_closed():
         pipe_send.send("closed")
+
+    # The Data page's "Export run" is a download; without this the window
+    # silently drops it, where a browser would ask where to save.
+    webview.settings["ALLOW_DOWNLOADS"] = True
 
     _win: Any = webview.create_window(  # type: ignore
         "Lab Wizard",
@@ -1748,63 +427,70 @@ if __name__ == "__main__":
     )
     instance = UvicornServer(config=config)
     instance.start()
+    windowsp: multiprocessing.Process | None = None
+    _set_signals(_STOP_SIGNALS, _raise_stop)
 
-    # If port 0 (auto), we can't easily query the bound port from uvicorn.Server in this process
-    # without IPC, so keep to explicit ports for now. If needed, add a pipe to report.
-    url = f"http://{webview_ip}:{server_port}/"
-    should_spawn_ui = (not args.no_ui) and has_gui_context()
+    try:
+        # If port 0 (auto), we can't easily query the bound port from uvicorn.Server in this process
+        # without IPC, so keep to explicit ports for now. If needed, add a pipe to report.
+        url = f"http://{webview_ip}:{server_port}/"
+        should_spawn_ui = (not args.no_ui) and has_gui_context()
 
-    # Refuse to show a window until the server answering is demonstrably ours.
-    _verify_own_server(server_port, str(runtime_env.workspace_dir or ""))
-    logger.info(
-        "Wizard serving %s on port %d", runtime_env.workspace_dir, server_port
-    )
-
-    if should_spawn_ui:
-        # Then start window
-        windowsp = multiprocessing.Process(
-            target=start_window,
-            args=(conn_send, url, args.debug),
+        # Refuse to show a window until the server answering is demonstrably ours.
+        _verify_own_server(server_port, str(runtime_env.workspace_dir or ""))
+        logger.info(
+            "Wizard serving %s on port %d", runtime_env.workspace_dir, server_port
         )
 
-        windowsp.start()
-
-        window_status = ""
-        while "closed" not in window_status:
-            window_status = conn_recv.recv()
-            logger.debug("Window status event: %s", window_status)
-
-        instance.stop()
-    else:
-        # Headless/SSH/no-UI: wait until the server is actually ready, then print URLs.
-        health_url = f"http://localhost:{server_port}/api/health"
-        _wait_for_server(health_url)
-        print("\nNo UI context detected or --no-ui set.")
-        # Enumerate all non-loopback IPv4s and print URLs
-        ips = get_ipv4_addresses()
-        if ips:
-            print(
-                "Reachable URLs on this host (for remote access, let port 8884 through your firewall):"
+        if should_spawn_ui:
+            # Then start window
+            windowsp = multiprocessing.Process(
+                target=start_window,
+                args=(conn_send, url, args.debug),
             )
-            for ip in ips:
-                print("  ", green(f"http://{ip}:{server_port}/"))
+
+            windowsp.start()
+
+            window_status = ""
+            while "closed" not in window_status:
+                window_status = conn_recv.recv()
+                logger.debug("Window status event: %s", window_status)
         else:
-            print("Could not determine host IPs; try using the hostname or SSH tunnel.")
+            # Headless/SSH/no-UI: wait until the server is actually ready, then print URLs.
+            health_url = f"http://localhost:{server_port}/api/health"
+            _wait_for_server(health_url)
+            print("\nNo UI context detected or --no-ui set.")
+            # Enumerate all non-loopback IPv4s and print URLs
+            ips = get_ipv4_addresses()
+            if ips:
+                print(
+                    "Reachable URLs on this host (for remote access, let port 8884 through your firewall):"
+                )
+                for ip in ips:
+                    print("  ", green(f"http://{ip}:{server_port}/"))
+            else:
+                print("Could not determine host IPs; try using the hostname or SSH tunnel.")
 
-        # Always include localhost for ssh tunnel scenarios
-        print("Also available via localhost if you port-forward:")
-        print("  ", green(url))
+            # Always include localhost for ssh tunnel scenarios
+            print("Also available via localhost if you port-forward:")
+            print("  ", green(url))
 
-        if is_ssh_session():
-            print("\nHint: create a tunnel from your local machine:")
-            print("  ssh -N -L 8884:localhost:%d <user>@<remote-host>" % server_port)
-            print("Then open:")
-            print("  ", green("http://localhost:8884/"))
+            if is_ssh_session():
+                print("\nHint: create a tunnel from your local machine:")
+                print("  ssh -N -L 8884:localhost:%d <user>@<remote-host>" % server_port)
+                print("Then open:")
+                print("  ", green("http://localhost:8884/"))
 
-        print("\nPress Ctrl+C to stop the server.\n")
-        try:
+            print("\nPress Ctrl+C to stop the server.\n")
             instance.join()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            instance.stop()
+    except _StopRequested as stop:
+        print(f"\n{stop} received; stopping the wizard…", flush=True)
+    finally:
+        # Once stopping, stay stopping: a second Ctrl-C must not interrupt
+        # the shutdown halfway.
+        _set_signals(_STOP_SIGNALS, signal.SIG_IGN)
+        if windowsp is not None and windowsp.is_alive():
+            windowsp.terminate()
+            windowsp.join(5)
+        instance.stop()
+        logger.info("Wizard stopped")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 
@@ -117,4 +118,19 @@ def main(argv: list[str] | None = None) -> None:
         command.append("--no-ui")
     if args.debug:
         command.append("--debug")
-    raise SystemExit(subprocess.call(command, env=environment))
+    raise SystemExit(_run_until_stopped(command, environment))
+
+
+def _run_until_stopped(command: list[str], environment: dict[str, str]) -> int:
+    """Run the wizard and return its exit code, letting *it* handle Ctrl-C.
+
+    The terminal signals the whole process group, so the wizard already hears
+    Ctrl-C and stops itself cleanly. ``subprocess.call`` would instead kill it
+    a quarter-second into that shutdown, so here Ctrl-C is ignored while
+    waiting.
+    """
+    process = subprocess.Popen(command, env=environment)
+    # Set only after the child exists: an ignored signal is inherited across
+    # exec, and the wizard must still receive it.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    return process.wait()

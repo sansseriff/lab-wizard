@@ -1,12 +1,14 @@
 <script lang="ts">
 	/** Edit only the selected step. Field editors remain catalog-driven. */
 	import { stepContext, stepTitle, cleanupSummary, humanize } from './presentation';
+	import Tooltip from '$lib/components/Tooltip.svelte';
 	import ArrowUpIcon from 'phosphor-svelte/lib/ArrowUp';
 	import ArrowDownIcon from 'phosphor-svelte/lib/ArrowDown';
 	import XIcon from 'phosphor-svelte/lib/X';
 	import PlusIcon from 'phosphor-svelte/lib/Plus';
 	import StepPicker from './StepPicker.svelte';
 	import ValueInput from './ValueInput.svelte';
+	import Select from '$lib/components/Select.svelte';
 	import type { ProcedureEditor } from './editor.svelte';
 	import { type FieldSpec, type Path, pathKey, roleFits } from './model';
 
@@ -109,7 +111,7 @@
 	{#if step}
 		<div>
 			<p class="mono text-xs text-muted">{step.type}</p>
-			<h2 class="mt-1 text-base font-semibold">{stepTitle(step)}</h2>
+			<h2 class="mt-1 text-title font-semibold">{stepTitle(step)}</h2>
 			{#if spec}<p class="mt-1 text-xs leading-relaxed text-muted">
 					{spec.summary.replaceAll('``', '')}
 				</p>{/if}
@@ -152,32 +154,26 @@
 						aria-label="Move down"><ArrowDownIcon size={12} /> Move down</button
 					>
 				{/if}
-				<button
+				<Tooltip text="Put this step inside a new one — a sweep, a guard, a retry">{#snippet child({ props })}<button {...props}
 					class="lw-btn lw-btn-sm"
-					title="Put this step inside a new one — a sweep, a guard, a retry"
 					onclick={() =>
 						(picker = {
 							title: `Wrap ${step.type} in…`,
 							containersOnly: true,
 							pick: (type) => editor.wrapStep(path, type)
-						})}>Wrap</button
-				>
+						})}>Wrap</button>{/snippet}</Tooltip>
 				{#if canUnwrap}
-					<button
+					<Tooltip text="Replace this step with the one step inside it">{#snippet child({ props })}<button {...props}
 						class="lw-btn lw-btn-sm"
-						title="Replace this step with the one step inside it"
-						onclick={() => editor.unwrapStep(path)}>Unwrap</button
-					>
+						onclick={() => editor.unwrapStep(path)}>Unwrap</button>{/snippet}</Tooltip>
 				{/if}
-				<button
+				<Tooltip text="Swap this step for another type">{#snippet child({ props })}<button {...props}
 					class="lw-btn lw-btn-sm"
-					title="Swap this step for another type"
 					onclick={() =>
 						(picker = {
 							title: `Replace ${step.type} with…`,
 							pick: (type, role) => editor.replaceStep(path, type, role)
-						})}>Replace</button
-				>
+						})}>Replace</button>{/snippet}</Tooltip>
 				{#if place !== 'root'}
 					<button
 						class="lw-btn lw-btn-sm px-1"
@@ -185,9 +181,7 @@
 						aria-label={optional || place === 'list'
 							? 'Remove step'
 							: 'Reset step to an empty sequence'}
-						title={optional || place === 'list' ? 'Remove' : 'Empty this slot'}
-						><XIcon size={12} /> {optional || place === 'list' ? 'Remove' : 'Empty'}</button
-					>
+						><XIcon size={12} /> {optional || place === 'list' ? 'Remove' : 'Empty'}</button>
 				{/if}
 				{#if place === 'list'}
 					<button
@@ -224,22 +218,22 @@
 							</span>
 
 							{#if field.kind === 'role'}
-								<select
-									class="lw-select mono min-w-0 w-full"
+								<Select
+									mono
+									class="min-w-0"
 									value={step[name]?.role ?? ''}
-									onchange={(e) => onRoleChange(name, field, e.currentTarget.value)}
+									onValueChange={(v) => onRoleChange(name, field, v)}
 									aria-label="{name}: role"
-								>
-									<option value="">— choose a role —</option>
-									{#each roleOptions(field) as opt (opt.role)}
-										<option value={opt.role} disabled={!opt.fits}>
-											{opt.role} ({opt.behavior}){opt.fits
-												? ''
-												: ` — needs ${field.requires.join(' or ')}`}
-										</option>
-									{/each}
-									<option value="__new__">New {field.requires[0] ?? ''} role…</option>
-								</select>
+									options={[
+										{ value: '', label: '— choose a role —' },
+										...roleOptions(field).map((opt) => ({
+											value: opt.role,
+											label: `${opt.role} (${opt.behavior})${opt.fits ? '' : ` — needs ${field.requires.join(' or ')}`}`,
+											disabled: !opt.fits
+										})),
+										{ value: '__new__', label: `New ${field.requires[0] ?? ''} role…` }
+									]}
+								/>
 								{#if step[name]?.role}<button
 										class="text-xs text-accent hover:underline"
 										onclick={() => onreference('roles', step[name].role)}>Edit role ↗</button
@@ -307,12 +301,12 @@
 										aria-label={name}
 									/>
 									{#if field.column === 'records'}
-										<span class="text-[11px] text-muted">recorded as a data column</span>
+										<span class="text-fine text-muted">recorded as a data column</span>
 									{:else if field.column === 'reads'}
 										<datalist id="records-{key}">
 											{#each records as column (column)}<option value={column}></option>{/each}
 										</datalist>
-										<span class="text-[11px] text-muted">a recorded column</span>
+										<span class="text-fine text-muted">a recorded column</span>
 									{/if}
 								</div>
 							{/if}
@@ -320,13 +314,13 @@
 					{/each}
 
 					{#if spec.emits.length}
-						<div class="text-[11px] text-muted">
+						<div class="text-fine text-muted">
 							Records <span class="mono">{spec.emits.join(', ')}</span>
 						</div>
 					{/if}
 
 					{#each problems as problem, i (i)}
-						<div class="text-[11.5px] text-crit">{problemText(problem.message, problem.path)}</div>
+						<div class="text-fine text-crit">{problemText(problem.message, problem.path)}</div>
 					{/each}
 				</div>
 			{/if}
@@ -372,7 +366,7 @@
 					{/each}
 				</div>
 			{/if}
-		{:else}<p class="text-sm text-crit">
+		{:else}<p class="text-body text-crit">
 				Unknown step type. Replace or remove it using Step actions.
 			</p>{/if}
 	{/if}

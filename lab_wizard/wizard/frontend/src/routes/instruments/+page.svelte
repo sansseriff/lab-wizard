@@ -12,9 +12,12 @@
 	 * wire refuses. They live on Servers ▸ Remote servers.
 	 */
 	import { page } from '$app/state';
+	import { ask } from '$lib/confirm.svelte';
 	import LocalTree from '$lib/components/instruments/LocalTree.svelte';
 	import ServerTree from '$lib/components/instruments/ServerTree.svelte';
 	import Pill from '$lib/components/Pill.svelte';
+	import Tabs from '$lib/components/Tabs.svelte';
+	import { setQuery } from '$lib/url';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import { workspaceName, type LocalServer } from '$lib/types/instruments';
 
@@ -30,12 +33,15 @@
 	const servers: LocalServer[] = $derived(data.servers ?? []);
 
 	/** `null` is this workspace; otherwise the pid of the daemon being shown. */
-	let activePid = $state<number | null>(null);
+	// In the URL (`?workspace=<pid>`) so a reload stays on the same tab.
+	let activePid = $state<number | null>(Number(page.url.searchParams.get('workspace')) || null);
+	$effect(() => setQuery({ workspace: activePid === null ? null : String(activePid) }));
 	let dirty = $state(false);
 	let busy = $state(false);
-	function switchWorkspace(pid: number | null) {
+	async function switchWorkspace(pid: number | null) {
 		if (pid === activePid || busy) return;
-		if (dirty && !confirm('Discard unsaved instrument parameters?')) return;
+		const discard = { title: 'Discard unsaved instrument parameters?', confirmLabel: 'Discard', tone: 'danger' } as const;
+		if (dirty && !(await ask(discard))) return;
 		dirty = false;
 		activePid = pid;
 	}
@@ -49,49 +55,33 @@
 		lede="Build your instrument tree, add modules under their parents, and edit settings in one place."
 	/>
 
-	<div class="flex gap-0 overflow-x-auto border-b border-line" role="tablist">
-		<button
-			role="tab"
-			aria-selected={activePid === null}
-			class="flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2 text-[13px] transition-colors
-				{activePid === null
-				? 'border-accent font-semibold text-ink'
-				: 'border-transparent text-muted hover:text-ink'}"
-			onclick={() => switchWorkspace(null)}
-			disabled={busy}
-		>
-			This workspace
-		</button>
-
-		{#each servers as server (server.pid)}
-			<button
-				role="tab"
-				aria-selected={activePid === server.pid}
-				class="flex items-center gap-2 whitespace-nowrap border-b-2 px-3.5 py-2 text-[13px] transition-colors
-					{activePid === server.pid
-					? 'border-accent font-semibold text-ink'
-					: 'border-transparent text-muted hover:text-ink'}"
-				onclick={() => switchWorkspace(server.pid)}
-				disabled={busy}
-			>
-				{workspaceName(server.workspace_path)}
-				<span class="mono text-[10.5px] font-normal opacity-70">pid {server.pid}</span>
-			</button>
-		{/each}
-	</div>
-
-	{#if activePid === null}
-		<LocalTree {data} {autoOpenAdd} bind:dirty bind:busy />
-	{:else if activeServer}
-		<!-- Keyed so switching tabs remounts rather than reusing another server's
-		     state: the tree, its schema and its event log all belong to one
-		     daemon, and carrying any of them across would be wrong, not stale. -->
-		{#key activeServer.pid}
-			<ServerTree server={activeServer} bind:dirty bind:busy />
-		{/key}
-	{:else}
-		<p class="py-6 text-sm text-muted">That server is no longer running.</p>
-	{/if}
+	<Tabs
+		value={activePid === null ? 'local' : String(activePid)}
+		onValueChange={(v) => switchWorkspace(v === 'local' ? null : Number(v))}
+		tabs={[
+			{ value: 'local', label: 'This workspace' },
+			...servers.map((server) => ({
+				value: String(server.pid),
+				label: `${workspaceName(server.workspace_path)} · pid ${server.pid}`
+			}))
+		]}
+		label="Workspace"
+	>
+		<div class="pt-4">
+			{#if activePid === null}
+				<LocalTree {data} {autoOpenAdd} bind:dirty bind:busy />
+			{:else if activeServer}
+				<!-- Keyed so switching tabs remounts rather than reusing another server's
+				     state: the tree, its schema and its event log all belong to one
+				     daemon, and carrying any of them across would be wrong, not stale. -->
+				{#key activeServer.pid}
+					<ServerTree server={activeServer} bind:dirty bind:busy />
+				{/key}
+			{:else}
+				<p class="py-6 text-body text-muted">That server is no longer running.</p>
+			{/if}
+		</div>
+	</Tabs>
 
 	{#if activePid === null && servers.length > 0}
 		<p class="text-xs text-muted">

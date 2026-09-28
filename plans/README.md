@@ -9,7 +9,7 @@ plan carries a status block at the top; this table is the summary.
 | [database_plan.md](database_plan.md) | **Mostly complete** | `query.py` pandas helpers, the `measurements_full` view, Alembic migrations |
 | [procedure_plan.md](procedure_plan.md) | **In progress** | Phases 0-5, 6.1-6.5 and 7 built (5.6 included). Next: 6.6 (port `AgilentN7764A`) |
 | [semantic_data_plan.md](semantic_data_plan.md) | **Proposed** | How a run records what it *means* — coordinates vs readings, one row per point, the run type and device gaps. Decisions needed before building |
-| [runner_plan.md](runner_plan.md) | **Not started** | Everything past listing projects — no launch endpoint, no run view, and both plotters are still placeholders |
+| [runner_plan.md](runner_plan.md) | **First version built** | Cases A–D work, with the lab database as the live bus (see its As built block). Left: step progress in the live view, tabs in the plot window |
 
 ## Relationship to `docs/roadmap.md`
 

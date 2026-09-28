@@ -24,6 +24,8 @@ export function formatValue(value: unknown): string {
 		const sweep = value as Record<string, unknown>;
 		if (sweep.mode === 'linear') return `${sweep.start} → ${sweep.stop}, step ${sweep.step}`;
 		if (sweep.mode === 'explicit') return formatValue(sweep.values);
+		if (sweep.mode === 'waypoints')
+			return `${(sweep.points as number[]).join(' → ')}, step ${sweep.step}`;
 		return JSON.stringify(value);
 	}
 	return String(value);

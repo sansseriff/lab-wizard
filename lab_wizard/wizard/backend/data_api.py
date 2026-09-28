@@ -4,8 +4,8 @@ The page asks five kinds of question: which filters there are (the sidebar),
 which runs match them (the run list), what one run was (details and its
 timeline), what a plot spec draws, and how to take a plot or a run somewhere
 else (a notebook, a folder of files). It also keeps the device registry, whose
-properties are filters on every run of that device, and saves a plot the page
-built back into its procedure.
+properties are filters on every run of that device, saves a plot the page
+built back into its procedure, and keeps the workspace's file-saving settings.
 
 Plots and derived columns come from the procedure's **current** definition, so
 a plot or a derived column added to a procedure applies to the runs recorded
@@ -24,21 +24,46 @@ import json
 import tempfile
 import zipfile
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from lab_wizard.lib.data.facets import write_run_facets
-from lab_wizard.lib.data.plot import PlotSpec, default_plot, load_plot, notebook_source, to_series
+from lab_wizard.lib.data.facets import metadata_units, write_run_facets
+from lab_wizard.lib.data.plot import (
+    PlotSpec,
+    line_shape,
+    load_plot,
+    notebook_source,
+    run_plots,
+    to_series,
+)
 from lab_wizard.lib.data.read import Lab
-from lab_wizard.lib.data.run_folder import export_run
-from lab_wizard.lib.data.schema import open_database
-from lab_wizard.lib.procedures.storage import load_procedure, procedure_origin, save_procedure
+from lab_wizard.lib.data.run_folder import (
+    FOLDER_KEY_FAMILIES,
+    FOLDER_KEYS,
+    check_template,
+    export_run,
+    folder_name,
+)
+from lab_wizard.lib.data.schema import DATABASE_NAME, open_database
+from lab_wizard.lib.data.settings import (
+    FileSettings,
+    load_data_settings,
+    save_data_settings,
+)
+from lab_wizard.lib.procedures.storage import (
+    load_procedure,
+    procedure_origin,
+    save_procedure,
+)
 
 __all__ = [
     "DataRequestError",
+    "check_file_template",
     "device_list",
     "export_zip",
     "facet_list",
+    "file_settings",
     "notebook",
     "parse_filters",
     "plot",
@@ -47,6 +72,7 @@ __all__ = [
     "run_list",
     "run_steps",
     "save_device",
+    "save_file_settings",
     "save_plot_to_procedure",
 ]
 
@@ -117,6 +143,11 @@ def facet_list(db: Path, filters: Mapping[str, Any]) -> dict[str, Any]:
         total = len(lab.find(filters))
     except ValueError as e:
         raise DataRequestError(str(e)) from e
+    # The units a run's metadata gives its quantities ({value, unit}); the
+    # latest run's unit wins if two runs disagree.
+    units: dict[str, str] = {}
+    for (text,) in lab.query("SELECT metadata FROM runs WHERE metadata IS NOT NULL ORDER BY id"):
+        units.update(metadata_units(json.loads(text or "{}")))
     out = []
     for (key,), part in frame.group_by("key", maintain_order=True):
         order, group = _group(str(key))
@@ -126,6 +157,7 @@ def facet_list(db: Path, filters: Mapping[str, Any]) -> dict[str, Any]:
             "group": group,
             "values": [{"value": v, "runs": n} for v, n in zip(part["value"], part["runs"])],
             "numeric": numeric,
+            "unit": units.get(str(key)),
         }
         if numeric:
             entry["range"] = [part["num"].min(), part["num"].max()]
@@ -172,10 +204,7 @@ def run_detail(db: Path, config_dir: str | Path, run_id: int) -> dict[str, Any]:
     current = _current_definition(config_dir, info["procedure"])
     definition = current if current is not None else info["definition"]
     columns = info["columns"] or {}
-    plots = [PlotSpec.model_validate(p) for p in (definition or {}).get("plots") or []]
-    if not plots:
-        fallback = default_plot(definition, list(columns))
-        plots = [fallback] if fallback is not None else []
+    plots = run_plots(definition, list(columns))
     return {
         "run": {**summary, "metadata": info["metadata"] or {}},
         "params": info["params"] or {},
@@ -235,7 +264,7 @@ def _derived_for(lab: Lab, config_dir: str | Path, run_ids: list[int]) -> dict[s
 
 
 def plot(db: Path, config_dir: str | Path, data: Mapping[str, Any]) -> dict[str, Any]:
-    """The series ``data`` (a plot spec) draws, and the units of its columns."""
+    """The series ``data`` (a plot spec) draws, the units of its columns, and the lines' shape."""
     from lab_wizard.lib.data.expressions import ExpressionError
 
     spec = _spec(data)
@@ -245,10 +274,10 @@ def plot(db: Path, config_dir: str | Path, data: Mapping[str, Any]) -> dict[str,
         rows = load_plot(spec, db, derived=derived)
     except ExpressionError as e:
         raise DataRequestError(str(e)) from e
-    units = {
-        name: meta.get("unit") for name, meta in lab.runs(spec.runs).columns().items() if isinstance(meta, dict)
-    }
-    return {"series": to_series(rows), "units": units}
+    runs = lab.runs(spec.runs)
+    units = {name: meta.get("unit") for name, meta in runs.columns().items() if isinstance(meta, dict)}
+    # How the rows fall into lines, so the page can say what it drew.
+    return {"series": to_series(rows), "units": units, "shape": line_shape(rows)}
 
 
 def notebook(db: Path, config_dir: str | Path, data: Mapping[str, Any]) -> dict[str, Any]:
@@ -311,6 +340,88 @@ def export_zip(db: Path, run_id: int) -> tuple[bytes, str]:
                 if path.is_file():
                     archive.write(path, path.relative_to(folder.parent))
         return buffer.getvalue(), f"{folder.name}.zip"
+
+
+# --------------------------- file saving ---------------------------
+
+# A made-up run, to show what a folder template gives before any run exists.
+_EXAMPLE_FACETS = {
+    "date": "2026-09-22",
+    "time": "143012",
+    "procedure": "mcr_curve",
+    "device": "A7",
+    "device.wafer": "W12",
+    "operator": "andrew",
+    "run_id": "41",
+}
+
+
+def _recorded_keys(db: Path) -> list[str]:
+    """Keys in the open families (``device.wafer``, ``run.cryostat``, ...) some run has."""
+    lab = _lab(db)
+    if lab is None:
+        return []
+    families = " OR ".join("key LIKE ?" for _ in FOLDER_KEY_FAMILIES)
+    rows = lab.query(
+        f"SELECT DISTINCT key FROM run_facets WHERE {families} ORDER BY key",
+        [f"{family}%" for family in FOLDER_KEY_FAMILIES],
+    )
+    return [row[0] for row in rows]
+
+
+def _example_facets(db: Path) -> dict[str, str]:
+    """The most recent run's facets, as a folder template sees them, or a made-up run."""
+    lab = _lab(db)
+    latest = lab.query("SELECT id, started_at FROM runs ORDER BY id DESC LIMIT 1") if lab else []
+    if not latest:
+        return dict(_EXAMPLE_FACETS)
+    run_id, started_at = latest[0]
+    facets: dict[str, str] = {}
+    for key, value in lab.query("SELECT key, value FROM run_facets WHERE run_id = ? ORDER BY rowid", (run_id,)):
+        facets.setdefault(key, value)
+    facets["run_id"] = str(run_id)
+    if started_at:
+        facets["time"] = datetime.fromisoformat(started_at).astimezone().strftime("%H%M%S")
+    return facets
+
+
+def check_file_template(data_dir: Path, template: str) -> dict[str, Any]:
+    """What ``template`` would name the latest run's folder, and what is wrong with it."""
+    db = data_dir / DATABASE_NAME
+    return {
+        "example": str(folder_name(template, _example_facets(db))),
+        "problems": check_template(template, set(_recorded_keys(db))),
+    }
+
+
+def file_settings(config_dir: str | Path, workspace_root: Path, data_dir: Path) -> dict[str, Any]:
+    """How runs are saved as files: the settings, where they go, and the keys a template can use."""
+    files = load_data_settings(config_dir).files
+    root = Path(files.root).expanduser() if files.root else data_dir / "files"
+    if not root.is_absolute():
+        root = workspace_root / root
+    return {
+        "files": files.model_dump(mode="json"),
+        "folder": str(root),
+        "keys": [*FOLDER_KEYS, *_recorded_keys(data_dir / DATABASE_NAME)],
+        **check_file_template(data_dir, files.path),
+    }
+
+
+def save_file_settings(
+    config_dir: str | Path, workspace_root: Path, data_dir: Path, files: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Replace the workspace's file-saving settings; every project's next run uses them."""
+    settings = load_data_settings(config_dir)
+    try:
+        settings.files = FileSettings.model_validate(files)
+    except ValueError as e:
+        raise DataRequestError(str(e)) from e
+    errors = [p["message"] for p in check_template(settings.files.path) if p["level"] == "error"]
+    if errors:
+        raise DataRequestError(" ".join(errors))
+    save_data_settings(config_dir, settings)
+    return file_settings(config_dir, workspace_root, data_dir)
 
 
 # --------------------------- devices ---------------------------

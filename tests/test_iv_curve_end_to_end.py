@@ -208,3 +208,27 @@ def test_generated_setup_runs_as_a_script(tmp_path: Path, rig) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "Traceback" not in result.stderr
+
+
+def test_a_there_and_back_sweep_shows_the_hysteresis_leg_by_leg(tmp_path: Path, rig) -> None:
+    """Up to past switching and back down: the down leg stays latched below
+    the switching bias, until the current falls under the retrapping current.
+    The leg each point was on is recorded, so the two can be told apart."""
+    out = _generate_project(tmp_path, rig)
+    yaml = YAML(typ="rt")
+    yaml_path = Path(out["yaml_file"])
+    payload = yaml.load(yaml_path.read_text(encoding="utf-8"))
+    payload["measurement"]["params"]["bias"]["sweep"] = {"mode": "waypoints", "points": [0.0, 0.06, 0.0], "step": 0.005}
+    with yaml_path.open("w", encoding="utf-8") as handle:
+        yaml.dump(payload, handle)
+    # Regenerated code for this definition passes the sweep's legs to Sweep.
+    assert ".also('bias_voltage')" in Path(out["measurement_file"]).read_text(encoding="utf-8")
+
+    rows = _run_and_read_back(out)
+    at = {(row["bias_voltage_leg"], row["bias_voltage"]): row["sense_voltage"] for row in rows.iter_rows(named=True)}
+    # Latched, the current is V / (R_bias + R_normal) = V / 150 kΩ, so it
+    # stays latched down to 0.0225 V (the 0.15 µA retrapping current).
+    assert at[(0, 0.025)] == 0.0, "going up, 0.025 V is below switching"
+    assert at[(1, 0.025)] > 0.0, "coming down, it is still latched at 0.025 V"
+    assert at[(1, 0.02)] == 0.0, "and retrapped by 0.02 V"
+    assert sorted({leg for leg, _bias in at}) == [0, 1]

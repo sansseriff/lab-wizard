@@ -65,6 +65,18 @@ other thing this detector is asked for: counts pass while the threshold is
 below the pulse amplitude and roll off across ``pulse_amplitude_spread_mV``
 around it. The comparison is on magnitude, so the model takes no position on
 whether the readout chain inverts.
+
+The pulse is the bias current diverted into the readout, so its height grows
+with the bias: ``pulse_amplitude_mV`` is its height at the critical current,
+and at half that current it is half as tall. That is why a PCR curve is
+measured at several trigger levels: a higher trigger cuts off the small pulses
+of a lightly biased detector, so its curve turns on at a higher bias.
+
+The readout amplifier's own noise triggers the counter too, when the trigger
+is low enough to reach it. Gaussian noise of RMS ``σ`` crosses a level ``T``
+about ``ν₀·exp(-T²/2σ²)`` times a second (Rice's formula), so the noise count
+falls off steeply with the trigger level: the lowest trigger of a set picks up
+a noise floor that the others do not, whatever the bias.
 """
 
 from __future__ import annotations
@@ -84,7 +96,7 @@ class SnspdParams(BaseModel):
     """Device and circuit constants for one simulated detector."""
 
     bias_resistance_ohm: float = Field(
-        default=1.0e5,
+        default=1.0e6,
         description="(ohm) series resistor between the voltage source and the detector",
     )
     critical_current_a: float = Field(
@@ -136,11 +148,19 @@ class SnspdParams(BaseModel):
     )
     pulse_amplitude_mV: float = Field(
         default=200.0,
-        description="(mV) height of an output pulse at the counter input",
+        description="(mV) height of an output pulse at the counter input, biased at the critical current; it scales with the bias current",
     )
     pulse_amplitude_spread_mV: float = Field(
         default=20.0,
         description="(mV) spread of pulse heights, which sets how sharply counts fall off with threshold",
+    )
+    readout_noise_rms_mV: float = Field(
+        default=8.0,
+        description="(mV) RMS of the readout amplifier's noise at the counter input; 0 for none",
+    )
+    readout_noise_crossing_rate_hz: float = Field(
+        default=1.0e7,
+        description="(Hz) how often that noise crosses zero, roughly the amplifier's bandwidth",
     )
 
 
@@ -266,39 +286,55 @@ class SnspdModel:
         exponent = (amps - p.critical_current_a) / p.dark_count_doubling_current_a
         return p.dark_count_rate_hz * 2.0**exponent
 
-    def discriminator_fraction(self, threshold_mV: float) -> float:
+    def pulse_amplitude(self, current: float | None = None) -> float:
+        """(mV) height of a pulse at ``current`` (default: now): proportional to the bias current."""
+        amps = abs(self.bias_current() if current is None else current)
+        return self.params.pulse_amplitude_mV * amps / self.params.critical_current_a
+
+    def discriminator_fraction(self, threshold_mV: float, current: float | None = None) -> float:
         """Fraction of pulses that clear a discriminator at ``threshold_mV``.
 
         One minus the error function of the threshold against the pulse-height
         distribution: everything passes well below the pulse amplitude, nothing
         passes well above it, and the transition is where a threshold sweep
-        finds the pulse height.
+        finds the pulse height. The pulses are those of the detector biased at
+        ``current`` (default: now).
         """
         p = self.params
+        amplitude = self.pulse_amplitude(current)
         if p.pulse_amplitude_spread_mV <= 0.0:
-            return 1.0 if abs(threshold_mV) <= p.pulse_amplitude_mV else 0.0
-        argument = (abs(threshold_mV) - p.pulse_amplitude_mV) / (
+            return 1.0 if abs(threshold_mV) <= amplitude else 0.0
+        argument = (abs(threshold_mV) - amplitude) / (
             math.sqrt(2.0) * p.pulse_amplitude_spread_mV
         )
         return 0.5 * (1.0 - math.erf(argument))
 
+    def noise_count_rate(self, threshold_mV: float) -> float:
+        """Counts per second the readout noise alone triggers at ``threshold_mV`` (Rice's formula)."""
+        p = self.params
+        if p.readout_noise_rms_mV <= 0.0:
+            return 0.0
+        return p.readout_noise_crossing_rate_hz * math.exp(-(threshold_mV**2) / (2.0 * p.readout_noise_rms_mV**2))
+
     def count_rate(self, threshold_mV: float = 0.0) -> float:
         """Counts per second a counter on this detector would report.
 
-        Zero once the detector has latched: a device sitting in its normal
-        state produces no pulses, which is why a measured PCR curve stops at
-        the switching current instead of continuing to climb.
+        The detector's pulses, once it has latched none: a device sitting in its
+        normal state produces no pulses, which is why a measured PCR curve stops
+        at the switching current instead of continuing to climb. The readout's
+        noise counts either way.
         """
         current, _ = self.solve()  # settles the branch; everything below reads it
+        noise = self.noise_count_rate(threshold_mV)
         if self._normal or not self.output_enabled:
-            return 0.0
+            return noise
         photons = (
             self.params.incident_photon_rate_hz
             * self.optical_transmission
             * self.detection_efficiency(current)
         )
         dark = self.dark_count_rate(current)
-        return (photons + dark) * self.discriminator_fraction(threshold_mV)
+        return (photons + dark) * self.discriminator_fraction(threshold_mV, current) + noise
 
     def count_events(self, gate_time: float, threshold_mV: float = 0.0) -> int:
         """Events counted in a gate — a Poisson draw about :meth:`count_rate`.

@@ -18,7 +18,8 @@ params:
   bias:
     sweep:
       type: sweep
-      default: {mode: linear, start: 0.0, stop: 1.4, step: 0.005}
+      # There and back, both ways: the loop that shows the hysteresis.
+      default: {mode: waypoints, points: [0.0, 1.4, 0.0, -1.4, 0.0], step: 0.005}
       unit: V
       description: the bias voltages to visit, in order
     settle_s:
@@ -70,6 +71,10 @@ plots:
     x: sense_voltage
     y: [current]
     series: run
+  - name: IV by leg
+    x: sense_voltage
+    y: [current]
+    series: bias_voltage_leg
   - name: Sensed voltage
     x: bias_voltage
     y: [sense_voltage]

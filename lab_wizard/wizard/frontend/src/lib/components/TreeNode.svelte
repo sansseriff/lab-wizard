@@ -26,15 +26,11 @@
 <script lang="ts">
 	import CaretDown from 'phosphor-svelte/lib/CaretDown';
 	import CaretRight from 'phosphor-svelte/lib/CaretRight';
-	import ArrowCounterClockwise from 'phosphor-svelte/lib/ArrowCounterClockwise';
-	import Trash from 'phosphor-svelte/lib/Trash';
 	import Self from './TreeNode.svelte';
 
 	type Props = {
 		node: TreeItem;
 		depth?: number;
-		onReset?: (node: TreeItem) => void;
-		onRemove?: (node: TreeItem) => void;
 		onSelect?: (node: TreeItem, path: TreePathRef[]) => void;
 		isSelectable?: boolean;
 		isCompatible?: (node: TreeItem, path: TreePathRef[]) => boolean;
@@ -51,8 +47,6 @@
 	let {
 		node,
 		depth = 0,
-		onReset,
-		onRemove,
 		onSelect,
 		isSelectable = false,
 		isCompatible,
@@ -96,7 +90,7 @@
 	{/if}
 
 	<div
-		class="group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition hover:bg-surface-2 {isSelectable && !compatible ? 'opacity-45' : ''} {selected ? 'bg-surface-2' : ''} {isSelectable && compatible ? 'cursor-pointer' : ''}"
+		class="group flex items-center gap-1.5 rounded-md px-2 py-1.5 text-body transition hover:bg-surface-2 {isSelectable && !compatible ? 'opacity-45' : ''} {selected ? 'bg-surface-2' : ''} {isSelectable && compatible ? 'cursor-pointer' : ''}"
 		role={isSelectable ? 'button' : undefined}
 		aria-disabled={isSelectable && !compatible}
 		onclick={handleSelect}
@@ -126,7 +120,7 @@
 		<span class="text-xs text-muted">({node.key})</span>
 		{#if selectBadge}
 			<span
-				class="rounded px-1.5 py-0.5 text-[10px] bg-accent-wash text-accent-strong"
+				class="rounded px-1.5 py-0.5 text-2xs bg-accent-wash text-accent-strong"
 			>
 				{selectBadge}
 			</span>
@@ -134,7 +128,7 @@
 
 		{#if busy}
 			<span
-				class="rounded bg-warn-wash px-1.5 py-0.5 text-[10px] font-medium text-warn"
+				class="rounded bg-warn-wash px-1.5 py-0.5 text-2xs font-medium text-warn"
 				title="A running measurement holds this, or part of it. You can still bind it — the run may be over by the time this project runs — but the two cannot hold the same instrument at once."
 			>
 				{busy}
@@ -143,7 +137,7 @@
 
 		{#if transport}
 			<span
-				class="rounded px-1.5 py-0.5 text-[10px] font-medium {transport.transport_sharing ===
+				class="rounded px-1.5 py-0.5 text-2xs font-medium {transport.transport_sharing ===
 				'shared'
 					? 'bg-ok-wash text-ok'
 					: 'bg-warn-wash text-warn'}"
@@ -155,7 +149,7 @@
 			</span>
 			{#if transport.state_authority === 'subscribed'}
 				<span
-					class="rounded bg-accent-wash px-1.5 py-0.5 text-[10px] font-medium text-accent-strong"
+					class="rounded bg-accent-wash px-1.5 py-0.5 text-2xs font-medium text-accent-strong"
 					title="State is read from the process that owns this hardware, not inferred from our own commands"
 				>
 					subscribed
@@ -163,7 +157,7 @@
 			{/if}
 			{#if transport.held_by_server}
 				<span
-					class="rounded bg-crit-wash px-1.5 py-0.5 text-[10px] font-medium text-crit"
+					class="rounded bg-crit-wash px-1.5 py-0.5 text-2xs font-medium text-crit"
 					title="A server has this hardware open right now"
 				>
 					in use
@@ -171,26 +165,6 @@
 			{/if}
 		{/if}
 
-		<div class="ml-auto flex gap-1 opacity-0 transition group-hover:opacity-100">
-			{#if onReset}
-				<button
-					class="rounded p-1 text-muted hover:bg-surface-2 hover:text-ink-2"
-					title="Reset to defaults"
-					onclick={() => onReset?.(node)}
-				>
-					<ArrowCounterClockwise size={14} />
-				</button>
-			{/if}
-			{#if onRemove}
-				<button
-					class="rounded p-1 text-muted hover:bg-crit-wash hover:text-crit"
-					title="Remove"
-					onclick={() => onRemove?.(node)}
-				>
-					<Trash size={14} />
-				</button>
-			{/if}
-		</div>
 	</div>
 
 	{#if expanded && hasChildren}
@@ -199,8 +173,6 @@
 				<Self
 					node={child}
 					depth={depth + 1}
-					{onReset}
-					{onRemove}
 					{onSelect}
 					{isSelectable}
 					{isCompatible}

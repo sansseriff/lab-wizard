@@ -125,12 +125,12 @@ Everything in the GUI lives under seven sections. What each is for:
 | Section | Use it to | Page |
 |---|---|---|
 | **Overview** | see what this workstation is doing: is a server running, who owns the hardware | — |
-| **Measurements** | pick something to run, bind instruments to it, generate a project; list what you have generated | [Measurements](wizard/measurements.md) |
+| **Measurements** | pick something to run, bind instruments to it, generate a project; then set it up, run it and watch it live | [Measurements](wizard/measurements.md) |
 | **Procedures** | write a measurement as roles, parameters and a step tree instead of Python | [Procedures](wizard/procedures.md) |
 | **Instruments** | configure the hardware this workspace drives; build standalone resource files | [Instruments](wizard/instruments.md) |
 | **Servers** | share this machine's instruments, set safety rules, see who holds what, reach other machines | [Servers](wizard/servers.md) |
-| **Plotters** | configure plotters (scaffolding today) | [Plotters](wizard/plotters.md) |
-| **Data** | configure savers and browse what runs wrote | [Data](wizard/data.md) |
+| **Data** | browse and plot what runs recorded | [Data](wizard/data.md) |
+| **Settings** | set how runs are saved as files, for every project; see where the workspace keeps things | [Saving files](wizard/data.md#saving-files) |
 
 A first session with real hardware is steps 1 and 2 above with your own
 instruments: add them, match their ports, slots and GPIB addresses to the
@@ -142,7 +142,7 @@ A timestamped folder under `projects/`:
 
 | File | Is |
 |---|---|
-| `<project>.yaml` | the measurement's parameters, which savers and plotters it uses, and **which instruments by name** — not a copy of their settings |
+| `<project>.yaml` | the measurement's parameters, what its runs produce (`outputs:`), and **which instruments by name** — not a copy of their settings |
 | `<measurement>_setup.py` | the generated file you run: it resolves those names against the config tree, claims what it needs, and hands the run its resources |
 | `<measurement>.py` | the procedure itself — editable Python |
 
@@ -164,15 +164,15 @@ lab_wizard_repo/
 ├── projects/                 # generated measurement projects
 ├── logs/                     # generated runtime logs
 ├── data/                     # generated; lab.db, where every run is recorded
+├── measurements/             # generated; this lab's custom measurements, with two examples
 ├── lab_wizard/
 │   ├── lib/                 # the instrument library (importable, no GUI)
 │   │   ├── instruments/     #   instrument models (general/ + per-vendor dirs)
-│   │   ├── measurements/    #   sweep params shared by measurements
 │   │   ├── procedures/      #   procedure definitions, step schemas, codegen
 │   │   ├── task_adapters/   #   steps, run lifecycle, the run entry point, sinks
 │   │   ├── data/            #   the lab database: schema, recorder, facets
-│   │   ├── savers/          #   optional extra outputs (FileSaver)
-│   │   ├── plotters/        #   plotting (scaffolding — see Roadmap)
+│   │   ├── savers/          #   the file saver: runs as folders of files
+│   │   ├── plotters/        #   live plots (placeholders — see Roadmap)
 │   │   ├── server/          #   remote-control server (ZMQ + JSON-RPC)
 │   │   ├── client/          #   remote-control client (RemoteResources + proxies)
 │   │   └── utilities/       #   config I/O, discovery, model tree

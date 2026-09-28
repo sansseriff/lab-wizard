@@ -55,7 +55,9 @@ def test_attenuation_leaves_dark_counts_alone():
     model.set_output_enabled(True)
     model.set_bias_voltage(BIAS_V)
     model.set_optical_transmission(0.0)
-    assert model.count_rate() == pytest.approx(model.dark_count_rate() * model.discriminator_fraction(0.0))
+    assert model.count_rate(THRESHOLD_MV) == pytest.approx(
+        model.dark_count_rate() * model.discriminator_fraction(THRESHOLD_MV) + model.noise_count_rate(THRESHOLD_MV)
+    )
 
 
 # --------------------------- built-in procedures ---------------------------

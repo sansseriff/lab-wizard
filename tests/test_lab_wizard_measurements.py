@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 import types
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,6 @@ from lab_wizard.lib.instruments.general.vsense import StandInVSense
 from lab_wizard.lib.instruments.general.vsource import StandInVSource
 from lab_wizard.lib.procedures.codegen import measurement_module_source
 from lab_wizard.lib.procedures.storage import load_procedure
-from lab_wizard.lib.savers.saver import StandInSaver
 
 
 class StubCounter(Counter):
@@ -64,8 +63,6 @@ class Resources:
     voltage_source: Any = None
     voltage_sense: Any = None
     counter: Any = None
-    savers: list = field(default_factory=lambda: [StandInSaver()])
-    plotters: list = field(default_factory=list)
 
 
 def _module(name: str, project_dir: Path) -> types.ModuleType:
@@ -102,16 +99,12 @@ def test_iv_curve_records_one_row_per_point_and_shuts_down(tmp_path: Path) -> No
     status = module.IvCurveMeasurement(resources).run_measurement()
 
     assert status is Status.SUCCESS
-    saver = resources.savers[0]
-    assert saver.run_started is not None and saver.run_started.procedure == "iv_curve"
-    assert saver.run_ended is not None and saver.run_ended.status == "success"
-    assert [(p.values["bias_voltage"], p.values["sense_voltage"]) for p in saver.points] == [
-        (bias, 0.05) for bias in points
-    ]
+    runs = find(db=tmp_path / "data" / "lab.db")
+    assert runs.table().select("procedure", "status").rows() == [("iv_curve", "success")]
+    rows = runs.points(runs.derived())
+    assert list(zip(rows["bias_voltage"], rows["sense_voltage"])) == [(bias, 0.05) for bias in points]
 
     # The current is derived when the run is read, from its own bias resistance.
-    runs = find(db=tmp_path / "data" / "lab.db")
-    rows = runs.points(runs.derived())
     assert rows["current"].to_list() == pytest.approx([(bias - 0.05) / 100_000.0 for bias in points])
 
     # Source returned to zero and turned off in cleanup.
@@ -152,12 +145,11 @@ def test_pcr_curve_records_a_count_rate_per_point(tmp_path: Path) -> None:
 
     assert status is Status.SUCCESS
     assert resources.counter.threshold_mV == -40.0  # set by the run, not inherited
-    rows = resources.savers[0].points
-    assert len(rows) == len(points)
-    for row, bias in zip(rows, points):
-        assert row.values == {
-            "bias_voltage": bias, "counts": counts, "int_time": gate_time, "count_rate": counts / gate_time,
-        }
+    rows = find(db=tmp_path / "data" / "lab.db").points()
+    assert rows.select("bias_voltage", "counts", "int_time", "count_rate").rows(named=True) == [
+        {"bias_voltage": bias, "counts": counts, "int_time": gate_time, "count_rate": counts / gate_time}
+        for bias in points
+    ]
 
     assert resources.voltage_source.voltage == 0.0
     assert resources.voltage_source.output_enabled is False

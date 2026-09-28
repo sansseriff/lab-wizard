@@ -98,7 +98,7 @@
 		class="flex w-full flex-col items-start rounded px-2.5 py-1.5 text-left hover:bg-accent-wash"
 		onclick={() => onpick(spec.type, role)}
 	>
-		<span class="text-[13px] font-semibold">{stepTitle({ type: spec.type })}</span>
+		<span class="text-body font-semibold">{stepTitle({ type: spec.type })}</span>
 		<span class="text-xs text-muted">{spec.summary.replaceAll('``', '')}</span>
 	</button>
 {/snippet}
@@ -115,7 +115,7 @@
 		{#each byRole as group (group.role)}
 			{#if group.steps.length}
 				<section>
-					<h3 class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+					<h3 class="mb-1 text-fine font-semibold uppercase tracking-[0.08em] text-muted">
 						<span class="mono normal-case tracking-normal text-ink">{group.role}</span> · {group.behavior}
 					</h3>
 					{#each group.steps as spec (spec.type)}
@@ -127,7 +127,7 @@
 
 		{#if flow.length}
 			<section>
-				<h3 class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+				<h3 class="mb-1 text-fine font-semibold uppercase tracking-[0.08em] text-muted">
 					Structure and flow
 				</h3>
 				{#each flow as spec (spec.type)}
@@ -138,7 +138,7 @@
 
 		{#if anyRole.length && Object.keys(editor.definition.roles).length}
 			<section>
-				<h3 class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+				<h3 class="mb-1 text-fine font-semibold uppercase tracking-[0.08em] text-muted">
 					Any role
 				</h3>
 				{#each anyRole as spec (spec.type)}
@@ -149,7 +149,7 @@
 
 		{#each needingRole as [behavior, specs] (behavior)}
 			<section>
-				<h3 class="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">
+				<h3 class="mb-1 text-fine font-semibold uppercase tracking-[0.08em] text-muted">
 					Adds {behavior} role
 				</h3>
 				{#each specs as spec (spec.type)}
@@ -160,6 +160,6 @@
 	</div>
 
 	{#if !visible.length}
-		<p class="text-sm text-muted">No step matches “{query}”.</p>
+		<p class="text-body text-muted">No step matches “{query}”.</p>
 	{/if}
 </Modal>

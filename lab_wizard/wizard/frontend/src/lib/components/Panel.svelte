@@ -34,7 +34,7 @@
 		>
 			<div class="min-w-0">
 				{#if title}
-					<h2 class="text-[13.5px] font-semibold">{title}</h2>
+					<h2 class="text-body font-semibold">{title}</h2>
 				{/if}
 				{#if description}
 					<p class="mt-0.5 text-xs text-muted">{description}</p>

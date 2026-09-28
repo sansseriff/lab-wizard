@@ -11,6 +11,8 @@
 	 * instruments.
 	 */
 	import { fetchWithConfig } from '$lib/api';
+	import IconButton from '$lib/components/IconButton.svelte';
+	import { ask } from '$lib/confirm.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Callout from '$lib/components/Callout.svelte';
@@ -60,6 +62,13 @@
 	}
 
 	async function removeServer(name: string) {
+		const yes = await ask({
+			title: `Forget remote server ${name}?`,
+			description: "It is only removed from this workspace's list; nothing on that server changes.",
+			confirmLabel: 'Remove',
+			tone: 'danger'
+		});
+		if (!yes) return;
 		busy = true;
 		statusMessage = null;
 		try {
@@ -133,20 +142,20 @@
 			</div>
 			<button class="lw-btn lw-btn-primary" onclick={addServer} disabled={busy}>Add</button>
 		</div>
-		<p class="mt-2 text-[11px] text-muted">
+		<p class="mt-2 text-fine text-muted">
 			Projects record the <em>name</em>, not the address, and resolve it through this book at run
 			time — so a project stays readable and an address can change in one place.
 		</p>
 	</Panel>
 
 	<div>
-		<p class="mb-2 text-[10.5px] font-semibold uppercase tracking-[0.11em] text-muted">
+		<p class="mb-2 text-2xs font-semibold uppercase tracking-[0.11em] text-muted">
 			Registered
 		</p>
 
 		{#if servers.length === 0}
 			<div class="rounded border border-line bg-surface px-4 py-8 text-center">
-				<p class="text-[13px] font-medium">No remote servers registered</p>
+				<p class="text-body font-medium">No remote servers registered</p>
 				<p class="mx-auto mt-1 max-w-[46ch] text-xs text-muted">
 					Add one to use another machine's instruments when creating a measurement.
 				</p>
@@ -165,17 +174,10 @@
 								<PlugIcon size={13} />
 								{testing[server.name] ? 'Testing…' : 'Test'}
 							</button>
-							<button
-								class="lw-btn lw-btn-sm"
-								title="Remove from the address book"
-								onclick={() => removeServer(server.name)}
-								disabled={busy}
-							>
-								<TrashIcon size={13} />
-							</button>
+							<IconButton small label="Remove from the address book" onclick={() => removeServer(server.name)} disabled={busy}><TrashIcon size={13} /></IconButton>
 						{/snippet}
 
-						<p class="mono mb-2 truncate text-[11.5px] text-muted" title={server.url}>
+						<p class="mono mb-2 truncate text-fine text-muted" title={server.url}>
 							{server.url}
 						</p>
 
@@ -193,7 +195,7 @@
 								</Pill>
 								{#if res.attributes && res.attributes.length > 0}
 									<dl
-										class="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-0.5 text-[12px]"
+										class="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-0.5 text-xs"
 									>
 										{#each res.attributes as a (a.attribute_name)}
 											<dt class="mono">{a.attribute_name}</dt>

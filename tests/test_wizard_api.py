@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 from typing import Any, cast
 
+from lab_wizard.lib.data.settings import load_data_settings
 from lab_wizard.wizard.backend.main import app
-import lab_wizard.wizard.backend.main as backend_main
+from lab_wizard.wizard.backend.deps import get_env
 from lab_wizard.wizard.backend.models import Env
 from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928Params
@@ -38,15 +39,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         yield c
 
 
-class TestGetMeasurements:
-    """Tests for /api/get-measurements endpoint."""
-
-    def test_returns_dict(self, client: TestClient):
-        """Endpoint should return a dict of measurements."""
-        response = client.get("/api/get-measurements")
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, dict)
+class TestMeasurementChoices:
+    """Tests for /api/measurement-choices."""
 
     def test_iv_and_pcr_curves_are_offered_as_built_in_procedures(self, client: TestClient):
         """They were hand-written measurements; now they are procedures like mcr_curve."""
@@ -56,18 +50,6 @@ class TestGetMeasurements:
         for name in ("iv_curve", "pcr_curve", "mcr_curve"):
             assert choices[(name, "procedure")]["origin"] == "builtin"
         assert not any(kind == "measurement" for _name, kind in choices)
-
-    def test_measurement_info_structure(self, client: TestClient):
-        """Each measurement should have required fields."""
-        response = client.get("/api/get-measurements")
-        data = response.json()
-
-        for name, info in data.items():
-            assert "name" in info, f"Missing 'name' in {name}"
-            assert "description" in info, f"Missing 'description' in {name}"
-            assert "measurement_dir" in info, f"Missing 'measurement_dir' in {name}"
-            assert info["name"] == name
-
 
 class TestGetResources:
     """Tests for /api/get-resources/{name} endpoint."""
@@ -158,30 +140,54 @@ class TestGetResources:
         assert response.status_code == 404
 
 
-class TestManageSaversMeta:
-    """Tests for /api/manage-savers endpoint metadata."""
+class TestFileSettings:
+    """/api/settings/files: how runs are saved as files, for the whole workspace."""
 
-    def test_returns_types(self, client: TestClient):
-        """Endpoint should return the configured tree and discoverable types."""
-        response = client.get("/api/manage-savers")
-        assert response.status_code == 200
+    def test_defaults_before_anything_is_saved(self, client: TestClient, tmp_path: Path):
+        data = client.get("/api/settings/files").json()
+        assert data["files"] == {"root": "", "path": "{date}/{procedure}_{device}_{time}", "plot_png": True}
+        assert data["folder"] == str((tmp_path / "workspace" / "data" / "files").resolve())
+        assert data["example"] == "2026-09-22/mcr_curve_A7_143012"
+
+    def test_saved_settings_are_the_workspaces(self, client: TestClient, tmp_path: Path):
+        response = client.put(
+            "/api/settings/files",
+            json={"root": "runs", "path": "{device.wafer}/{device}/{date}", "plot_png": False},
+        )
+        assert response.status_code == 200, response.text
         data = response.json()
-        assert "tree" in data
-        assert "metadata" in data
-        # file_saver is the bundled implementation; the lab database is not a saver
-        assert "file_saver" in data["metadata"]
+        assert data["folder"] == str((tmp_path / "workspace" / "runs").resolve())
+        assert data["example"] == "W12/A7/2026-09-22"
 
+        config_dir = tmp_path / "workspace" / "config"
+        assert load_data_settings(config_dir).files.path == "{device.wafer}/{device}/{date}"
+        assert client.get("/api/settings/files").json()["files"]["plot_png"] is False
 
-class TestManagePlottersMeta:
-    """Tests for /api/manage-plotters endpoint metadata."""
+    def test_the_workspace_paths_are_the_manifests(self, client: TestClient, tmp_path: Path):
+        paths = client.get("/api/settings/workspace").json()
+        root = (tmp_path / "workspace").resolve()
+        assert paths["root"] == str(root)
+        assert paths["database"] == str(root / "data" / "lab.db")
+        assert paths["projects_dir"] == str(root / "projects")
 
-    def test_returns_types(self, client: TestClient):
-        response = client.get("/api/manage-plotters")
-        assert response.status_code == 200
-        data = response.json()
-        assert "tree" in data
-        assert "metadata" in data
-        assert "mpl_plotter" in data["metadata"]
+    def test_a_template_is_checked_as_it_is_typed(self, client: TestClient):
+        check = client.post("/api/settings/files/check", json={"path": "{date}/{devce}"}).json()
+        assert [(p["level"], p["key"]) for p in check["problems"]] == [("error", "devce")]
+        # A family key no run has recorded yet may still be recorded later.
+        check = client.post("/api/settings/files/check", json={"path": "{run.cryostat}/{device}"}).json()
+        assert [(p["level"], p["key"]) for p in check["problems"]] == [("warning", "run.cryostat")]
+        assert check["example"] == "none/A7"
+
+    def test_a_template_with_an_unknown_key_is_not_saved(self, client: TestClient):
+        response = client.put("/api/settings/files", json={"root": "", "path": "{devce}", "plot_png": True})
+        assert response.status_code == 422
+        assert "devce" in response.json()["detail"]
+        assert client.get("/api/settings/files").json()["files"]["path"] == "{date}/{procedure}_{device}_{time}"
+
+    def test_an_empty_template_is_refused(self, client: TestClient):
+        response = client.put("/api/settings/files", json={"root": "", "path": " ", "plot_png": True})
+        assert response.status_code == 422
+        assert "empty" in response.json()["detail"]
 
 
 def _seed_config(config_dir: Path) -> None:
@@ -206,20 +212,14 @@ def _seed_config(config_dir: Path) -> None:
 
 
 class TestCreateMeasurementProject:
-    def test_creates_project_folder(self, client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_creates_project_folder(self, client: TestClient, tmp_path: Path, request: pytest.FixtureRequest):
         cfg = tmp_path / "config"
         prj = tmp_path / "projects"
         _seed_config(cfg)
         prj.mkdir(parents=True, exist_ok=True)
 
-        def _cfg_override(_env: Env) -> str:
-            return str(cfg)
-
-        def _prj_override(_env: Env) -> Path:
-            return prj
-
-        monkeypatch.setattr(backend_main, "_config_dir", _cfg_override)
-        monkeypatch.setattr(backend_main, "_projects_dir", _prj_override)
+        app.dependency_overrides[get_env] = lambda: Env(config_dir=cfg, projects_dir=prj)
+        request.addfinalizer(app.dependency_overrides.clear)
 
         body = {
             "measurement_name": "iv_curve",

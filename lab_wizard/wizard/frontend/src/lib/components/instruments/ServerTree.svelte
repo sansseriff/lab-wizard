@@ -22,6 +22,9 @@
 	import ArrowClockwise from 'phosphor-svelte/lib/ArrowClockwise';
 	import ArrowCounterClockwise from 'phosphor-svelte/lib/ArrowCounterClockwise';
 	import Trash from 'phosphor-svelte/lib/Trash';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import { ask } from '$lib/confirm.svelte';
+	import Select from '$lib/components/Select.svelte';
 
 	type RootTransport = {
 		transport_sharing: 'exclusive' | 'shared';
@@ -174,8 +177,8 @@
 		return result;
 	}
 
-	function refresh() {
-		if (busy || (dirty && !confirm('Discard unsaved instrument parameters?'))) return;
+	async function refresh() {
+		if (busy || (dirty && !(await ask({ title: 'Discard unsaved instrument parameters?', confirmLabel: 'Discard', tone: 'danger' })))) return;
 		dirty = false;
 		loadTree();
 	}
@@ -318,7 +321,7 @@
 
 	{#if message}
 		<div
-			class="rounded border p-3 text-sm {message.ok
+			class="rounded border p-3 text-body {message.ok
 				? 'border-ok/30 bg-ok-wash text-ok'
 				: 'border-crit/30 bg-crit-wash text-crit'}"
 		>
@@ -331,7 +334,7 @@
 			title={addParent ? `Add under ${addParent.node.type}` : 'Add instrument'}
 			onclose={resetAddForm}
 		>
-			<h2 class="text-sm font-medium">
+			<h2 class="text-body font-medium">
 				Add to <span class="font-mono">{workspaceName(selected?.workspace_path ?? '')}</span>
 			</h2>
 			<p class="mt-1 text-xs text-ink-2">
@@ -342,16 +345,12 @@
 			<div class="mt-3 grid gap-3 sm:grid-cols-2">
 				<label class="block text-xs">
 					<span class="mb-1 block text-ink-2">Instrument type</span>
-					<select
-						class="w-full rounded-md border border-line-2 px-2 py-1.5 text-sm"
+					<Select
 						value={addType ?? ''}
-						onchange={(e) => onPickType((e.target as HTMLSelectElement).value)}
-					>
-						<option value="" disabled>Choose a type…</option>
-						{#each addableTypes as meta (meta.type)}
-							<option value={meta.type}>{meta.type}</option>
-						{/each}
-					</select>
+						onValueChange={onPickType}
+						placeholder="Choose a type…"
+						options={addableTypes.map((meta) => ({ value: meta.type, label: meta.type }))}
+					/>
 				</label>
 
 				{#if addMeta}
@@ -364,7 +363,7 @@
 							bind:value={addKey}
 							onblur={checkDuplicate}
 							placeholder={addMeta.key_hint ?? 'address or slot'}
-							class="w-full rounded-md border border-line-2 px-2 py-1.5 text-sm"
+							class="lw-input mono"
 						/>
 					</label>
 				{/if}
@@ -389,16 +388,14 @@
 									Choose its ancestor above first. If it has no {parentType}, add one there.
 								</span>
 							{:else}
-								<select
-									class="w-full rounded-md border border-line-2 px-2 py-1.5 text-sm"
+								<Select
 									value={addParents[parentType] ?? ''}
-									onchange={(e) => selectParent(parentType, e.currentTarget.value)}
-								>
-									<option value="" disabled>Choose…</option>
-									{#each candidates as node (node.key)}
-										<option value={node.key}>{node.type} ({node.key})</option>
-									{/each}
-								</select>
+									onValueChange={(v) => selectParent(parentType, v)}
+									options={candidates.map((node) => ({
+										value: node.key,
+										label: `${node.type} (${node.key})`
+									}))}
+								/>
 							{/if}
 						</label>
 					{/each}
@@ -408,11 +405,11 @@
 			{#if addActions.length > 0}
 				<div class="mt-3 rounded-md border border-line bg-surface p-2.5/40">
 					<div class="text-xs font-medium">Discover</div>
-					<p class="text-[11px] text-muted">Runs on that server, where the hardware is.</p>
+					<p class="text-fine text-muted">Runs on that server, where the hardware is.</p>
 					{#each addActions as action (action.name)}
 						<div class="mt-2 flex flex-wrap items-end gap-2">
 							{#each action.inputs ?? [] as inp (inp.name)}
-								<label class="text-[11px]">
+								<label class="text-fine">
 									<span class="mb-0.5 block text-ink-2">
 										{inp.label ?? inp.name}
 									</span>
@@ -424,12 +421,12 @@
 												...discoveryInputs,
 												[inp.name]: (e.target as HTMLInputElement).value
 											})}
-										class="rounded border border-line-2 px-2 py-1 text-xs"
+										class="lw-input w-40"
 									/>
 								</label>
 							{/each}
 							<button
-								class="rounded-md border border-line-2 px-2.5 py-1 text-xs hover:bg-surface-2 disabled:opacity-50"
+								class="lw-btn"
 								onclick={() => runDiscovery(action.name)}
 								disabled={discoveryLoading}
 							>
@@ -471,7 +468,7 @@
 								</button>
 							{/each}
 							{#if (discoveryResult.found ?? []).length === 0 && (discoveryResult.children ?? []).length === 0}
-								<div class="text-[11px] text-muted">Nothing found.</div>
+								<div class="text-fine text-muted">Nothing found.</div>
 							{/if}
 						</div>
 					{/if}
@@ -501,13 +498,9 @@
 			{/if}
 
 			<div class="mt-4 flex justify-end gap-2">
+				<button class="lw-btn" onclick={resetAddForm} disabled={loading}>Cancel</button>
 				<button
-					class="rounded-md px-3 py-1.5 text-sm text-ink-2 hover:bg-surface-2"
-					onclick={resetAddForm}
-					disabled={loading}>Cancel</button
-				>
-				<button
-					class="rounded-md bg-accent px-3 py-1.5 text-sm text-white hover:brightness-110 disabled:opacity-50"
+					class="lw-btn lw-btn-primary"
 					onclick={submitAdd}
 					disabled={!canSubmitAdd || loading}
 				>
@@ -548,7 +541,7 @@
 								/>
 
 			<div>
-				<h2 class="mb-2 text-sm font-medium">Recent activity</h2>
+				<h2 class="mb-2 text-body font-medium">Recent activity</h2>
 				<div
 					class="max-h-[28rem] space-y-1.5 overflow-y-auto rounded-lg border border-line p-2 text-xs"
 				>
@@ -558,7 +551,7 @@
 						{#each remote.events as e (e.ts + e.kind)}
 							<div class="border-b border-line pb-1.5 last:border-0">
 								<div class="text-ink">{e.message}</div>
-								<div class="text-[10px] text-muted">
+								<div class="text-2xs text-muted">
 									{when(e.ts)} · {e.actor}
 								</div>
 							</div>
@@ -569,47 +562,21 @@
 	{/if}
 </section>
 
-{#if confirmTarget}
-	<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-		<div class="w-full max-w-md rounded border border-line bg-surface p-5 shadow-2xl">
-			<h3 class="text-lg font-semibold">
-				{confirmAction === 'remove' ? 'Remove from' : 'Reset in'} that workspace?
-			</h3>
-			<p class="mt-2 text-sm text-ink-2">
-				{#if confirmAction === 'remove'}
-					This removes <strong>{confirmTarget.type}</strong> ({confirmTarget.key}) and its children
-					from the other workspace's config — not this one.
-				{:else}
-					This resets <strong>{confirmTarget.type}</strong> ({confirmTarget.key}) to default field
-					values in the other workspace's config, keeping its children.
-				{/if}
-			</p>
-			<div class="mt-4 flex justify-end gap-2">
-				<button
-					class="rounded-md px-3 py-1.5 text-sm text-ink-2 hover:bg-surface-2"
-					onclick={() => (confirmTarget = null)}
-					disabled={loading}>Cancel</button
-				>
-				<button
-					class="flex items-center gap-1 rounded-md px-3 py-1.5 text-sm text-white disabled:opacity-50 {confirmAction ===
-					'remove'
-						? 'bg-crit hover:brightness-110'
-						: 'bg-warn hover:brightness-110'}"
-					onclick={() =>
-						edit(confirmAction, {
-							type: confirmTarget!.type,
-							key: confirmTarget!.key,
-							path: confirmPath
-						})}
-					disabled={loading}
-				>
-					{#if confirmAction === 'remove'}
-						<Trash size={14} /> Remove
-					{:else}
-						<ArrowCounterClockwise size={14} /> Reset
-					{/if}
-				</button>
-			</div>
-		</div>
-	</div>
-{/if}
+<ConfirmDialog
+	open={confirmTarget !== null}
+	title="{confirmAction === 'remove' ? 'Remove from' : 'Reset in'} that workspace?"
+	confirmLabel={confirmAction === 'remove' ? 'Remove' : 'Reset'}
+	tone={confirmAction === 'remove' ? 'danger' : 'primary'}
+	busy={loading}
+	onconfirm={() =>
+		edit(confirmAction, { type: confirmTarget!.type, key: confirmTarget!.key, path: confirmPath })}
+	oncancel={() => (confirmTarget = null)}
+>
+	{#if confirmAction === 'remove'}
+		This removes <strong>{confirmTarget?.type}</strong> ({confirmTarget?.key}) and its children from
+		the other workspace's config — not this one.
+	{:else}
+		This resets <strong>{confirmTarget?.type}</strong> ({confirmTarget?.key}) to default field values
+		in the other workspace's config, keeping its children.
+	{/if}
+</ConfirmDialog>

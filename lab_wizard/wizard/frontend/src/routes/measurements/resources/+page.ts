@@ -54,11 +54,13 @@ type Source = {
 
 const EMPTY = {
     measurementName: null,
-    measurementKind: 'measurement' as 'measurement' | 'procedure',
+    measurementKind: 'procedure' as 'procedure' | 'custom',
     presets: [] as string[],
     requirements: [] as any[],
     sources: [] as Source[],
-    ownServer: null as { name: string; url: string; pid: number } | null
+    ownServer: null as { name: string; url: string; pid: number } | null,
+    /** Why the measurement could not be loaded, shown instead of an empty page. */
+    loadError: null as string | null
 };
 
 export const load = async ({ url }: any) => {
@@ -66,14 +68,18 @@ export const load = async ({ url }: any) => {
 
     const name = url.searchParams.get('name');
     if (!name) return EMPTY;
-    const kind: 'measurement' | 'procedure' =
-        url.searchParams.get('kind') === 'procedure' ? 'procedure' : 'measurement';
+    const kind: 'procedure' | 'custom' = url.searchParams.get('kind') === 'custom' ? 'custom' : 'procedure';
 
-    let requirements = await fetchWithConfig(
-        `/api/get-resources/${encodeURIComponent(name)}?kind=${kind}`,
-        'GET'
-    );
-    requirements = Array.isArray(requirements) ? requirements : [];
+    let requirements: any[];
+    try {
+        requirements = await fetchWithConfig<any[]>(
+            `/api/get-resources/${encodeURIComponent(name)}?kind=${kind}`,
+            'GET'
+        );
+    } catch (e) {
+        const message = e instanceof Error ? e.message.replace(/^Failed to fetch: HTTP \d+: /, '') : String(e);
+        return { ...EMPTY, measurementName: name, measurementKind: kind, loadError: message };
+    }
     const sourceData = await fetchWithConfig<{
         sources: Source[];
         own_server: { name: string; url: string; pid: number } | null;
@@ -89,7 +95,8 @@ export const load = async ({ url }: any) => {
         presets: choice?.presets ?? [],
         requirements,
         sources: sourceData?.sources ?? [],
-        ownServer: sourceData?.own_server ?? null
+        ownServer: sourceData?.own_server ?? null,
+        loadError: null
     };
 };
 

@@ -11,8 +11,8 @@ It is two things in one repository:
 
 - **A typed instrument library** (`lab_wizard/lib`) — Pydantic-modelled
   instruments with a parent/child/channel hierarchy, a YAML-backed configuration
-  tree, composable measurement procedures, savers, plotters, and a
-  remote-control server/client.
+  tree, composable measurement procedures, a lab database every run is recorded
+  in, and a remote-control server/client.
 - **A wizard GUI** (`lab_wizard/wizard`) — a local desktop app (FastAPI backend +
   SvelteKit frontend in a `pywebview` window) that guides the lab workflow:
   configure instruments, set safety permissions, and generate runnable
@@ -35,8 +35,8 @@ graph TD
     CFG -->|load_instruments| LIB[Instrument library<br/>Params → Instrument]
     PROJ -->|resolves instruments by name| CFG
     LIB --> MEAS[Measurement run]
-    MEAS --> SAV[Savers<br/>SQLite DB]
-    MEAS --> PLOT[Plotters]
+    MEAS --> DB[Lab database<br/>SQLite]
+    MEAS --> OUT[Run folders, live plot<br/>if the project asks]
     SERVER[Instrument server<br/>ZMQ + JSON-RPC] -->|hosts| CFG
     PROJ -.->|--remote| SERVER
     GATE[Permission gate] --> SERVER
