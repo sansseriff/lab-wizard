@@ -4,6 +4,7 @@
 	 * Click one to look at it; Cmd/Ctrl-click to add or remove a run, and
 	 * Shift-click to take a range, to overlay several on one plot.
 	 */
+	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import { localTime, type RunRow } from './model';
 
@@ -62,7 +63,8 @@
 			<button class="text-accent hover:underline" onclick={() => onselect(selected.slice(0, 1))}>Just one</button>
 		{/if}
 	</div>
-	<ul class="min-h-0 flex-1 overflow-y-auto" aria-label="Runs" aria-multiselectable="true" role="listbox">
+	<ScrollArea class="min-h-0 flex-1">
+	<ul aria-label="Runs" aria-multiselectable="true" role="listbox">
 		{#each runs as run (run.id)}
 			{@const chosen = selected.includes(run.id)}
 			<li
@@ -113,4 +115,5 @@
 			</li>
 		{/if}
 	</ul>
+	</ScrollArea>
 </div>

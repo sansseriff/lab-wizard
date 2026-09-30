@@ -5,6 +5,7 @@
 	 * the Run page shows the project's last run until a new one starts, and the
 	 * standalone live page (a web plotter's) is this view on its own.
 	 */
+	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import { onDestroy } from 'svelte';
 	import BokehPlot from '$lib/components/BokehPlot.svelte';
 	import Pill from '$lib/components/Pill.svelte';
@@ -115,9 +116,9 @@
 					</p>
 				{/if}
 			</div>
-			<div class="min-h-0 flex-1 overflow-y-auto">
+			<ScrollArea class="min-h-0 flex-1">
 				<Timeline steps={live.steps} follow={live.running} now={live.now} />
-			</div>
+			</ScrollArea>
 		</section>
 	</div>
 {/if}

@@ -5,8 +5,9 @@
   it, so a panel's own border can stay the visible line.
 
   `size` is pixels and is kept in localStorage under `storageKey`, so a layout
-  that was dragged stays where it was left. Double-click restores `initial`;
-  the arrow keys nudge it.
+  that was dragged stays where it was left. Until it is dragged it follows
+  `initial`, which a page can derive from the window to keep a proportion.
+  Double-click goes back to that; the arrow keys nudge it.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
@@ -22,7 +23,7 @@
 		label
 	}: {
 		size: number;
-		/** What double-click goes back to. */
+		/** The size until the user sets one, and what double-click goes back to. */
 		initial: number;
 		min?: number;
 		max?: number;
@@ -36,10 +37,17 @@
 
 	const horizontal = $derived(orientation === 'horizontal');
 	let dragging = $state(false);
+	// Set once the user has chosen a size, here or in an earlier session.
+	let chosen = $state(false);
+
+	$effect(() => {
+		if (!chosen && initial > 0) size = clamp(initial);
+	});
 
 	const clamp = (value: number) => Math.round(Math.min(Math.max(value, min), Math.max(min, max)));
 
 	function save() {
+		chosen = true;
 		try {
 			localStorage.setItem(storageKey, String(size));
 		} catch {
@@ -50,7 +58,10 @@
 	onMount(() => {
 		try {
 			const stored = Number(localStorage.getItem(storageKey));
-			if (Number.isFinite(stored) && stored > 0) size = clamp(stored);
+			if (Number.isFinite(stored) && stored > 0) {
+				chosen = true;
+				size = clamp(stored);
+			}
 		} catch {
 			// as above
 		}
@@ -92,8 +103,12 @@
 	}
 
 	function reset() {
-		size = clamp(initial);
-		save();
+		chosen = false;
+		try {
+			localStorage.removeItem(storageKey);
+		} catch {
+			// as above
+		}
 	}
 </script>
 

@@ -780,7 +780,7 @@
 										{:else}
 											<!-- A remote machine: named leaves only. A tcp peer gets read +
 											     call and never reconfiguration, so there is no tree to offer. -->
-											<div class="max-h-[300px] overflow-y-auto p-3">
+											<ScrollArea viewportClasses="max-h-[300px] p-3">
 												{#if !source.reachable}
 													<div class="px-2 py-2 text-body text-warn">
 														Not reachable: {source.error ?? 'no answer'}
@@ -829,7 +829,7 @@
 														{/each}
 													</div>
 												{/if}
-											</div>
+											</ScrollArea>
 										{/if}
 									{/if}
 								</Tabs>

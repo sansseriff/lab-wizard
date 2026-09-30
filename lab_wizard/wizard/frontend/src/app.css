@@ -175,18 +175,6 @@ body {
 	-webkit-font-smoothing: antialiased;
 }
 
-/* Scrollbars stay out of sight until the pointer is over the thing that
-   scrolls, as in Figma: a panel reads as a panel, not as a panel with a rail
-   down its side. `scrollbar-color` is the standards route, so every scroller
-   in the app follows it without opting in. */
-* {
-	scrollbar-width: thin;
-	scrollbar-color: transparent transparent;
-}
-*:hover {
-	scrollbar-color: var(--line-2) transparent;
-}
-
 /* Identifiers — hash keys, bind addresses, inst:// roots — are content in this
    app, not decoration, so give them a real monospace face. */
 .mono,

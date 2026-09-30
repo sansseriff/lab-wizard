@@ -8,6 +8,7 @@
 	 * deliberately does not do (fits, arithmetic between runs) belongs.
 	 * See plans/semantic_data_plan.md Phase 7.
 	 */
+	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import '$lib/procedures/composer.css';
 	import Tooltip from '$lib/components/Tooltip.svelte';
 	import { onMount, untrack } from 'svelte';
@@ -332,7 +333,7 @@
 
 		<Splitter
 			bind:size={filtersWidth}
-			initial={240}
+			initial={Math.round(viewerWidth * 0.23)}
 			min={160}
 			max={viewerWidth - runsWidth - 360}
 			storageKey="lw.data.filtersWidth"
@@ -352,7 +353,7 @@
 
 		<Splitter
 			bind:size={runsWidth}
-			initial={304}
+			initial={Math.round(viewerWidth * 0.4)}
 			min={200}
 			max={viewerWidth - filtersWidth - 360}
 			storageKey="lw.data.runsWidth"
@@ -452,7 +453,7 @@
 										{/if}
 									</div>
 									{#if point}
-										<div class="max-h-48 shrink-0 overflow-y-auto border-t border-line px-3 py-2 text-xs">
+										<ScrollArea class="shrink-0 border-t border-line" viewportClasses="max-h-48 px-3 py-2 text-xs">
 											<div class="flex items-center gap-2">
 												<p class="font-semibold">Point {point.seq} of run #{point.run}</p>
 												<button class="text-accent hover:underline" onclick={() => showTab('timeline')}>Show in timeline</button>
@@ -464,18 +465,20 @@
 												{/each}
 											</dl>
 											<p class="mono mt-1 break-all text-fine text-muted">{point.steps.join('  ·  ')}</p>
-										</div>
+										</ScrollArea>
 									{/if}
 								{/if}
 							</div>
 							{#if editing && spec}
-								<aside class="w-80 shrink-0 overflow-y-auto border-l border-line px-3 pb-4" aria-label="Plot settings">
+								<aside class="w-80 shrink-0 border-l border-line" aria-label="Plot settings">
+									<ScrollArea class="h-full" viewportClasses="px-3 pb-4">
 									<PlotSettings plot={spec} {columns} {labelKeys} shape={drawn?.shape} />
 									<p class="mt-3 text-fine text-muted">
 										An axis can be any expression of the columns, such as
 										<span class="mono">count_rate / 1000</span> or
 										<span class="mono">counts - mean(counts, phase == "background")</span>.
 									</p>
+									</ScrollArea>
 								</aside>
 							{/if}
 						</div>
@@ -483,7 +486,7 @@
 
 				<Splitter
 					bind:size={bottomHeight}
-					initial={260}
+					initial={Math.round(detailHeight * 0.5)}
 					min={120}
 					max={detailHeight - 280}
 					orientation="horizontal"
@@ -503,8 +506,9 @@
 						label="Run contents"
 						size="sm"
 						class="flex min-h-0 flex-1 flex-col"
-						panelClass="min-h-0 flex-1 overflow-y-auto"
+						panelClass="flex min-h-0 flex-1 flex-col"
 					>
+						<ScrollArea class="min-h-0 flex-1">
 						{#if tab === 'timeline'}
 							{#if selected.length > 1}
 								<div class="flex items-center gap-2 border-b border-line px-3 py-1.5 text-xs text-muted">
@@ -521,6 +525,7 @@
 						{:else}
 							<RunDetails {detail} />
 						{/if}
+						</ScrollArea>
 					</Tabs>
 				</div>
 			{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Pill from '$lib/components/Pill.svelte';
@@ -48,7 +49,7 @@
 
 	<!-- The list pads inside its own scroll area, so the selection ring has room
 	     to draw instead of being clipped at the edge. -->
-	<div class="min-h-0 flex-1 overflow-y-auto rounded border border-line bg-surface shadow-sm">
+	<ScrollArea class="min-h-0 flex-1 rounded border border-line bg-surface shadow-sm">
 		<ul class="divide-y divide-line p-2">
 			{#each choices as c (`${c.kind}:${c.name}`)}
 				<li>
@@ -92,5 +93,5 @@
 				</li>
 			{/each}
 		</ul>
-	</div>
+	</ScrollArea>
 </section>

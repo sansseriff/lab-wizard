@@ -19,6 +19,7 @@
 	import Combobox from '$lib/components/Combobox.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Pill from '$lib/components/Pill.svelte';
+	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import Splitter from '$lib/components/Splitter.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
@@ -313,11 +314,11 @@
 					panelClass="flex min-h-0 flex-1 flex-col"
 				>
 					<fieldset
-						class="flex min-h-0 min-w-0 flex-1 flex-col {mode === 'yaml' ? '' : 'overflow-y-auto p-3'}"
+						class="flex min-h-0 min-w-0 flex-1 flex-col"
 						disabled={active}
 					>
 						{#if active}
-							<p class="text-fine text-muted {mode === 'yaml' ? 'px-3.5 py-2' : 'mb-2'}">
+							<p class="px-3.5 py-2 text-fine text-muted">
 								The run read these when it started; they are locked until it ends.
 							</p>
 						{/if}
@@ -333,6 +334,7 @@
 								The whole project file. Save checks it against the project before writing anything.
 							</p>
 						{:else}
+						<ScrollArea class="min-h-0 flex-1" viewportClasses="p-3">
 							{#key generation}
 								<div class="space-y-5">
 									<div class="space-y-2">
@@ -417,6 +419,7 @@
 									</div>
 								</div>
 							{/key}
+						</ScrollArea>
 						{/if}
 					</fieldset>
 					<div class="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">

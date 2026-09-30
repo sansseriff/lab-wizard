@@ -6,6 +6,7 @@
 	 * A value's count ignores its own key's choice, so choosing one procedure
 	 * still shows how many runs the others have.
 	 */
+	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
 	import XIcon from 'phosphor-svelte/lib/X';
 	import CaretRightIcon from 'phosphor-svelte/lib/CaretRight';
@@ -90,7 +91,7 @@
 		{/if}
 	</div>
 
-	<div class="min-h-0 flex-1 overflow-y-auto px-2.5 pb-4">
+	<ScrollArea class="min-h-0 flex-1" viewportClasses="px-2.5 pb-4">
 		{#each groups as { group, facets: keys } (group)}
 			{@const open = !collapsed.has(group) || !!search}
 			<section class="border-b border-line py-2 last:border-b-0">
@@ -162,5 +163,5 @@
 		{:else}
 			<p class="py-4 text-xs text-muted">{search ? 'No filter matches.' : 'Filters appear once runs are recorded.'}</p>
 		{/each}
-	</div>
+	</ScrollArea>
 </div>
