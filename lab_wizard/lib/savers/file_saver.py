@@ -19,12 +19,12 @@ from lab_procedure.messages import NodeId
 from lab_wizard.lib.data.encoding import jsonable
 from lab_wizard.lib.data.run_folder import RunFolder, run_facets_for_folder
 from lab_wizard.lib.data.settings import DEFAULT_TEMPLATE
-from lab_wizard.lib.savers.saver import GenericSaver
+from lab_wizard.lib.task_adapters.sinks import RunInfo, RunSink
 
 __all__ = ["FileSaver"]
 
 
-class FileSaver(GenericSaver):
+class FileSaver(RunSink):
     """Writes each run it sees to a new folder under ``root``.
 
     With no ``root``, folders go in ``files/`` beside the lab database.
@@ -39,19 +39,18 @@ class FileSaver(GenericSaver):
         self._open_steps: dict[NodeId, list[int]] = {}
         self._next_step = 0
 
-    def _root(self) -> Path:
+    def _root(self, run: RunInfo) -> Path:
         if self.root is not None:
             return self.root
-        context = self.context
-        if context.database is not None:
-            return context.database.parent / "files"
-        if context.project_dir is not None:
-            return context.project_dir / "data" / "files"
+        if run.database is not None:
+            return run.database.parent / "files"
+        if run.project_dir is not None:
+            return run.project_dir / "data" / "files"
         raise ValueError("file saver has no root: give it one, or run from a project")
 
-    def handle(self, message: Any) -> None:
+    def handle(self, message: Any, run: RunInfo) -> None:
         if isinstance(message, RunStarted):
-            self._run_started(message)
+            self._run_started(message, run)
         elif self.folder is None:
             return
         elif isinstance(message, Point):
@@ -69,11 +68,11 @@ class FileSaver(GenericSaver):
             self._run.update(status=message.status, ended_at=message.t.isoformat())
             self.folder.finish(self._run, plot_png=self.plot_png)
 
-    def _run_started(self, message: RunStarted) -> None:
+    def _run_started(self, message: RunStarted, run: RunInfo) -> None:
         self._open_steps = {}
         self._next_step = 0
         self._run = {
-            "run_id": self.context.run_id,
+            "run_id": run.run_id,
             "procedure": message.procedure,
             "status": "running",
             "started_at": message.t.isoformat(),
@@ -87,5 +86,5 @@ class FileSaver(GenericSaver):
             "instruments": jsonable(message.instruments),
             "columns": jsonable(message.columns),
         }
-        facets = run_facets_for_folder(self._run, self.context.device(message.device))
-        self.folder = RunFolder.create(self._root(), self.template, facets, self._run, message.definition)
+        facets = run_facets_for_folder(self._run, run.device(message.device))
+        self.folder = RunFolder.create(self._root(run), self.template, facets, self._run, message.definition)

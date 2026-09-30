@@ -1,6 +1,6 @@
 """What happens around a procedure when it runs.
 
-Every run does the same six things, and the order is the point, so it is written
+Every run does the same seven things, and the order is the point, so it is written
 once here instead of in every generated setup file:
 
 1. **claim**    the transports this process will open (``claims``)
@@ -17,7 +17,7 @@ once here instead of in every generated setup file:
                 **if the run did not succeed** — while every claim is still held
 7. **release**  the claims, always
 
-Step 5 runs only on failure, abort, or an exception. A run that completes has
+Step 6 runs only on failure, abort, or an exception. A run that completes has
 already been through its own guards (``SafeGuard``, ``SourceGuard``) and ended
 where its procedure chose to — including states a measurement deliberately
 exposes, like an IV curve's ``turn_off_at_end=False``. Forcing a safe state
@@ -68,7 +68,7 @@ def bound_instruments(resources: object) -> list[InstrumentBehavior]:
 
 
 class RunLifecycle:
-    """Claim, resolve, baseline, run, make safe on failure, release."""
+    """Claim, resolve, claim through servers, baseline, run, make safe on failure, release."""
 
     def __init__(
         self,

@@ -12,8 +12,10 @@ Code: [`lib/data/`](../../lab_wizard/lib/data/).
 ## What a run records
 
 - **The run**: its procedure, status (`running`, `success`, `failed`,
-  `aborted`), start and end times, and what the project's `run:` block said:
-  the device under test, the operator, notes, and any other metadata.
+  `aborted`, or `interrupted` if its process died without ending it — killed,
+  crashed, or a power cut), start and end times, and what the project's `run:`
+  block said: the device under test, the operator, notes, and any other
+  metadata.
 - **One row per point.** A row is everything recorded while the same parameter
   values were in force (see
   [How readings become rows](../concepts/procedures.md#how-readings-become-rows)),

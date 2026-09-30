@@ -4,8 +4,7 @@ from pathlib import Path
 from typing import Any, Literal, Tuple, Optional
 import yaml
 
-from pydantic import BaseModel, Field, PrivateAttr, SerializeAsAny, model_validator
-from ruamel.yaml import YAML as RuamelYAML
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, SerializeAsAny, model_validator
 
 from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
@@ -21,6 +20,9 @@ class ProjectInfo(BaseModel):
 class RunConfig(BaseModel):
     """Who and what a run is about. Read at the start of every run and recorded with it."""
 
+    # Every field is present in what the wizard's API returns (its OpenAPI schema).
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
     device: str | None = Field(default=None, description="The device under test, by its name in the lab database")
     operator: str | None = None
     notes: str | None = None
@@ -34,6 +36,8 @@ class MeasurementConfig(BaseModel):
 
 class OutputsConfig(BaseModel):
     """What a run produces besides its record in the lab database, which is always written."""
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
     # Also save each run as a folder of files, laid out by the workspace's
     # data settings (lab_wizard.lib.data.settings).
@@ -51,8 +55,7 @@ class ResourceConfig(BaseModel):
     # Where each named instrument comes from: "local", or the name of a server
     # in config/remote/servers.yaml. Recorded here rather than passed as a
     # command-line flag so a project runs identically for everyone and stays
-    # reproducible. Attributes absent from this mapping are local, which is why
-    # existing projects need no change.
+    # reproducible. Attributes absent from this mapping are local.
     instrument_sources: dict[str, str] = Field(default_factory=dict)
 
     # Instruments already built, by hash-key path from the root. Two attributes
@@ -68,17 +71,7 @@ class ResourceConfig(BaseModel):
     def from_attribute(self, attribute_name: str) -> Any:
         result = _find_attribute_path(self.instruments, attribute_name)
         if result is None:
-            hint = (
-                " This resource tree holds no instruments at all: a project generated "
-                "since instrument params left the project YAML resolves them against "
-                "its workspace — pass resource_source_for(project, project_dir) from "
-                "lab_wizard.lib.client.project_resources."
-                if not self.instruments
-                else ""
-            )
-            raise ValueError(
-                f"No instrument with attribute_name={attribute_name!r} found in resources.{hint}"
-            )
+            raise ValueError(f"No instrument with attribute_name={attribute_name!r} found in resources.")
         path, channel_index = result
         return _construct_from_path(path, channel_index, self._built)
 
@@ -224,46 +217,8 @@ def _construct_from_path(
     return current_inst
 
 
-def _rewrite_project_yaml(yaml_path: Path | str, project: ProjectConfig) -> None:
-    y = RuamelYAML(typ="rt")
-    y.default_flow_style = False
-
-    with open(yaml_path, "r", encoding="utf-8") as f:
-        data = y.load(f)
-
-    from lab_wizard.lib.utilities.config_io import (
-        to_commented_yaml_value, model_to_commented_map,
-    )
-
-    repaired_instruments = {}
-    for k, v in project.resources.instruments.items():
-        if isinstance(v, BaseModel):
-            repaired_instruments[k] = model_to_commented_map(v, exclude_none=True)
-        else:
-            repaired_instruments[k] = v
-
-    data["resources"]["instruments"] = to_commented_yaml_value(repaired_instruments)
-
-    with open(yaml_path, "w", encoding="utf-8") as f:
-        y.dump(data, f)
-
-
 def load_project_config(yaml_path: str | Path) -> ProjectConfig:
     """Load the explicit project YAML shape used by generated projects."""
-    from lab_wizard.lib.utilities.config_io import validate_and_repair_hashes
-
-    yaml_path = Path(yaml_path)
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
-    project = ProjectConfig.model_validate(data)
-
-    repaired, changed = validate_and_repair_hashes(project.resources.instruments)
-    if changed:
-        resources = project.resources.model_copy(update={"instruments": repaired})
-        project = project.model_copy(update={"resources": resources})
-        try:
-            _rewrite_project_yaml(yaml_path, project)
-        except OSError:
-            pass
-
-    return project
+    return ProjectConfig.model_validate(data)

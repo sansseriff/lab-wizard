@@ -25,6 +25,13 @@ from typing import Any, Optional
 
 from lab_wizard.lib.server.registry import InstrumentRegistry, root_path
 from lab_wizard.wizard.backend.server_control import server_status
+from lab_wizard.lib.client.session import Session
+from lab_wizard.lib.client.server_registry import (
+    list_local_servers,
+    local_server_endpoints,
+)
+from lab_wizard.lib.utilities.config_io import _apply_key_to_params
+from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
 
 logger = logging.getLogger("lab_wizard.wizard.backend.transport_status")
@@ -44,7 +51,6 @@ def _loopback(bind: Optional[str]) -> Optional[str]:
 
 def _held_from(url: str, timeout_ms: int = 1500) -> dict[str, Any]:
     """Ask one server what it holds. Unreachable is not an error."""
-    from lab_wizard.lib.client.session import Session
 
     try:
         session = Session(url, timeout_ms=timeout_ms)
@@ -68,10 +74,6 @@ def _machine_held(timeout_ms: int = 1500) -> dict[str, Any]:
     Held transport keys are collected alongside roots because the same device
     reached through another workspace's config has a different root hash.
     """
-    from lab_wizard.lib.client.server_registry import (
-        list_local_servers,
-        local_server_endpoints,
-    )
 
     held_roots: set[str] = set()
     held_keys: dict[str, dict[str, Any]] = {}
@@ -189,8 +191,6 @@ def duplicate_transport_check(
     is touched. A warning rather than a refusal: configuring one device twice is
     occasionally deliberate, and the person doing it should decide.
     """
-    from lab_wizard.lib.utilities.config_io import _apply_key_to_params
-    from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
     try:
         params = load_params_class(type_str)()

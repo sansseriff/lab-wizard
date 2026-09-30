@@ -153,17 +153,7 @@
 		{/each}
 	</nav>
 
-	<div class="border-t border-line px-4 py-3">
-		<p class="text-fine leading-relaxed text-muted">
-			{#if workstation.error}
-				Wizard backend unreachable.
-			{:else if workstation.phase === 'running'}
-				Instrument server running — it owns this workspace's hardware.
-			{:else if workstation.phase === 'stopped'}
-				Server stopped. The wizard opens hardware itself, and safety rules are inert.
-			{:else}
-				Not a hardware host. This workspace is a client of other servers.
-			{/if}
-		</p>
-	</div>
+	{#if workstation.error}
+		<p class="border-t border-line px-4 py-3 text-fine text-crit">Wizard backend unreachable.</p>
+	{/if}
 </aside>

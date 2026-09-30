@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, errorMessage, unwrap } from '$lib/api';
 
 type TreeItem = {
     type: string;
@@ -72,21 +72,20 @@ export const load = async ({ url }: any) => {
 
     let requirements: any[];
     try {
-        requirements = await fetchWithConfig<any[]>(
-            `/api/get-resources/${encodeURIComponent(name)}?kind=${kind}`,
-            'GET'
+        requirements = await unwrap<any[]>(
+            api.GET('/api/get-resources/{name}', { params: { path: { name }, query: { kind } } })
         );
     } catch (e) {
-        const message = e instanceof Error ? e.message.replace(/^Failed to fetch: HTTP \d+: /, '') : String(e);
+        const message = errorMessage(e);
         return { ...EMPTY, measurementName: name, measurementKind: kind, loadError: message };
     }
-    const sourceData = await fetchWithConfig<{
+    const sourceData = await unwrap<{
         sources: Source[];
         own_server: { name: string; url: string; pid: number } | null;
-    }>('/api/instrument-sources', 'GET');
-    const choices = await fetchWithConfig<{
+    }>(api.GET('/api/instrument-sources'));
+    const choices = await unwrap<{
         choices: { name: string; kind: string; presets: string[] }[];
-    }>('/api/measurement-choices', 'GET');
+    }>(api.GET('/api/measurement-choices'));
     const choice = choices?.choices?.find((c) => c.name === name && c.kind === kind);
 
     return {

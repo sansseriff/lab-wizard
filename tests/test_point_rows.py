@@ -131,9 +131,31 @@ def test_a_reading_at_an_outer_level_gets_its_own_row_with_fewer_parameters():
     assert rows[1].values == {"bias_voltage": 0.02, "trigger_mV": -50, "count_rate": 33333.3}
 
 
-def test_recording_a_field_twice_starts_a_new_row():
-    rows, _ = run(Sequence(Measure("counts", lambda p: 1), Measure("counts", lambda p: 2)))
-    assert [r.values for r in rows] == [{"counts": 1}, {"counts": 2}]
+def test_recording_a_field_twice_at_the_same_parameters_is_refused():
+    """Measure, wait, measure again, inside one sweep point: two rows nothing tells apart."""
+    with pytest.raises(ValueError, match="'device_voltage' again at the same parameters"):
+        run(Sweep("bias_voltage", [0.02], lambda b: Sequence(
+            Measure("device_voltage", lambda p: 1.0), Wait(0), Measure("device_voltage", lambda p: 1.1),
+        )))
+
+
+def test_two_readings_of_one_quantity_are_one_row_under_two_names():
+    rows, _ = run(Sweep("bias_voltage", [0.02], lambda b: Sequence(
+        Measure("voltage_before", lambda p: 1.0), Wait(0), Measure("voltage_after", lambda p: 1.1),
+    )))
+    assert [r.values for r in rows] == [{"bias_voltage": 0.02, "voltage_before": 1.0, "voltage_after": 1.1}]
+
+
+def test_or_a_row_each_when_labelled():
+    rows, _ = run(Sweep("bias_voltage", [0.02], lambda b: Sequence(
+        WithParameter("phase", "before", Measure("device_voltage", lambda p: 1.0)),
+        Wait(0),
+        WithParameter("phase", "after", Measure("device_voltage", lambda p: 1.1)),
+    )))
+    assert [r.values for r in rows] == [
+        {"bias_voltage": 0.02, "phase": "before", "device_voltage": 1.0},
+        {"bias_voltage": 0.02, "phase": "after", "device_voltage": 1.1},
+    ]
 
 
 def test_a_reading_outside_any_loop_is_its_own_row():
@@ -177,7 +199,19 @@ def test_a_retry_whose_failed_attempts_record_nothing_is_one_row():
             return outcome
 
     rows, _ = run(Sweep("bias_voltage", [0.02], lambda b: Retry(3, Flaky())))
-    assert [r.values for r in rows] == [{"bias_voltage": 0.02, "counts": 7}]
+    assert [r.values for r in rows] == [{"bias_voltage": 0.02, "attempt": 2, "counts": 7}]
+
+
+def test_a_retried_reading_keeps_every_attempt_as_its_own_row():
+    """Measure, then check; the check fails once, so the reading is taken twice."""
+    readings = iter([0.5, 2.0])
+    rows, _ = run(Sweep("bias_voltage", [0.02], lambda b: Retry(3, Sequence(
+        Measure("count_rate", lambda p: next(readings)), ValueAbove("count_rate", 1.0),
+    ))))
+    assert [r.values for r in rows] == [
+        {"bias_voltage": 0.02, "attempt": 0, "count_rate": 0.5},
+        {"bias_voltage": 0.02, "attempt": 1, "count_rate": 2.0},
+    ]
 
 
 def test_recording_a_bound_parameter_is_refused():

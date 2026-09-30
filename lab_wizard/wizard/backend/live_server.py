@@ -33,8 +33,8 @@ __all__ = ["live_app", "main"]
 def live_app(db: Path, config_dir: Path | None = None) -> FastAPI:
     """An app serving the live page and websocket for the lab database at ``db``."""
     app = FastAPI()
-    # config_dir finds the procedure's current plots, as the Data page does; a
-    # project outside any workspace has none and uses the plots it recorded.
+    # A run draws with the plots it recorded; config_dir only says whether its
+    # procedure still exists, for the Data page's "save to procedure".
     app.state.env = Env(data_dir=db.parent, config_dir=config_dir or db.parent)
     app.include_router(live.router)
     app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="frontend")

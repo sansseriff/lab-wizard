@@ -23,6 +23,7 @@ and ``z`` for waterfalls. Every expression may be a derived one (see
 from __future__ import annotations
 
 import pprint
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -36,7 +37,20 @@ from lab_wizard.lib.data.expressions import (
     derive,
 )
 
-__all__ = ["PlotSpec", "default_plot", "evaluate_plot", "line_shape", "load_plot", "notebook_source", "run_plots", "to_series"]
+__all__ = [
+    "PlotSpec",
+    "RunsContext",
+    "default_plot",
+    "derive_per_run",
+    "draw_rows",
+    "evaluate_plot",
+    "line_shape",
+    "load_plot",
+    "notebook_source",
+    "run_plots",
+    "runs_context",
+    "to_series",
+]
 
 _PER_RUN = {"min", "max", "first", "last"}
 
@@ -282,39 +296,89 @@ def line_shape(rows: pl.DataFrame) -> dict[str, Any]:
     return {"lines": sizes.len(), "points": [int(sizes.min() or 0), int(sizes.max() or 0)]}
 
 
-def load_plot(
-    spec: PlotSpec | dict[str, Any],
-    db: str | Path | None = None,
-    *,
-    derived: dict[str, str] | None = None,
+def derive_per_run(
+    points: pl.DataFrame, derived_by_run: dict[int, dict[str, str]], params: Params | None = None
 ) -> pl.DataFrame:
+    """``points`` with each run's own derived columns added.
+
+    Runs that recorded the same formulas are derived together; a run whose
+    procedure changed a formula is derived with the one it recorded.
+    """
+    groups: dict[str, tuple[dict[str, str], list[int]]] = {}
+    for run_id, derived in derived_by_run.items():
+        key = repr(sorted(derived.items()))
+        groups.setdefault(key, (derived, []))[1].append(run_id)
+    if not any(derived for derived, _ids in groups.values()):
+        return points
+    if len(groups) == 1:
+        (derived, _ids), = groups.values()
+        return derive(points, derived, params)
+    parts = [
+        derive(points.filter(pl.col("run_id").is_in(ids)), derived, params) if derived
+        else points.filter(pl.col("run_id").is_in(ids))
+        for derived, ids in groups.values()
+    ]
+    return pl.concat(parts, how="diagonal_relaxed").sort(["run_id", "seq"])
+
+
+@dataclass
+class RunsContext:
+    """Everything about a set of runs, besides their points, that drawing them needs."""
+
+    labels: dict[int, str]
+    bins: dict[str, dict[str, Any]]
+    params: dict[int, dict[str, Any]]
+    derived: dict[int, dict[str, str]]
+    units: dict[str, str | None]
+
+
+def runs_context(lab: Any, run_ids: list[int], label: str | None = None) -> RunsContext:
+    """What :func:`draw_rows` needs about ``run_ids``, read from the lab database."""
+    runs = lab.runs(run_ids)
+    labels: dict[int, str] = {}
+    if label:
+        where = ", ".join("?" * len(run_ids))
+        labels = {
+            run_id: value
+            for run_id, value in lab.query(
+                f"SELECT run_id, value FROM run_facets WHERE key = ? AND run_id IN ({where})",
+                [label, *run_ids],
+            )
+        }
+    columns = runs.columns()
+    return RunsContext(
+        labels=labels,
+        bins={name: meta["bins"] for name, meta in columns.items() if isinstance(meta, dict) and meta.get("bins")},
+        params=runs.params(),
+        derived=runs.derived_by_run(),
+        units={name: meta.get("unit") for name, meta in columns.items() if isinstance(meta, dict)},
+    )
+
+
+def draw_rows(spec: PlotSpec | dict[str, Any], points: pl.DataFrame, context: RunsContext) -> pl.DataFrame:
+    """:func:`evaluate_plot` for recorded runs: each run drawn with what it recorded."""
+    spec = spec if isinstance(spec, PlotSpec) else PlotSpec.model_validate(spec)
+    return evaluate_plot(
+        spec,
+        derive_per_run(points, context.derived, context.params),
+        run_labels=context.labels,
+        bins=context.bins,
+        params=context.params,
+    )
+
+
+def load_plot(spec: PlotSpec | dict[str, Any], db: str | Path | None = None) -> pl.DataFrame:
     """Evaluate ``spec`` against its runs in the lab database.
 
-    ``derived`` are the procedure's derived columns; by default, the ones each
-    run recorded with its definition. The Data page passes the procedure's
-    current ones, so a derived column added later applies to past runs.
+    Everything a run is drawn with comes from the run itself: its points, and
+    the derived columns its definition recorded. However its procedure has
+    changed since, or whether it still exists, a run draws as it was measured.
     """
     from lab_wizard.lib.data.read import Lab
 
     spec = spec if isinstance(spec, PlotSpec) else PlotSpec.model_validate(spec)
     with Lab(db) as lab:
-        runs = lab.runs(spec.runs)
-        points = runs.points()
-        labels: dict[int, str] = {}
-        if spec.label:
-            where = ", ".join("?" * len(spec.runs))
-            labels = {
-                run_id: value
-                for run_id, value in lab.query(
-                    f"SELECT run_id, value FROM run_facets WHERE key = ? AND run_id IN ({where})",
-                    [spec.label, *spec.runs],
-                )
-            }
-        bins = {name: meta["bins"] for name, meta in runs.columns().items() if isinstance(meta, dict) and meta.get("bins")}
-        return evaluate_plot(
-            spec, points, run_labels=labels, bins=bins, params=runs.params(),
-            derived=runs.derived() if derived is None else derived,
-        )
+        return draw_rows(spec, lab.runs(spec.runs).points(), runs_context(lab, spec.runs, spec.label))
 
 
 def notebook_source(spec: PlotSpec | dict[str, Any], db: str | Path) -> str:

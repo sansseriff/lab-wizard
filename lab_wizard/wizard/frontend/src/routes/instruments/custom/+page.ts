@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 
 type TreeItem = {
     type: string;
@@ -50,10 +50,7 @@ type Source = {
 
 export const load = async () => {
     if (!browser) return { sources: [] as Source[] };
-    const sourceData = await fetchWithConfig<{ sources: Source[] }>(
-        '/api/instrument-sources',
-        'GET'
-    );
+    const sourceData = await unwrap<{ sources: Source[] }>(api.GET('/api/instrument-sources'));
     return { sources: sourceData?.sources ?? [] };
 };
 

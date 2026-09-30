@@ -36,6 +36,7 @@ from lab_wizard.lib.procedures.storage import (
     save_procedure,
 )
 from lab_wizard.wizard.backend.python_formatting import format_python_code
+from lab_wizard.lib.server.registry import InstrumentRegistry
 
 
 logger = logging.getLogger("lab_wizard.wizard.backend.procedures_api")
@@ -76,7 +77,6 @@ def _fillers(config_dir: str | Path) -> dict[str, list[str]]:
     What a role costs in portability is how few instruments can fill it, so the
     composer shows the count beside each role.
     """
-    from lab_wizard.lib.server.registry import InstrumentRegistry
 
     try:
         attributes = InstrumentRegistry.from_config_dir(str(config_dir)).list_descriptions()

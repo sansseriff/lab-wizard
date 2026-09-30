@@ -27,6 +27,7 @@
 	import CaretDown from 'phosphor-svelte/lib/CaretDown';
 	import CaretRight from 'phosphor-svelte/lib/CaretRight';
 	import Self from './TreeNode.svelte';
+	import { nodeAddress, sortedChildren } from '$lib/instruments/model';
 
 	type Props = {
 		node: TreeItem;
@@ -58,8 +59,9 @@
 	}: Props = $props();
 
 	let expanded = $state(true);
-	const childEntries = $derived(Object.entries(node.children ?? {}));
-	const hasChildren = $derived(childEntries.length > 0);
+	// By slot, as Manage Instruments orders them: keys are hashes.
+	const childNodes = $derived(sortedChildren(node));
+	const hasChildren = $derived(childNodes.length > 0);
 	const currentPath = $derived([...path, { type: node.type, key: node.key }]);
 	const compatible = $derived(
 		isSelectable ? (isCompatible ? isCompatible(node, currentPath) : true) : true
@@ -117,7 +119,10 @@
 		{/if}
 
 		<span class="font-medium text-ink">{node.type}</span>
-		<span class="text-xs text-muted">({node.key})</span>
+		<span class="text-xs text-muted" title={node.key}>{nodeAddress(node)}</span>
+		{#if node.fields?.attribute_name}
+			<span class="mono text-xs text-muted">{node.fields.attribute_name}</span>
+		{/if}
 		{#if selectBadge}
 			<span
 				class="rounded px-1.5 py-0.5 text-2xs bg-accent-wash text-accent-strong"
@@ -169,7 +174,7 @@
 
 	{#if expanded && hasChildren}
 		<div>
-			{#each childEntries as [_childKey, child]}
+			{#each childNodes as child (child.key)}
 				<Self
 					node={child}
 					depth={depth + 1}

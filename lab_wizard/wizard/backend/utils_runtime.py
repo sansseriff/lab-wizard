@@ -12,12 +12,10 @@ import socket
 import logging
 from typing import List, Tuple
 
+from lab_wizard.lib.utilities.ssh import is_ssh_session
+
+
 logger = logging.getLogger("lab_wizard.wizard.backend.utils_runtime")
-
-
-def is_ssh_session() -> bool:
-    """Heuristic: detect if we're running under SSH by env vars."""
-    return any(os.environ.get(var) for var in ("SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"))
 
 
 def has_gui_context() -> bool:

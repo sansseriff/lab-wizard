@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { ask } from '$lib/confirm.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 	import Callout from '$lib/components/Callout.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import ParamValueInput from './ParamValueInput.svelte';
@@ -41,11 +41,10 @@
 	const leaves = $derived(
 		paramLeaves(JSON.parse(editing ? draftSchema : editor.savedJson).params ?? {})
 	);
-	const url = $derived(`/api/procedures/${encodeURIComponent(name)}/presets`);
 	$effect(() => ondirty(dirty));
 	$effect(() => onbusy(busy));
 	$effect(() => {
-		void url;
+		void name;
 		void editor.savedJson;
 		untrack(() => {
 			if (!dirty) editing = false;
@@ -57,13 +56,13 @@
 		const version = ++loadVersion;
 		loading = true;
 		try {
-			const result = await fetchWithConfig<PresetData>(url, 'GET');
+			const result = await unwrap<PresetData>(api.GET('/api/procedures/{name}/presets', { params: { path: { name } } }));
 			if (version === loadVersion) {
 				data = result;
 				loadError = null;
 			}
 		} catch (e) {
-			if (version === loadVersion) loadError = e instanceof Error ? e.message : String(e);
+			if (version === loadVersion) loadError = errorMessage(e);
 		} finally {
 			if (version === loadVersion) loading = false;
 		}
@@ -110,8 +109,9 @@
 		}
 		busy = true;
 		try {
-			await fetchWithConfig(`${url}/${encodeURIComponent(target)}`, 'PUT', {
-				values: $state.snapshot(draft)
+			await api.PUT('/api/procedures/{name}/presets/{preset}', {
+				params: { path: { name, preset: target } },
+				body: { values: $state.snapshot(draft) }
 			});
 			await load();
 			selected = draftName = target;
@@ -119,7 +119,7 @@
 			baseline = JSON.stringify([draftName, draft]);
 			message = { tone: 'ok', text: `Saved preset ${target}.` };
 		} catch (e) {
-			message = { tone: 'crit', text: e instanceof Error ? e.message : String(e) };
+			message = { tone: 'crit', text: errorMessage(e) };
 		} finally {
 			busy = false;
 		}
@@ -134,12 +134,12 @@
 		if (!yes) return;
 		busy = true;
 		try {
-			await fetchWithConfig(`${url}/${encodeURIComponent(preset)}`, 'DELETE');
+			await api.DELETE('/api/procedures/{name}/presets/{preset}', { params: { path: { name, preset } } });
 			if (selected === preset) discard();
 			await load();
 			message = { tone: 'ok', text: `Deleted preset ${preset}.` };
 		} catch (e) {
-			message = { tone: 'crit', text: e instanceof Error ? e.message : String(e) };
+			message = { tone: 'crit', text: errorMessage(e) };
 		} finally {
 			busy = false;
 		}

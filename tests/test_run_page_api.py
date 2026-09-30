@@ -75,6 +75,7 @@ def test_saving_sections_keeps_the_rest_of_the_file(workspace, rig):
     project = _create(client, rig)
     run = {"device": "A7", "operator": "andrew", "notes": "after rewiring",
            "metadata": {"cryostat": "BF1", "optics": {"fiber": "SM28", "attenuation_db": 30}}}
+    client.put("/api/data/devices/A7", json={"properties": {}})
     saved = client.put(f"/api/projects/{project}/settings", json={"run": run}).json()
     assert saved["run"] == run
     assert "instrument_sources" in saved["yaml"]  # the resources were not touched
@@ -87,14 +88,19 @@ def test_a_bad_setting_is_refused_with_where_it_is(workspace, rig):
 
     response = client.put(f"/api/projects/{project}/settings", json={"params": {"settle_s": "soon"}})
     assert response.status_code == 422
-    (problem,) = response.json()["detail"]["problems"]
+    (problem,) = response.json()["problems"]
     assert problem["path"] == ["measurement", "params", "settle_s"]
 
     response = client.put(f"/api/projects/{project}/settings", json={"outputs": {"live_plot": "hologram"}})
-    assert response.json()["detail"]["problems"][0]["path"] == ["outputs", "live_plot"]
+    assert response.json()["problems"][0]["path"] == ["outputs", "live_plot"]
+
+    # A device the lab has not registered is a typo until it is registered.
+    response = client.put(f"/api/projects/{project}/settings", json={"run": {"device": "A7x"}})
+    assert response.status_code == 422
+    assert response.json()["problems"][0]["path"] == ["run", "device"]
 
     response = client.put(f"/api/projects/{project}/settings", json={"yaml": "run: [unclosed"})
-    assert "not valid YAML" in response.json()["detail"]["message"]
+    assert "not valid YAML" in response.json()["detail"]
     assert client.get(f"/api/projects/{project}/settings").json()["yaml"] == before  # nothing written
 
 
@@ -104,11 +110,13 @@ def test_a_bad_setting_is_refused_with_where_it_is(workspace, rig):
 def test_a_launched_run_is_followed_to_its_record(workspace, rig):
     ws, client = workspace
     project = _create(client, rig)
-    client.put(f"/api/projects/{project}/settings", json={
+    client.put("/api/data/devices/A7", json={"properties": {}})
+    saved = client.put(f"/api/projects/{project}/settings", json={
         "params": {"bias": {"mode": "explicit", "values": [0.0, 0.01, 0.02]}, "settle_s": 0.0},
         "run": {"device": "A7", "metadata": {"cryostat": "BF1", "optics": {"fiber": "SM28"}}},
     })
-    assert client.get(f"/api/projects/{project}/launch").json() == {"state": "idle"}
+    assert saved.status_code == 200, saved.text
+    assert client.get(f"/api/projects/{project}/launch").json()["state"] == "idle"
 
     started = client.post(f"/api/projects/{project}/launch").json()
     assert started["state"] in ("starting", "running", "ended")
@@ -151,3 +159,35 @@ def test_params_are_written_with_their_descriptions_as_comments(workspace, rig):
     assert comment in client.get(f"/api/projects/{project}/settings").json()["yaml"]
     saved = client.put(f"/api/projects/{project}/settings", json={"params": {"settle_s": 0.2}}).json()
     assert "settle_s: 0.2" in saved["yaml"] and comment in saved["yaml"]
+
+
+def test_a_pid_reused_after_the_run_is_not_mistaken_for_it(workspace, rig):
+    """After a reboot the pid in launch.json can be anyone's; the lock says the run ended."""
+    import json
+    import subprocess
+    import sys
+
+    from lab_wizard.wizard.backend import launcher
+
+    ws, client = workspace
+    project = _create(client, rig)
+    client.put(f"/api/projects/{project}/settings", json={
+        "params": {"bias": {"mode": "explicit", "values": [0.0]}, "settle_s": 0.0},
+    })
+    client.post(f"/api/projects/{project}/launch")
+    _wait_until_ended(client, project)
+
+    # The wizard restarts, forgetting its children, and the old pid now belongs
+    # to an unrelated live process.
+    stranger = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        launcher._children.clear()
+        state_file = ws.projects_dir / project / ".wizard" / "launch.json"
+        state = json.loads(state_file.read_text())
+        state_file.write_text(json.dumps({**state, "pid": stranger.pid}))
+
+        assert client.get(f"/api/projects/{project}/launch").json()["state"] == "ended"
+        assert client.post(f"/api/projects/{project}/stop").status_code == 409
+        assert stranger.poll() is None  # never signalled
+    finally:
+        stranger.kill()

@@ -19,6 +19,7 @@ the path of the field it is about.
 from __future__ import annotations
 
 import io
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from pydantic import BaseModel, ValidationError
 from ruamel.yaml import YAML
 
 from lab_wizard.lib.custom_measurements import load_custom_measurement
+from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.procedures.storage import load_procedure
 from lab_wizard.lib.utilities.model_tree import ProjectConfig
 from lab_wizard.wizard.backend.project_generation import commented_params
@@ -62,7 +64,7 @@ def _params_model(project_dir: Path, project: ProjectConfig, config_dir: Path) -
     try:
         if project.project.kind == "custom":
             # The project's own copy: it is what runs, and it may have been edited.
-            return load_custom_measurement(project_dir / f"{name}.py").params_model
+            return load_custom_measurement(module_path(project_dir, name)).params_model
         return load_procedure(config_dir, name).params_model()
     except Exception:  # noqa: BLE001 - params then go unchecked here; the run still checks them
         return None
@@ -112,13 +114,33 @@ def read_project(projects_dir: Path, config_dir: Path, name: str) -> dict[str, A
     }
 
 
-def save_project(projects_dir: Path, config_dir: Path, name: str, body: dict[str, Any]) -> dict[str, Any]:
+def _check_device(data: Any, known_devices: Collection[str] | None) -> None:
+    """A run's device must be one the lab has registered, so a typo is not a new device."""
+    if known_devices is None or not isinstance(data, dict):
+        return
+    device = (data.get("run") or {}).get("device")
+    if device and device not in known_devices:
+        raise ProjectConfigError([{
+            "path": ["run", "device"],
+            "message": f"no device named {device!r}; register it under Data → Devices first",
+        }])
+
+
+def save_project(
+    projects_dir: Path,
+    config_dir: Path,
+    name: str,
+    body: dict[str, Any],
+    *,
+    known_devices: Collection[str] | None = None,
+) -> dict[str, Any]:
     """Write a project's settings, from the whole YAML or from its sections.
 
     ``{"yaml": text}`` replaces the file as written. ``{"run", "params",
     "outputs"}`` (any of them) replace those sections and keep everything else
     in the file — its resources, and comments outside the sections changed.
-    Nothing is written unless the result checks.
+    Nothing is written unless the result checks. With ``known_devices``, the
+    run's device must be one of them.
     """
     project_dir = project_dir_for(projects_dir, name)
     path = _yaml_path(project_dir)
@@ -129,6 +151,7 @@ def save_project(projects_dir: Path, config_dir: Path, name: str, body: dict[str
         except yaml.YAMLError as e:
             raise ProjectConfigError([{"path": [], "message": f"not valid YAML: {e}"}]) from e
         _check(data, project_dir, config_dir)
+        _check_device(data, known_devices)
     else:
         rt = YAML(typ="rt")
         rt.default_flow_style = False
@@ -143,6 +166,8 @@ def save_project(projects_dir: Path, config_dir: Path, name: str, body: dict[str
         buffer = io.StringIO()
         rt.dump(document, buffer)
         text = buffer.getvalue()
-        _check(yaml.safe_load(text), project_dir, config_dir)
+        data = yaml.safe_load(text)
+        _check(data, project_dir, config_dir)
+        _check_device(data, known_devices)
     path.write_text(text, encoding="utf-8")
     return read_project(projects_dir, config_dir, name)

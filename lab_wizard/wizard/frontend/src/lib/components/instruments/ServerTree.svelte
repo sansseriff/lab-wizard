@@ -17,7 +17,7 @@
 		type ParamResult
 	} from '$lib/instruments/model';
 	import type { TreeItem as TreeNodeItem, TransportBadge } from '$lib/components/TreeNode.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 	import { workspaceName, type LocalServer } from '$lib/types/instruments';
 	import ArrowClockwise from 'phosphor-svelte/lib/ArrowClockwise';
 	import ArrowCounterClockwise from 'phosphor-svelte/lib/ArrowCounterClockwise';
@@ -127,12 +127,10 @@
 		loading = true;
 		message = null;
 		try {
-			remote = await fetchWithConfig<RemoteTree>('/api/remote-tree', 'POST', {
-				config_dir: selected.config_dir
-			});
+			remote = await unwrap<RemoteTree>(api.POST('/api/remote-tree', { body: { config_dir: selected.config_dir } }));
 		} catch (e) {
 			remote = null;
-			message = { text: e instanceof Error ? e.message : String(e), ok: false };
+			message = { text: errorMessage(e), ok: false };
 		} finally {
 			loading = false;
 		}
@@ -143,18 +141,14 @@
 		loading = true;
 		message = null;
 		try {
-			await fetchWithConfig('/api/remote-tree/edit', 'POST', {
-				config_dir: selected.config_dir,
-				operation,
-				payload
-			});
+			await api.POST('/api/remote-tree/edit', { body: { config_dir: selected.config_dir, operation, payload } });
 			message = { text: `Applied ${operation}.`, ok: true };
 			resetAddForm();
 			await loadTree();
 		} catch (e) {
 			// The server refuses a remote peer, or a rack that is currently open.
 			// Both are its decision, so its wording is what the user sees.
-			message = { text: e instanceof Error ? e.message : String(e), ok: false };
+			message = { text: errorMessage(e), ok: false };
 		} finally {
 			loading = false;
 			confirmTarget = null;
@@ -168,11 +162,11 @@
 	}
 
 	async function saveParams(update: ParamUpdate): Promise<ParamResult> {
-		const result = await fetchWithConfig<ParamResult>('/api/remote-tree/edit', 'POST', {
-			config_dir: server.config_dir,
-			operation: 'update',
-			payload: update
-		});
+		const result = await unwrap<ParamResult>(
+			api.POST('/api/remote-tree/edit', {
+				body: { config_dir: server.config_dir, operation: 'update', payload: update }
+			})
+		);
 		await loadTree();
 		return result;
 	}
@@ -235,15 +229,19 @@
 				.reverse()
 				.filter((t) => addParents[t])
 				.map((t) => ({ type: t, key: addParents[t] }));
-			discoveryResult = await fetchWithConfig('/api/remote-tree/discover', 'POST', {
-				config_dir: selected.config_dir,
-				type: addType,
-				action: actionName,
-				params: discoveryInputs,
-				parent_chain: parentChain
-			});
+			discoveryResult = await unwrap<typeof discoveryResult>(
+				api.POST('/api/remote-tree/discover', {
+					body: {
+						config_dir: selected.config_dir,
+						type: addType,
+						action: actionName,
+						params: discoveryInputs,
+						parent_chain: parentChain
+					}
+				})
+			);
 		} catch (e) {
-			message = { text: e instanceof Error ? e.message : String(e), ok: false };
+			message = { text: errorMessage(e), ok: false };
 		} finally {
 			discoveryLoading = false;
 		}
@@ -256,11 +254,11 @@
 			return;
 		}
 		try {
-			duplicate = await fetchWithConfig('/api/transport-status/duplicate-check', 'POST', {
-				type: addType,
-				key: addKey.trim(),
-				include_local: true
-			});
+			duplicate = await unwrap<typeof duplicate>(
+				api.POST('/api/transport-status/duplicate-check', {
+					body: { type: addType, key: addKey.trim(), include_local: true }
+				})
+			);
 		} catch {
 			duplicate = null;
 		}

@@ -111,9 +111,20 @@ around a `count` recovers from a timeout.
 ## How readings become rows
 
 A run's data is a table of rows. **A row is everything recorded while the same
-parameter values were in force, until a field would be recorded twice.** The
-parameters are whatever `sweep`, `repeat` and `with_parameter` have bound at the
-time, and every row carries them.
+parameter values were in force.** The parameters are whatever `sweep`,
+`repeat`, `retry` (its `attempt`) and `with_parameter` have bound at the time,
+and every row carries them.
+
+Recording the same field twice under the same parameters is an error, since the
+two readings would be rows nothing tells apart. Measuring a voltage, waiting,
+and measuring it again at one sweep point is written one of two ways:
+
+- **one row, two names** — `voltage_before` and `voltage_after`, when the two
+  readings are a pair to compare (a derived `voltage_after - voltage_before`
+  is then one column);
+- **a row each, labelled** — each reading inside a `with_parameter`
+  (`phase: before`, `phase: after`), or a `repeat`, when they are samples of one
+  quantity to plot or average together.
 
 So in an MCR curve, the `count` and the `read_voltage` taken at one attenuation
 share a row, while the background count, taken before any attenuation is set,
@@ -220,7 +231,7 @@ preset afterwards changes no existing project.
 
 ## Generated code, and editing it
 
-A project generated from a procedure contains `<name>.py`, holding
+A project generated from a procedure contains `_measurement/<name>.py`, holding
 `build_<name>_procedure()` and a `<Name>Measurement` class, and a setup file with
 the params models and the usual run lifecycle. The step tree sits between
 `# wizard:procedure:start` and `# wizard:procedure:end`. Regenerating from a

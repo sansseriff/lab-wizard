@@ -7,9 +7,10 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-# Imported when the app is built, never inside a request: two requests
-# importing lab_wizard.lib.data at once from different modules deadlock on its
-# import locks, and the Data page sends its first requests in parallel.
+# Backend modules import what they use at module level, so everything is
+# imported when the app is built and never inside a request: two requests that
+# import one package at once from different modules can deadlock on its import
+# locks, and pages send their first requests in parallel.
 from lab_wizard.lib.data.schema import DATABASE_NAME
 from lab_wizard.wizard.backend import data_api
 from lab_wizard.wizard.backend.models import Env

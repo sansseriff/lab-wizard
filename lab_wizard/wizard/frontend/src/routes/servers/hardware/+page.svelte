@@ -10,7 +10,7 @@
 	 * what this page exists to make visible: *declared* is what the config says
 	 * a transport is, *held* is whether a process actually has it open.
 	 */
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 	import Tooltip from '$lib/components/Tooltip.svelte';
 	import { ask } from '$lib/confirm.svelte';
 	import Panel from '$lib/components/Panel.svelte';
@@ -44,17 +44,17 @@
 		error = null;
 		try {
 			const [o, t, s, c] = await Promise.all([
-				fetchWithConfig<typeof owner>('/api/hardware-owner', 'GET'),
-				fetchWithConfig<typeof transport>('/api/transport-status', 'GET'),
-				fetchWithConfig<{ servers: typeof servers }>('/api/local-servers', 'GET'),
-				fetchWithConfig<{ servers: ServerClaims[] }>('/api/local-servers/claims', 'GET')
+				unwrap<typeof owner>(api.GET('/api/hardware-owner')),
+				unwrap<typeof transport>(api.GET('/api/transport-status')),
+				unwrap<{ servers: typeof servers }>(api.GET('/api/local-servers')),
+				unwrap<{ servers: ServerClaims[] }>(api.GET('/api/local-servers/claims'))
 			]);
 			owner = o;
 			transport = t;
 			servers = s.servers;
 			claims = c.servers;
 		} catch (e) {
-			error = e instanceof Error ? e.message : String(e);
+			error = errorMessage(e);
 		} finally {
 			busy = false;
 		}
@@ -64,10 +64,8 @@
 		busy = true;
 		message = null;
 		try {
-			const res = await fetchWithConfig<{ released: string[] }>(
-				'/api/local-servers/release',
-				'POST',
-				{ url, path }
+			const res = await unwrap<{ released: string[] }>(
+				api.POST('/api/local-servers/release', { body: { url, path } })
 			);
 			message = {
 				text: `Released ${res.released.length} instrument(s) under ${path}.`,
@@ -92,10 +90,8 @@
 		busy = true;
 		message = null;
 		try {
-			const res = await fetchWithConfig<{ released: string[] }>(
-				'/api/local-servers/claims/force-release',
-				'POST',
-				{ url, unit }
+			const res = await unwrap<{ released: string[] }>(
+				api.POST('/api/local-servers/claims/force-release', { body: { url, unit } })
 			);
 			message = {
 				text: `Ended the claim on ${res.released.join(', ') || unit}. It is reset to baseline before anyone else can claim it.`,

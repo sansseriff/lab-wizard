@@ -45,7 +45,8 @@ export type RunDetail = {
 	columns: Record<string, { unit?: string | null; bins?: unknown }>;
 	derived: Record<string, string>;
 	plots: PlotSpec[];
-	definition_source: 'procedure' | 'recorded' | null;
+	/** Whether a composed procedure of this name exists now, to save a plot into. */
+	procedure_exists: boolean;
 };
 
 /** One drawable line: the values, and the point (run, seq) each came from. */

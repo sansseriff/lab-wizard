@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 import type { ServerStatus } from '$lib/stores/workstation.svelte';
 
 export type ServersData = {
@@ -16,7 +16,7 @@ export const load: PageLoad = async () => {
 
 	let serverStatus: ServerStatus | null = null;
 	try {
-		serverStatus = await fetchWithConfig<ServerStatus>('/api/server/status', 'GET');
+		serverStatus = await unwrap<ServerStatus>(api.GET('/api/server/status'));
 	} catch {
 		serverStatus = null;
 	}
@@ -26,9 +26,8 @@ export const load: PageLoad = async () => {
 	// would make the first thing the user tries the thing that fails.
 	let suggestedBind = fallbackBind;
 	try {
-		const r = await fetchWithConfig<{ bind: string }>(
-			'/api/server/suggest-port?prefer_default=true',
-			'GET'
+		const r = await unwrap<{ bind: string }>(
+			api.GET('/api/server/suggest-port', { params: { query: { prefer_default: true } } })
 		);
 		suggestedBind = r.bind;
 	} catch {

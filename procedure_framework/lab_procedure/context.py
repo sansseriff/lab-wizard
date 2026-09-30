@@ -64,17 +64,21 @@ class RunContext:
     def observe(self, fields: Mapping[str, Any]) -> None:
         """Record ``fields``, merging them into the current row.
 
-        A row is everything recorded while the same parameter values were in
-        force, until a field would be recorded twice. So a count and a voltage
-        read at the same bias share a row; ten counts in a ``Repeat`` are ten
-        rows, because each repetition binds its own index; and two procedures
-        that take the same readings at the same parameter values produce the
-        same rows whatever the order of their loops. Only ``seq``, ``t`` and
-        ``steps`` record the order.
+        A row is everything recorded while the same parameter values are in
+        force. So a count and a voltage read at the same bias share a row; ten
+        counts in a ``Repeat`` are ten rows, because each repetition binds its
+        own index; and two procedures that take the same readings at the same
+        parameter values produce the same rows whatever the order of their
+        loops. Only ``seq``, ``t`` and ``steps`` record the order.
+
+        Recording a field twice under the same parameters is an error: the two
+        readings would be two rows nothing tells apart. Either name them
+        differently (``voltage_before``, ``voltage_after``: one row with both)
+        or bind what distinguishes them (a ``Repeat``, or ``with_parameter``
+        ``phase: after``: one row each, labelled).
 
         The row is emitted as a :class:`Point` when it closes: when the
-        parameters change, when a field would be recorded again, or when the
-        run ends (:meth:`close_point`).
+        parameters change, or when the run ends (:meth:`close_point`).
         """
         shadowed = sorted(self.parameters.keys() & fields.keys())
         if shadowed:
@@ -87,11 +91,18 @@ class RunContext:
         self.latest.update(fields)
 
         open_ = self._open
-        if (
-            open_ is None
-            or open_.parameters != self.parameters
-            or open_.fields.keys() & fields.keys()
-        ):
+        if open_ is not None and open_.parameters == self.parameters:
+            again = sorted(open_.fields.keys() & fields.keys())
+            if again:
+                where = ", ".join(f"{k}={v!r}" for k, v in self.parameters.items()) or "no parameters"
+                raise ValueError(
+                    f"{self.current_step or 'A step'} records {', '.join(map(repr, again))} again at the "
+                    f"same parameters ({where}), which would make two rows nothing tells apart. "
+                    "Name the readings differently (voltage_before, voltage_after) to keep them in one "
+                    "row, or bind what distinguishes them (a repeat, or with_parameter phase: after) "
+                    "for a row each."
+                )
+        if open_ is None or open_.parameters != self.parameters:
             self.close_point()
             open_ = self._open = _OpenPoint(parameters=self.snapshot_parameters())
         open_.fields.update(fields)

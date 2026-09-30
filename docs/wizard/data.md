@@ -55,11 +55,12 @@ recorded in the database.
 
 ### Writing another saver
 
-A saver is a sink on the run's messages, like the database recorder: it sees
-`RunStarted`, every `Point` (one row), every step's start and end, and
-`RunEnded`, in [`GenericSaver.handle`](../../lab_wizard/lib/savers/saver.py).
-One written by hand is passed to `run_procedure(..., savers=[...])`, which
-replaces the ones the project's `outputs:` asks for.
+A saver is a [`RunSink`](../../lab_wizard/lib/task_adapters/sinks.py): its
+`handle(message, run)` sees `RunStarted`, every `Point` (one row), every step's
+start and end, and `RunEnded`, each after the database has recorded it, so
+`run.run_id` is already set when it sees the run start. One written by hand is
+passed to `run_procedure(..., sinks=[...])`, which replaces the ones the
+project's `outputs:` asks for.
 
 ## Database
 
@@ -87,17 +88,17 @@ overlay on one plot, a line each. A run still being recorded is marked
 
 **The chosen run**, on the right, has three tabs:
 
-- **Plot** draws the run with its procedure's plots, one tab each, as the
-  procedure defines them now. A plot added to a procedure later applies to the
-  runs recorded before it; a run whose procedure has been deleted keeps the
-  plots it was recorded with.
+- **Plot** draws the run with the plots it was recorded with, one tab each,
+  and its derived columns as they were when it ran. However its procedure has
+  changed since, or whether it still exists, a past run draws the same.
     - **Edit plot** changes the axes, which rows are drawn, one line per what,
       and the scales. An axis can be any expression of the columns:
       `count_rate / 1000`, or
       `counts - mean(counts, phase == "background")`. See
       [derived columns](procedures.md).
-    - **Save to procedure** adds the plot to the procedure, for every run of
-      it. Saving to a built-in procedure makes this workspace's own copy of it.
+    - **Save to procedure** adds the plot to the procedure, for the runs it
+      records from then on. Saving to a built-in procedure makes this
+      workspace's own copy of it.
     - **Open in notebook** gives the Python that draws the same plot from the
       database with matplotlib: the place for what this page does not do,
       such as fits and arithmetic between runs.

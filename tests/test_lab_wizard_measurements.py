@@ -18,6 +18,7 @@ import pytest
 
 from lab_procedure import ProcedureRunner, Status
 
+from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.data import find
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.instruments.general.vsense import StandInVSense
@@ -69,7 +70,7 @@ def _module(name: str, project_dir: Path) -> types.ModuleType:
     """The procedure's generated module, as if it sat in ``project_dir``."""
     definition = load_procedure(project_dir / "no-config", name)
     module = types.ModuleType(name)
-    module.__file__ = str(project_dir / f"{name}.py")  # where it records its runs
+    module.__file__ = str(module_path(project_dir, name))  # where it records its runs
     exec(compile(measurement_module_source(definition), module.__file__, "exec"), module.__dict__)
     return module
 

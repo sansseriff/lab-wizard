@@ -11,7 +11,7 @@
 	 * server keeps no registry of its clients. "2 remote servers" counts *our*
 	 * address book — a list we wrote — and it is labelled as such.
 	 */
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage } from '$lib/api';
 	import Pill from '$lib/components/Pill.svelte';
 	import { workstation } from '$lib/stores/workstation.svelte';
 	import { workspaceName } from '$lib/types/instruments';
@@ -39,14 +39,11 @@
 		serverBusy = true;
 		serverError = null;
 		try {
-			await fetchWithConfig(
-				stopping ? '/api/server/stop' : '/api/server/start',
-				'POST',
-				stopping ? null : { detached: false }
-			);
+			if (stopping) await api.POST('/api/server/stop');
+			else await api.POST('/api/server/start', { body: { detached: false } });
 			await workstation.refresh();
 		} catch (e) {
-			serverError = e instanceof Error ? e.message : 'Server action failed.';
+			serverError = errorMessage(e) || 'Server action failed.';
 		} finally {
 			serverBusy = false;
 		}
@@ -56,10 +53,6 @@
 <section class="space-y-5">
 	<div>
 		<h1 class="text-headline font-semibold tracking-tight">Overview</h1>
-		<p class="mt-1 max-w-[64ch] text-body text-muted">
-			What this workstation has configured, what is actually open right now, and the two things you
-			start a session with.
-		</p>
 	</div>
 
 	<!-- Counts. Every label states which kind of fact it is. -->
@@ -92,16 +85,32 @@
 
 	<div class="grid gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
 		<div class="space-y-4">
-			<!-- Server state. Three states, each with its consequence spelled out:
-			     "stopped" is a normal steady state, not a fault, but it does mean
-			     every permission rule is inert. -->
+			<!-- Server state. What running it changes is explained on /servers;
+			     here it is a status and a switch. -->
 			<div class="rounded border border-line bg-surface">
-				<div class="flex items-center justify-between gap-3 border-b border-line px-3.5 py-2.5">
-					<div>
-						<h2 class="text-body font-semibold">This workstation</h2>
-						<p class="text-xs text-muted">
-							Who owns the hardware, and whether the permission gate can see anything.
-						</p>
+				<div class="flex items-center justify-between gap-3 px-3.5 py-2.5">
+					<div class="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+						<h2 class="text-body font-semibold">
+							<a class="text-ink no-underline hover:underline" href="/servers">Instrument server</a>
+						</h2>
+						{#if workstation.phase === 'running'}
+							<Pill tone="ok" dot>Running</Pill>
+						{:else if workstation.phase === 'stopped'}
+							<Pill tone="warn" dot>Stopped</Pill>
+						{:else}
+							<Pill tone="neutral">Not configured</Pill>
+						{/if}
+						{#if workstation.phase !== 'unconfigured'}
+							<span class="text-fine text-muted">
+								{#if workstation.server?.bind}<span class="mono">{workstation.server.bind}</span> ·{/if}
+								<a class="text-muted hover:underline" href="/servers/permissions"
+									>{workstation.server?.rule_count ?? 0} safety rule{(workstation.server
+										?.rule_count ?? 0) === 1
+										? ''
+										: 's'}</a
+								>
+							</span>
+						{/if}
 					</div>
 					{#if workstation.phase === 'unconfigured'}
 						<a
@@ -124,54 +133,9 @@
 						</button>
 					{/if}
 				</div>
-
-				<div class="space-y-2.5 p-3.5">
-					{#if serverError}
-						<div class="rounded border border-crit/30 bg-crit-wash px-3 py-2 text-xs text-crit">
-							{serverError}
-						</div>
-					{/if}
-
-					{#if workstation.phase === 'running'}
-						<div class="rounded border border-ok/30 bg-ok-wash px-3 py-2 text-body text-ok">
-							<strong>The instrument server owns this workspace's hardware.</strong>
-							Calls route through it, so exactly one process holds each transport and permission rules
-							apply.
-						</div>
-					{:else if workstation.phase === 'stopped'}
-						<div class="rounded border border-warn/30 bg-warn-wash px-3 py-2 text-body text-warn">
-							<strong>No server is running for this workspace.</strong>
-							The wizard opens hardware in its own process. That works, but the permission gate only
-							sees calls made through a server — anything done here is invisible to it.
-						</div>
-					{:else}
-						<div class="rounded border border-line bg-surface-2 px-3 py-2 text-body text-ink-2">
-							<strong>This workspace is not a hardware host.</strong>
-							It has no server config, so it acts as a client of other servers. That is what keeps a
-							cloned workspace from racing the real host for the same instruments.
-						</div>
-					{/if}
-
-					<dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-3.5 gap-y-1 text-body">
-						<dt class="text-fine text-muted">Serving</dt>
-						<dd>
-							{#if workstation.server?.bind}
-								<span class="mono">{workstation.server.bind}</span>
-							{:else if workstation.server?.has_config}
-								this machine over <span class="mono">ipc://</span> · no network bind set
-							{:else}
-								<span class="text-muted">—</span>
-							{/if}
-						</dd>
-						<dt class="text-fine text-muted">Rules</dt>
-						<dd>
-							{workstation.server?.rule_count ?? 0} safety rule{(workstation.server?.rule_count ??
-								0) === 1
-								? ''
-								: 's'}, read at start
-						</dd>
-					</dl>
-				</div>
+				{#if serverError}
+					<div class="border-t border-line px-3.5 py-2.5 text-xs text-crit">{serverError}</div>
+				{/if}
 			</div>
 
 			<!-- Attention. Renders only when something is genuinely true; the empty
@@ -217,10 +181,7 @@
 					{/if}
 
 					{#if data.duplicates.length === 0 && data.otherServers.length === 0}
-						<p class="text-xs text-muted">
-							Nothing outstanding. Duplicate transports, other workspaces' servers, and configs that
-							diverged on disk would appear here.
-						</p>
+						<p class="text-xs text-muted">Nothing outstanding.</p>
 					{/if}
 				</div>
 			</div>
@@ -285,27 +246,23 @@
 				{:else}
 					<ul>
 						{#each data.projects as p (p.name)}
-							<li class="border-b border-line px-3.5 py-2.5 last:border-b-0">
-								<div class="mono truncate text-xs font-semibold">{p.name}</div>
-								<div class="text-fine text-muted">
-									{p.measurement ?? 'unknown measurement'}{when(p.created)
-										? ` · ${when(p.created)}`
-										: ''}
-								</div>
+							<li class="border-b border-line last:border-b-0">
+								<a
+									class="block px-3.5 py-2.5 no-underline hover:bg-surface-2"
+									href={`/measurements/run?project=${encodeURIComponent(p.name)}`}
+								>
+									<div class="mono truncate text-xs font-semibold text-ink">{p.name}</div>
+									<div class="text-fine text-muted">
+										{p.measurement ?? 'unknown measurement'}{when(p.created)
+											? ` · ${when(p.created)}`
+											: ''}
+									</div>
+								</a>
 							</li>
 						{/each}
 					</ul>
 				{/if}
 			</div>
-
-			{#if workstation.phase !== 'running'}
-				<p class="text-xs leading-relaxed text-muted">
-					<Pill tone="warn">Note</Pill>
-					Safety rules on
-					<a class="text-accent underline" href="/servers/permissions">Permissions</a>
-					are not enforced while the server is down.
-				</p>
-			{/if}
 		</div>
 	</div>
 </section>

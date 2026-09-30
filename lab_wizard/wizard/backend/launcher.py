@@ -7,9 +7,17 @@ wizard that crashes or restarts mid-sweep does not stop it. The wizard finds
 it again from what is written in ``<project>/.wizard/``:
 
 ``launch.json``      the process, when it started, and where its output goes
+``<id>.lock``        locked for exactly as long as the process lives: it
+                     inherits the lock when it starts, and the operating
+                     system drops it when the process exits, however it exits
 ``<id>.run.json``    written by the run itself (``LAUNCH_FILE_ENV``) once it
                      has a run id in the lab database — until then it is
                      still claiming and resolving its instruments
+
+Liveness is read from the lock, never from the pid alone: after a reboot, or
+long enough after the run, the pid in ``launch.json`` can belong to an
+unrelated process, which would read as a run still going — and Stop would
+signal it.
 
 Stop sends SIGINT, which is Ctrl-C: the run aborts through its own guards and
 ``RunLifecycle`` puts the instruments in their safe state.
@@ -28,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from lab_wizard.lib.task_adapters.run import LAUNCH_FILE_ENV
+from lab_wizard.lib.utilities.process_lock import hold, is_held
 
 __all__ = ["LaunchError", "launch", "launch_status", "stop"]
 
@@ -51,12 +60,20 @@ def _read_state(project_dir: Path) -> dict[str, Any] | None:
         return None
 
 
-def _alive(pid: int) -> tuple[bool, int | None]:
-    """Whether ``pid`` is still running, and its exit code if we know it."""
+# A lock is handed to the child through an inherited descriptor, which
+# Windows' subprocess cannot do; there the pid is all there is.
+_LOCKS = sys.platform != "win32"
+
+
+def _alive(state: dict[str, Any]) -> tuple[bool, int | None]:
+    """Whether the launched process is still running, and its exit code if we know it."""
+    pid = state["pid"]
     child = _children.get(pid)
     if child is not None:
         code = child.poll()
         return code is None, code
+    if state.get("lock"):
+        return is_held(state["lock"]), None
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -79,7 +96,7 @@ def launch_status(project_dir: Path) -> dict[str, Any]:
     state = _read_state(project_dir)
     if state is None:
         return {"state": "idle"}
-    alive, code = _alive(state["pid"])
+    alive, code = _alive(state)
     run: dict[str, Any] = {}
     try:
         run = json.loads(Path(state["launch_file"]).read_text(encoding="utf-8"))
@@ -119,17 +136,31 @@ def launch(project_dir: Path) -> dict[str, Any]:
     log = logs / f"run_{stamp}.log"
     launch_file = state_dir / f"{launch_id}.run.json"
 
+    for previous in state_dir.glob("*.lock"):
+        if not is_held(previous):  # a finished launch's
+            previous.unlink(missing_ok=True)
+    lock = hold(state_dir / f"{launch_id}.lock") if _LOCKS else None
+
     env = {**os.environ, LAUNCH_FILE_ENV: str(launch_file), "PYTHONUNBUFFERED": "1"}
-    with log.open("wb") as out:
-        child = subprocess.Popen(
-            [sys.executable, str(setups[0])],
-            cwd=str(project_dir),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=out,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,  # outlives the wizard, and is stopped as a group
-        )
+    try:
+        with log.open("wb") as out:
+            child = subprocess.Popen(
+                [sys.executable, str(setups[0])],
+                cwd=str(project_dir),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # outlives the wizard, and is stopped as a group
+                pass_fds=(lock.fileno(),) if lock else (),
+            )
+    except BaseException:
+        if lock:
+            lock.release()
+        raise
+    if lock:
+        # The child holds it now; the lock lasts exactly as long as the child.
+        lock.hand_off()
     _children[child.pid] = child
     state = {
         "launch_id": launch_id,
@@ -137,6 +168,7 @@ def launch(project_dir: Path) -> dict[str, Any]:
         "started_at": datetime.now(timezone.utc).isoformat(),
         "log": str(log),
         "launch_file": str(launch_file),
+        "lock": str(lock.path) if lock else None,
     }
     (state_dir / "launch.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
     return launch_status(project_dir)

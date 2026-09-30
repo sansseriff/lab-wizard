@@ -31,6 +31,16 @@ from lab_wizard.wizard.backend.projects import list_projects
 from lab_wizard.wizard.backend.remote_servers import (
     list_remote_attributes,
 )
+from lab_wizard.lib.procedures.storage import (
+    list_presets,
+    list_procedures,
+    load_procedure,
+    procedure_origin,
+)
+from lab_wizard.wizard.backend.procedure_generation import (
+    procedure_requirements,
+    generate_procedure_project,
+)
 
 logger = logging.getLogger("lab_wizard.wizard.backend.routes.measurements")
 router = APIRouter()
@@ -46,12 +56,6 @@ def api_measurement_choices(env: Env = Depends(get_env)):
     measurement they are the same kind of thing: roles to bind, params to set.
     A file that cannot be loaded is listed with why, not hidden.
     """
-    from lab_wizard.lib.procedures.storage import (
-        list_presets,
-        list_procedures,
-        load_procedure,
-        procedure_origin,
-    )
 
     config_dir = workspace_config_dir(env)
     choices: list[dict] = []
@@ -94,11 +98,6 @@ def api_measurement_choices(env: Env = Depends(get_env)):
 def _requirements_for(name: str, kind: str, env: Env):
     """``FilledReq``s for a procedure or a custom measurement, or a 404."""
     if kind == "procedure":
-        from lab_wizard.lib.procedures.storage import load_procedure
-        from lab_wizard.wizard.backend.procedure_generation import (
-            procedure_requirements,
-        )
-
         try:
             return procedure_requirements(load_procedure(workspace_config_dir(env), name))
         except ValueError as e:
@@ -183,10 +182,6 @@ def api_create_measurement_project(
     """Create a project from a procedure or a custom measurement (``body.kind``)."""
     try:
         if body.kind == "procedure":
-            from lab_wizard.wizard.backend.procedure_generation import (
-                generate_procedure_project,
-            )
-
             return generate_procedure_project(
                 config_dir=Path(workspace_config_dir(env)),
                 projects_dir=workspace_projects_dir(env),

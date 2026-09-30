@@ -16,16 +16,21 @@ same rows, computed the same way (``plans/runner_plan.md`` §7).
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
+from typing import Any
 
-__all__ = ["GenericPlotter", "StandInPlotter", "display_available", "is_ssh_session"]
+from lab_procedure import RunEnded, RunStarted
 
+from lab_wizard.lib.task_adapters.sinks import RunInfo, RunSink
+from lab_wizard.lib.utilities.ssh import is_ssh_session
 
-def is_ssh_session() -> bool:
-    return any(os.environ.get(var) for var in ("SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"))
+__all__ = ["GenericPlotter", "StandInPlotter", "display_available"]
+
+logger = logging.getLogger(__name__)
 
 
 def display_available() -> bool:
@@ -39,12 +44,21 @@ def display_available() -> bool:
     return not is_ssh_session()
 
 
-class GenericPlotter(ABC):
+class GenericPlotter(RunSink):
     """Base class for plotters: told when a run starts, ends, and returns."""
 
     def __init__(self, plot: str = "") -> None:
         # A name from the procedure's plots:, or "" for the first.
         self.plot_name = plot
+
+    def handle(self, message: Any, run: RunInfo) -> None:
+        if isinstance(message, RunStarted):
+            if run.database is None or run.run_id is None:
+                logger.warning("A live plot needs the run recorded in a lab database; this run is not, so none opens")
+                return
+            self.run_started(run.database, run.run_id)
+        elif isinstance(message, RunEnded):
+            self.run_ended(message.status)
 
     @abstractmethod
     def run_started(self, database: Path, run_id: int) -> None:
@@ -52,14 +66,6 @@ class GenericPlotter(ABC):
 
     def run_ended(self, status: str) -> None:
         """The run ended with ``status``."""
-
-    def finish(self) -> None:
-        """Called once the run has returned, before the process exits.
-
-        A viewer that lives in this process's lifetime (the web plot's server)
-        waits here until it is closed.
-        """
-
 
 class StandInPlotter(GenericPlotter):
     """Remembers what it was told. Useful for tests."""

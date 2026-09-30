@@ -7,11 +7,13 @@ See ``plans/semantic_data_plan.md`` §4.
 A run started from a project is always recorded in the lab database: the
 workspace's ``<data_dir>/lab.db``, or, for a project outside any workspace, the
 project's own ``data/lab.db``. A step tree run without a project (a test, a
-notebook) records nothing unless given a recorder.
+notebook) records nothing unless given a database.
 
 What else a run produces is read from the project's ``outputs:`` block each
 time it starts: a folder of files (``files``, laid out by the workspace's
-``data.yaml``) and a live plot (``live_plot``).
+``data.yaml``) and a live plot (``live_plot``). Each is a
+:class:`~lab_wizard.lib.task_adapters.sinks.RunSink`, fed after the database
+has recorded each message (:class:`~lab_wizard.lib.task_adapters.sinks.RunOutputs`).
 
 A run the wizard launches (``LAUNCH_FILE_ENV`` set) is drawn on the wizard's
 Run page, so it opens no plot of its own; it writes its run id to that file
@@ -23,7 +25,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,11 +32,11 @@ from lab_procedure import ProcedureRunner, RunStarted, Status, Step
 
 from lab_wizard.lib.data import DATABASE_NAME, DatabaseRecorder
 from lab_wizard.lib.data.settings import load_data_settings
-from lab_wizard.lib.plotters import GenericPlotter, MplPlotter, WebPlotter
+from lab_wizard.lib.plotters import MplPlotter, WebPlotter
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.savers import FileSaver, GenericSaver, SaverContext
-from lab_wizard.lib.task_adapters.plotters import PlotterSink
+from lab_wizard.lib.savers import FileSaver
 from lab_wizard.lib.task_adapters.provenance import baseline_snapshot
+from lab_wizard.lib.task_adapters.sinks import RunInfo, RunOutputs, RunSink
 from lab_wizard.lib.utilities.model_tree import (
     OutputsConfig,
     ProjectConfig,
@@ -45,7 +46,15 @@ from lab_wizard.lib.workspace import find_workspace
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LAUNCH_FILE_ENV", "RunSinks", "attach_sinks", "database_path", "project_outputs", "run_procedure", "run_started"]
+__all__ = [
+    "LAUNCH_FILE_ENV",
+    "LaunchReport",
+    "database_path",
+    "project_outputs",
+    "run_outputs",
+    "run_procedure",
+    "run_started",
+]
 
 # Set by the wizard when it launches a run: a file to write the run's id to.
 LAUNCH_FILE_ENV = "LAB_WIZARD_LAUNCH_FILE"
@@ -71,12 +80,12 @@ def _project(project_dir: Path | None) -> ProjectConfig | None:
     return load_project_config(path) if path.is_file() else None
 
 
-def project_outputs(project_dir: Path) -> tuple[list[GenericSaver], list[GenericPlotter]]:
-    """The savers and plotters the project at ``project_dir`` asks for in ``outputs:``."""
+def project_outputs(project_dir: Path) -> list[RunSink]:
+    """What the project at ``project_dir`` asks a run to produce in ``outputs:``."""
     project = _project(project_dir)
     outputs = project.outputs if project is not None else OutputsConfig()
 
-    savers: list[GenericSaver] = []
+    sinks: list[RunSink] = []
     if outputs.files:
         workspace = find_workspace(project_dir, use_environment=False)
         files = load_data_settings(workspace.config_dir if workspace is not None else None).files
@@ -85,16 +94,15 @@ def project_outputs(project_dir: Path) -> tuple[list[GenericSaver], list[Generic
             root = Path(files.root).expanduser()
             if not root.is_absolute():
                 root = (workspace.root if workspace is not None else project_dir) / root
-        savers.append(FileSaver(root=root, path=files.path, plot_png=files.plot_png))
+        sinks.append(FileSaver(root=root, path=files.path, plot_png=files.plot_png))
 
-    plotters: list[GenericPlotter] = []
     if os.environ.get(LAUNCH_FILE_ENV):
         pass  # the wizard's Run page draws it (plans/runner_plan.md R6)
     elif outputs.live_plot == "window":
-        plotters.append(MplPlotter(plot=outputs.plot))
+        sinks.append(MplPlotter(plot=outputs.plot))
     elif outputs.live_plot == "web":
-        plotters.append(WebPlotter(plot=outputs.plot))
-    return savers, plotters
+        sinks.append(WebPlotter(plot=outputs.plot))
+    return sinks
 
 
 def run_started(
@@ -124,53 +132,41 @@ def run_started(
     )
 
 
-@dataclass
-class RunSinks:
-    """What ``attach_sinks`` subscribed that ``run_procedure`` looks after afterwards."""
+class LaunchReport(RunSink):
+    """Writes the run's id to ``path`` once it has one, for the wizard that launched it."""
 
-    recorder: DatabaseRecorder | None
-    plotters: list[GenericPlotter]
+    def __init__(self, path: Path) -> None:
+        self.path = path
 
-
-def _report_run_id(recorder: DatabaseRecorder, path: Path) -> Any:
-    """Write the run's id to ``path`` once the recorder has it, for the wizard."""
-
-    def handle(message: RunStarted) -> None:
-        if recorder.run_id is not None:
-            path.write_text(json.dumps({"run_id": recorder.run_id, "database": str(recorder.path)}), encoding="utf-8")
-
-    return handle
+    def handle(self, message: Any, run: RunInfo) -> None:
+        if isinstance(message, RunStarted) and run.run_id is not None:
+            self.path.write_text(json.dumps({"run_id": run.run_id, "database": str(run.database)}), encoding="utf-8")
 
 
-def attach_sinks(
-    runner: ProcedureRunner,
+def run_outputs(
     *,
     project_dir: Path | None = None,
-    savers: list[GenericSaver] | None = None,
-    plotters: list[GenericPlotter] | None = None,
-) -> RunSinks:
-    """Subscribe everything that consumes a run: the database, then savers and plotters.
+    database: str | Path | None = None,
+    sinks: list[RunSink] | None = None,
+) -> RunOutputs:
+    """Everything that consumes a run: its lab database record, then its sinks.
 
-    ``savers`` and ``plotters`` of ``None`` mean the ones the project's
-    ``outputs:`` asks for (none without a project). The recorder is subscribed
-    first, so it has the run's database id before any saver or plotter sees the
-    run start.
+    A run in a project is recorded in the project's workspace database, and
+    ``sinks`` of ``None`` means the ones its ``outputs:`` asks for. A run
+    outside a project is recorded only if given a ``database``, and produces
+    only the ``sinks`` it is given.
     """
     recorder = None
+    wanted: list[RunSink] = []
     if project_dir is not None:
         recorder = DatabaseRecorder(database_path(project_dir))
-        recorder.attach(runner.context.data_bus, runner.context.status_bus)
-        wanted_savers, wanted_plotters = project_outputs(project_dir)
-        savers = wanted_savers if savers is None else savers
-        plotters = wanted_plotters if plotters is None else plotters
+        wanted = project_outputs(project_dir)
         launch_file = os.environ.get(LAUNCH_FILE_ENV)
         if launch_file:
-            runner.context.data_bus.subscribe((RunStarted,), _report_run_id(recorder, Path(launch_file)))
-    context = SaverContext(project_dir=project_dir, recorder=recorder)
-    for saver in savers or []:
-        saver.attach(runner.context.data_bus, runner.context.status_bus, context)
-    PlotterSink(plotters or [], recorder).attach(runner.context.data_bus)
-    return RunSinks(recorder=recorder, plotters=list(plotters or []))
+            wanted.insert(0, LaunchReport(Path(launch_file)))
+    elif database is not None:
+        recorder = DatabaseRecorder(database)
+    return RunOutputs(recorder, wanted if sinks is None else sinks, project_dir=project_dir)
 
 
 def run_procedure(
@@ -180,24 +176,18 @@ def run_procedure(
     procedure: str,
     definition: dict[str, Any] | None = None,
     project_dir: str | Path | None = None,
-    savers: list[GenericSaver] | None = None,
-    plotters: list[GenericPlotter] | None = None,
+    sinks: list[RunSink] | None = None,
 ) -> Status:
     """Run ``root`` against ``resources``, recording it if it belongs to a project.
 
-    ``savers`` and ``plotters`` replace the ones the project's ``outputs:`` asks for.
+    ``sinks`` replace the ones the project's ``outputs:`` asks for.
     """
     project_path = Path(project_dir).resolve() if project_dir is not None else None
     runner = ProcedureRunner(instruments=resources)
-    sinks = attach_sinks(runner, project_dir=project_path, savers=savers, plotters=plotters)
+    outputs = run_outputs(project_dir=project_path, sinks=sinks)
+    outputs.attach(runner.context.data_bus, runner.context.status_bus)
     try:
         started = run_started(procedure, resources, definition=definition, project_dir=project_path)
         return runner.run(root, started)
     finally:
-        if sinks.recorder is not None:
-            sinks.recorder.close()
-        for plotter in sinks.plotters:
-            try:
-                plotter.finish()
-            except Exception:  # noqa: BLE001 - the run is over and recorded either way
-                logger.exception("%s failed while finishing", type(plotter).__name__)
+        outputs.close()

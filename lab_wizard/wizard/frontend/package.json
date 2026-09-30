@@ -13,7 +13,8 @@
 		"test": "bun test --conditions=browser tests",
 		"format": "prettier --write .",
 		"lint": "prettier --check .",
-		"buildall": "bun run ./build.ts"
+		"buildall": "bun run ./build.ts",
+		"api": "cd ../../.. && uv run python -m lab_wizard.wizard.backend.openapi > lab_wizard/wizard/frontend/src/lib/api/openapi.json && cd lab_wizard/wizard/frontend && openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-static": "^3.0.10",
@@ -21,6 +22,7 @@
 		"@sveltejs/vite-plugin-svelte": "^7.3.0",
 		"@tailwindcss/vite": "^4.3.3",
 		"@types/bun": "^1.3.14",
+		"openapi-typescript": "7.13.0",
 		"playwright": "^1.63.0",
 		"prettier": "^3.8.3",
 		"prettier-plugin-svelte": "^3.5.2",
@@ -35,6 +37,7 @@
 		"@bokeh/bokehjs": "3.8.2",
 		"@vitejs/plugin-legacy": "^8.2.3",
 		"bits-ui": "^2.18.1",
+		"openapi-fetch": "0.17.0",
 		"phosphor-svelte": "^3.1.0"
 	}
 }

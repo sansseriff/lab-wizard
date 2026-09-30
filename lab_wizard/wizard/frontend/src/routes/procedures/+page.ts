@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, errorMessage, unwrap } from '$lib/api';
 
 export type ProcedureSummary = {
 	name: string;
@@ -15,10 +15,10 @@ export type ProcedureSummary = {
 export const load = async () => {
 	if (!browser) return { procedures: [] as ProcedureSummary[], error: null as string | null };
 	try {
-		const data = await fetchWithConfig<{ procedures: ProcedureSummary[] }>('/api/procedures', 'GET');
+		const data = await unwrap<{ procedures: ProcedureSummary[] }>(api.GET('/api/procedures'));
 		return { procedures: data.procedures, error: null };
 	} catch (e) {
-		return { procedures: [] as ProcedureSummary[], error: e instanceof Error ? e.message : String(e) };
+		return { procedures: [] as ProcedureSummary[], error: errorMessage(e) };
 	}
 };
 

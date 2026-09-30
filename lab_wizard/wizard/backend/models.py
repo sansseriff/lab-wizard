@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pathlib import Path
 from typing import Any
 
@@ -81,3 +81,14 @@ class OutputReq(BaseModel):
     is_list: bool = False
     matching_instruments: list[MatchingReq] = []
     matching_remote: list[RemoteMatch] = []
+
+
+class ResponseModel(BaseModel):
+    """Base for what a route returns: every field is present in its OpenAPI schema.
+
+    Pydantic otherwise marks a field with a default as optional, so the
+    frontend's generated type would say ``field?:`` for something the backend
+    always sends.
+    """
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)

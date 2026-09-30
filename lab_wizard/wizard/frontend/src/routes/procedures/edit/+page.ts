@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 import { type Catalog, type Definition, blankDefinition } from '$lib/procedures/model';
 
 /** `?name=` edits a procedure, `?from=` starts a copy of one, neither starts blank. */
@@ -9,19 +9,16 @@ export const load = async ({ url }: { url: URL }) => {
 	const name = url.searchParams.get('name');
 	const from = url.searchParams.get('from');
 	try {
-		const catalog = await fetchWithConfig<Catalog>('/api/procedures/catalog', 'GET');
+		const catalog = await unwrap<Catalog>(api.GET('/api/procedures/catalog'));
 		if (!name && !from) {
 			return { catalog, definition: blankDefinition(), origin: null, loadedName: null, hasBuiltin: false, error: null };
 		}
-		const detail = await fetchWithConfig<{
+		const detail = await unwrap<{
 			name: string;
 			origin: 'workspace' | 'builtin';
 			has_builtin: boolean;
 			definition: Definition;
-		}>(
-			`/api/procedures/${encodeURIComponent((name ?? from)!)}`,
-			'GET'
-		);
+		}>(api.GET('/api/procedures/{name}', { params: { path: { name: (name ?? from)! } } }));
 		const definition = { description: '', roles: {}, params: {}, ...(detail.definition as Partial<Definition>) } as Definition;
 		if (from) {
 			definition.name = `${detail.name}_copy`;

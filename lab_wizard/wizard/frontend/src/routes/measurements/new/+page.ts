@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, errorMessage, unwrap } from '$lib/api';
 
 /** One thing a measurement can be created from. See api_measurement_choices.
  *
@@ -24,13 +24,10 @@ export const load: PageLoad = async () => {
 		return { choices: [] as MeasurementChoice[], error: null as string | null };
 	}
 	try {
-		const data = await fetchWithConfig<{ choices: MeasurementChoice[] }>(
-			'/api/measurement-choices',
-			'GET'
-		);
+		const data = await unwrap<{ choices: MeasurementChoice[] }>(api.GET('/api/measurement-choices'));
 		return { choices: data?.choices ?? [], error: null };
 	} catch (e) {
-		return { choices: [] as MeasurementChoice[], error: e instanceof Error ? e.message : String(e) };
+		return { choices: [] as MeasurementChoice[], error: errorMessage(e) };
 	}
 };
 

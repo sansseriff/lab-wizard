@@ -7,6 +7,7 @@
 	 * workspace's config/data.yaml and used by every project's next run.
 	 */
 	import { onMount } from 'svelte';
+	import { errorMessage } from '$lib/api';
 	import Panel from '$lib/components/Panel.svelte';
 	import {
 		settingsApi,
@@ -79,7 +80,7 @@
 			show(await settingsApi.saveFiles({ ...files, root: files.root.trim(), path: files.path.trim() }));
 			saved = true;
 		} catch (e) {
-			error = e instanceof Error ? e.message.replace(/^Failed to fetch: HTTP \d+: /, '') : String(e);
+			error = errorMessage(e);
 		} finally {
 			saving = false;
 		}

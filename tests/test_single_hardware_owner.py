@@ -84,8 +84,8 @@ class _Root(BaseModel):
     type: str = "fake"
     children: dict = Field(default_factory=dict)
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return _Inst
 
     def create_inst(self):

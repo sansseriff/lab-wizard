@@ -14,7 +14,7 @@
 	import Modal from '$lib/components/Modal.svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Pill from '$lib/components/Pill.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 	import { workstation } from '$lib/stores/workstation.svelte';
 	import type {
 		TreeItem,
@@ -147,31 +147,26 @@
 
 	async function stageDraft(chain: ChainStep[]) {
 		if (!draftId) {
-			const draft = await fetchWithConfig<{ id: string }>('/api/manage-instruments/drafts', 'POST');
+			const draft = await unwrap<{ id: string }>(api.POST('/api/manage-instruments/drafts'));
 			draftId = draft.id;
 		}
-		const result = await fetchWithConfig<{ tree: TreeItem[]; path: NodePath }>(
-			`/api/manage-instruments/drafts/${draftId}`, 'PUT', { chain }
+		const result = await unwrap<{ tree: TreeItem[]; path: NodePath }>(
+			api.PUT('/api/manage-instruments/drafts/{draft_id}', { params: { path: { draft_id: draftId } }, body: { chain } })
 		);
 		draftTree = result.tree;
 		draftPath = result.path;
 	}
 
 	async function refetchData() {
-		const d = await fetchWithConfig<{ tree: TreeItem[]; metadata: Record<string, InstrumentMeta> }>(
-			'/api/manage-instruments',
-			'GET'
+		const d = await unwrap<{ tree: TreeItem[]; metadata: Record<string, InstrumentMeta> }>(
+			api.GET('/api/manage-instruments')
 		);
 		tree = d.tree ?? [];
 		metadata = d.metadata ?? {};
 	}
 
 	async function saveParams(update: ParamUpdate): Promise<ParamResult> {
-		const result = await fetchWithConfig<ParamResult>(
-			'/api/manage-instruments/update',
-			'POST',
-			update
-		);
+		const result = await unwrap<ParamResult>(api.POST('/api/manage-instruments/update', { body: update }));
 		await refetchData();
 		statusMessage = { text: 'Instrument parameters saved.', ok: true };
 		return result;
@@ -207,11 +202,9 @@
 		confirmTarget = node;
 		removalImpact = null;
 		impactLoading = true;
-		fetchWithConfig<RemovalImpact>('/api/manage-instruments/removal-impact', 'POST', {
-			type: node.type,
-			key: node.key,
-			path
-		})
+		unwrap<RemovalImpact>(
+			api.POST('/api/manage-instruments/removal-impact', { body: { type: node.type, key: node.key, path } })
+		)
 			.then((res) => {
 				// Ignore a reply for a dialog the user already dismissed.
 				if (confirmTarget === node) removalImpact = res;
@@ -228,18 +221,15 @@
 		statusMessage = null;
 		try {
 			const body = { type: confirmTarget.type, key: confirmTarget.key, path: confirmPath };
-			const endpoint =
-				confirmAction === 'reset'
-					? '/api/manage-instruments/reset'
-					: '/api/manage-instruments/remove';
-			await fetchWithConfig(endpoint, 'POST', body);
+			if (confirmAction === 'reset') await api.POST('/api/manage-instruments/reset', { body });
+			else await api.POST('/api/manage-instruments/remove', { body });
 			statusMessage = {
 				text: `${confirmAction === 'reset' ? 'Reset' : 'Removed'} ${confirmTarget.type} (${confirmTarget.key})`,
 				ok: true
 			};
 			await refetchData();
-		} catch (e: any) {
-			statusMessage = { text: e.message ?? 'Operation failed', ok: false };
+		} catch (e) {
+			statusMessage = { text: errorMessage(e) || 'Operation failed', ok: false };
 		} finally {
 			actionLoading = false;
 			confirmAction = null;
@@ -447,12 +437,12 @@
 			await stageResolvedParent(stepIndex);
 			advanceChain();
 			return true;
-		} catch (e: any) {
+		} catch (e) {
 			// Keep the entry screen and its value visible so a failed server edit
 			// cannot look like the button simply did nothing.
 			step.key = '';
 			step.resolved = false;
-			statusMessage = { text: e.message ?? `Could not add ${step.type}`, ok: false };
+			statusMessage = { text: errorMessage(e) || `Could not add ${step.type}`, ok: false };
 			return false;
 		} finally {
 			addLoading = false;
@@ -546,16 +536,20 @@
 			const targetIndex = chainSteps.findIndex((s) => s.type === targetType);
 			const ancestors = chainSteps.slice(targetIndex + 1);
 			if (ancestors.length) await stageDraft(ancestors);
-			const response = await fetchWithConfig('/api/manage-instruments/discover', 'POST', {
-				type: targetType,
-				action: actionName,
-				params: discoveryInputs,
-				...(ancestors.length ? { draft_id: draftId } : {})
-			});
+			const response = await unwrap<DiscoveryResult>(
+				api.POST('/api/manage-instruments/discover', {
+					body: {
+						type: targetType,
+						action: actionName,
+						params: discoveryInputs,
+						...(ancestors.length ? { draft_id: draftId } : {})
+					}
+				})
+			);
 			discoveryResult = response;
 			discoveryInputsHaveChanged = false;
-		} catch (e: any) {
-			statusMessage = { text: `Discovery failed: ${e.message ?? e}`, ok: false };
+		} catch (e) {
+			statusMessage = { text: `Discovery failed: ${errorMessage(e)}`, ok: false };
 		} finally {
 			discoveryLoading = false;
 		}
@@ -582,14 +576,14 @@
 				await stageDraft(chainSteps);
 				draftReadyToCommit = true;
 			}
-			await fetchWithConfig(`/api/manage-instruments/drafts/${draftId}/commit`, 'POST');
+			await api.POST('/api/manage-instruments/drafts/{draft_id}/commit', { params: { path: { draft_id: draftId! } } });
 
 			statusMessage = { text: `Added ${selectedType}`, ok: true };
 			draftReadyToCommit = true;
 			await refetchData();
 			showAddWizard = false;
-		} catch (e: any) {
-			statusMessage = { text: e.message ?? 'Add failed', ok: false };
+		} catch (e) {
+			statusMessage = { text: errorMessage(e) || 'Add failed', ok: false };
 		} finally {
 			addLoading = false;
 		}
@@ -618,11 +612,11 @@
 		if (addLoading || discoveryLoading) return;
 		addLoading = true;
 		try {
-			if (draftId) await fetchWithConfig(`/api/manage-instruments/drafts/${draftId}`, 'DELETE');
+			if (draftId) await api.DELETE('/api/manage-instruments/drafts/{draft_id}', { params: { path: { draft_id: draftId } } });
 			draftId = null;
 			showAddWizard = false;
-		} catch (e: any) {
-			statusMessage = { text: e.message ?? 'Could not close the draft. Please retry.', ok: false };
+		} catch (e) {
+			statusMessage = { text: errorMessage(e) || 'Could not close the draft. Please retry.', ok: false };
 		} finally {
 			addLoading = false;
 		}

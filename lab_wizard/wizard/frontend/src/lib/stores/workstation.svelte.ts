@@ -9,7 +9,7 @@
  * Deliberately *not* a `+layout.ts` load: the state changes while the user
  * watches (they press Start), so it has to be refreshable without a navigation.
  */
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 
 export type ServerStatus = {
 	has_config: boolean;
@@ -65,9 +65,9 @@ class Workstation {
 		this.loading = true;
 		try {
 			const [server, owner, health] = await Promise.all([
-				fetchWithConfig<ServerStatus>('/api/server/status', 'GET'),
-				fetchWithConfig<HardwareOwner>('/api/hardware-owner', 'GET'),
-				fetchWithConfig<{ workspace: string }>('/api/health', 'GET')
+				unwrap<ServerStatus>(api.GET('/api/server/status')),
+				unwrap<HardwareOwner>(api.GET('/api/hardware-owner')),
+				unwrap<{ workspace: string }>(api.GET('/api/health'))
 			]);
 			this.server = server;
 			this.owner = owner;

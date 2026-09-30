@@ -7,7 +7,7 @@
  * it only places the problems it is told about next to the step they concern.
  */
 
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 import {
 	type Catalog,
 	type CheckResult,
@@ -91,9 +91,9 @@ export class ProcedureEditor {
 		const json = this.json;
 		this.checking = true;
 		try {
-			const result = await fetchWithConfig<CheckResult>('/api/procedures/check', 'POST', {
-				definition: $state.snapshot(this.definition)
-			});
+			const result = await unwrap<CheckResult>(
+				api.POST('/api/procedures/check', { body: { definition: $state.snapshot(this.definition) } })
+			);
 			// An answer about an older edit would mark problems that are already fixed.
 			if (generation !== this.#generation) return;
 			this.check = result;

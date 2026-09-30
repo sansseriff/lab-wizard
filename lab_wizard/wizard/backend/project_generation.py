@@ -14,6 +14,7 @@ from lab_wizard.lib.utilities.config_io import (
     model_to_commented_map,
     to_commented_yaml_value,
 )
+from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.utilities.model_tree import OutputsConfig
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
@@ -34,6 +35,7 @@ from lab_wizard.wizard.backend.instrument_sources import (
 )
 from lab_wizard.wizard.backend.models import FilledReq
 from lab_wizard.wizard.backend.python_formatting import format_python_code
+from lab_wizard.lib.procedures.storage import load_preset
 
 logger = logging.getLogger("lab_wizard.wizard.backend.project_generation")
 
@@ -459,9 +461,8 @@ def _default_project_yaml(
         # plot for a run started from a terminal (none | window | web).
         "outputs": (outputs or OutputsConfig()).model_dump(mode="json"),
         "resources": {
-            # Present only for the embedded style (and in projects generated
-            # before instrument params left the project); otherwise instruments
-            # are resolved from the tree instrument_sources names.
+            # Present only for the embedded style; otherwise instruments are
+            # resolved from the tree instrument_sources names.
             **(
                 {
                     "instruments": {
@@ -472,9 +473,7 @@ def _default_project_yaml(
                 if instruments
                 else {}
             ),
-            # Omitted entirely for a purely local project, so existing projects
-            # and their YAML are unchanged. Present only when something is
-            # routed, which is also what the setup file keys its behaviour off.
+            # Every named instrument and where it lives: local, or a server.
             **(
                 {"instrument_sources": dict(instrument_sources)}
                 if instrument_sources
@@ -511,7 +510,6 @@ def _params_for(
     """A project's initial ``measurement.params``: a preset, or ``None`` for defaults."""
     if preset is None:
         return None
-    from lab_wizard.lib.procedures.storage import load_preset
 
     return load_preset(config_dir, measurement, preset, model)
 
@@ -608,7 +606,8 @@ def generate_project(
     setup_path = project_dir / f"{req.measurement_name}_setup.py"
     setup_code = format_python_code(setup_code)
     setup_path.write_text(setup_code, encoding="utf-8")
-    measurement_path = project_dir / f"{req.measurement_name}.py"
+    measurement_path = module_path(project_dir, req.measurement_name)
+    measurement_path.parent.mkdir()
     measurement_path.write_text(measurement_source, encoding="utf-8")
     logger.info(
         "Generated project artifacts yaml=%s setup=%s measurement=%s",

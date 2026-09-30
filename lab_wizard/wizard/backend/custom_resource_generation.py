@@ -48,6 +48,7 @@ from lab_wizard.wizard.backend._generation_common import (
     _selected_runtime_type,
     _walk_tree,
 )
+from lab_wizard.lib.instruments.general.behavior import behaviors
 
 logger = logging.getLogger("lab_wizard.wizard.backend.custom_resource_generation")
 
@@ -130,7 +131,6 @@ def _behavior_import(name: str | None) -> tuple[str, str] | None:
     """
     if not name:
         return None
-    from lab_wizard.lib.instruments.general.behavior import behaviors
 
     for registered, cls in behaviors():
         if registered == name:

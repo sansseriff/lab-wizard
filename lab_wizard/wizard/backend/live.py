@@ -16,12 +16,18 @@ looked, as messages a page can apply:
 ``{"type": "plots", "plots": [{"name", "series", "units", "shape"}, ...]}``
     every plot, recomputed over all the points so far — never appended, so a
     per-run reduction or a derived column stays right as the run grows. At most
-    a few times a second.
+    a few times a second, and less often the longer a plot takes to compute.
 ``{"type": "end"}``
     last: the run is over and everything about it has been sent.
 
 The same feed serves the wizard's Run page and the standalone live page a web
 plotter opens, so both show exactly what the Data page will show afterwards.
+
+The feed keeps the run's points in memory and reads only the rows recorded
+since it last looked, so following a long run costs one small query a poll,
+not a re-read of everything recorded. Recomputing a plot from the points in
+memory is cheap next to that, and it keeps every kind of plot right without
+any plot needing to know how to update itself.
 """
 
 from __future__ import annotations
@@ -30,12 +36,18 @@ import time
 from pathlib import Path
 from typing import Any
 
+import polars as pl
+
+from lab_wizard.lib.data.plot import PlotSpec, runs_context
 from lab_wizard.lib.data.read import Lab
 from lab_wizard.wizard.backend import data_api
 
 __all__ = ["LiveFeed"]
 
 PLOT_INTERVAL_S = 0.4
+# Plots are recomputed at most this fraction of the time: a run whose plots
+# take 0.2 s to compute is replotted every second, not every 0.4 s.
+PLOT_DUTY = 0.2
 
 
 class LiveFeed:
@@ -51,7 +63,11 @@ class LiveFeed:
         self.open_steps: set[int] = set()
         self.plotted_points = -1
         self.plotted_at = 0.0
+        self.plot_interval = PLOT_INTERVAL_S
         self.ended = False
+        # Every point read so far, and the last one's seq.
+        self.points: pl.DataFrame | None = None
+        self.last_seq = -1
 
     def poll(self) -> list[dict[str, Any]]:
         if self.ended:
@@ -74,11 +90,14 @@ class LiveFeed:
                 messages.append({"type": "steps", "steps": steps})
 
             running = summary["status"] == "running"
-            due = time.monotonic() - self.plotted_at >= PLOT_INTERVAL_S
+            due = time.monotonic() - self.plotted_at >= self.plot_interval
             if summary["points"] != self.plotted_points and (due or not running):
-                messages.append({"type": "plots", "plots": self._plots()})
+                started = time.monotonic()
+                self._read_new_points(lab)
+                messages.append({"type": "plots", "plots": self._plots(lab)})
                 self.plotted_points = summary["points"]
                 self.plotted_at = time.monotonic()
+                self.plot_interval = max(PLOT_INTERVAL_S, (self.plotted_at - started) / PLOT_DUTY)
 
             if not running and self.plotted_points == summary["points"] and not self.open_steps:
                 self.ended = True
@@ -109,12 +128,22 @@ class LiveFeed:
                 self.open_steps.discard(step["id"])
         return out
 
-    def _plots(self) -> list[dict[str, Any]]:
+    def _read_new_points(self, lab: Lab) -> None:
+        """Add the points recorded since the last read to the ones in memory."""
+        new = lab.runs([self.run_id]).points(after=self.last_seq)
+        if new.is_empty():
+            return
+        self.last_seq = int(new["seq"].max())  # type: ignore[arg-type]
+        self.points = new if self.points is None else pl.concat([self.points, new], how="diagonal_relaxed")
+
+    def _plots(self, lab: Lab) -> list[dict[str, Any]]:
         out = []
+        points = self.points if self.points is not None else lab.runs([self.run_id]).points()
         for spec in (self.detail or {}).get("plots", []):
             try:
-                drawn = data_api.plot(self.db, self.config_dir, spec)
-            except data_api.DataRequestError as e:
+                plot = PlotSpec.model_validate(spec)
+                drawn = data_api.drawn(plot, points, runs_context(lab, [self.run_id], plot.label))
+            except (data_api.DataRequestError, ValueError) as e:
                 drawn = {"series": [], "units": {}, "shape": {"lines": 0, "points": [0, 0]}, "error": str(e)}
             out.append({"name": spec.get("name"), "spec": spec, **drawn})
         return out

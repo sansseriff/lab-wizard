@@ -125,18 +125,12 @@ def _generate(tmp_path: Path, rig, preset: str | None = "bench_sweep") -> dict[s
 
 
 def _load_setup(out: dict[str, Any]) -> Any:
-    setup_path = Path(out["setup_file"])
-    sys.path.insert(0, str(setup_path.parent))  # the measurement module is its sibling
-    try:
-        spec = importlib.util.spec_from_file_location("composed_setup", setup_path)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        measurement = importlib.import_module("composed_pcr")
-        return module, measurement
-    finally:
-        sys.path.remove(str(setup_path.parent))
-        sys.modules.pop("composed_pcr", None)
+    """The generated setup module, and the measurement module it loaded from _measurement/."""
+    spec = importlib.util.spec_from_file_location("composed_setup", Path(out["setup_file"]))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, sys.modules[module.ComposedPcrMeasurement.__module__]
 
 
 def _expected_counts(bias_v: float) -> float:

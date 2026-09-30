@@ -209,8 +209,8 @@ class _Root(BaseModel):
     sharing: str = "exclusive"
     children: dict = Field(default_factory=dict)
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return _Inst
 
     def create_inst(self):

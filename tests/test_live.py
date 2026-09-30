@@ -83,7 +83,7 @@ def _run(project_dir: Path, **kwargs: Any) -> Status:
 def test_a_plotter_is_told_where_the_run_is_recorded_and_when_it_ends(tmp_path: Path):
     project_dir = _project(tmp_path)
     plotter = StandInPlotter()
-    assert _run(project_dir, plotters=[plotter]) is Status.SUCCESS
+    assert _run(project_dir, sinks=[plotter]) is Status.SUCCESS
     assert plotter.started == (project_dir / "data" / "lab.db", 1)
     assert plotter.ended == "success"
     assert plotter.finished
@@ -94,15 +94,15 @@ def test_a_plotter_that_fails_does_not_fail_the_run(tmp_path: Path, caplog):
         def run_started(self, database: Path, run_id: int) -> None:
             raise RuntimeError("no screen")
 
-    assert _run(_project(tmp_path), plotters=[Broken()]) is Status.SUCCESS
-    assert "Broken failed; the run continues" in caplog.text
+    assert _run(_project(tmp_path), sinks=[Broken()]) is Status.SUCCESS
+    assert "Broken failed and has stopped; the run continues" in caplog.text
 
 
 def test_a_project_picks_its_live_plot(tmp_path: Path):
-    _savers, [window] = project_outputs(_project(tmp_path / "a", "{files: false, live_plot: window, plot: Voltage}"))
+    [window] = project_outputs(_project(tmp_path / "a", "{files: false, live_plot: window, plot: Voltage}"))
     assert isinstance(window, MplPlotter)
     assert window.command(Path("lab.db"), 4)[-6:] == ["--db", "lab.db", "--run", "4", "--plot", "Voltage"]
-    _savers, [web] = project_outputs(_project(tmp_path / "b", "{files: false, live_plot: web}"))
+    [web] = project_outputs(_project(tmp_path / "b", "{files: false, live_plot: web}"))
     assert isinstance(web, WebPlotter)
 
 
@@ -110,7 +110,7 @@ def test_a_run_the_wizard_launched_opens_no_plot_and_reports_its_id(tmp_path: Pa
     launch_file = tmp_path / "launch.json"
     monkeypatch.setenv(LAUNCH_FILE_ENV, str(launch_file))
     project_dir = _project(tmp_path, "{files: false, live_plot: window}")
-    assert project_outputs(project_dir) == ([], [])
+    assert project_outputs(project_dir) == []
     assert _run(project_dir) is Status.SUCCESS
     assert json.loads(launch_file.read_text()) == {"run_id": 1, "database": str(project_dir / "data" / "lab.db")}
 
@@ -207,6 +207,8 @@ def test_a_running_run_is_followed_as_it_grows(tmp_path: Path):
     ended = {s["id"] for m in rest if m["type"] == "steps" for s in m["steps"] if s["ended_at"]}
     assert {s["id"] for s in open_steps} <= ended
     assert [m for m in rest if m["type"] == "plots"][-1]["plots"][0]["series"][0]["y"] == [100.0, 200.0, 300.0]
+    # The points were read as they came, each once, and kept.
+    assert feed.points is not None and feed.points["seq"].to_list() == [0, 1, 2, 3]
 
 
 def test_the_live_websocket_streams_a_run(tmp_path: Path):

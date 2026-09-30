@@ -1,10 +1,10 @@
 """The Data page's API: filters, runs, plots and devices, over a recorded workspace.
 
 Runs are recorded the way a project records them, into the workspace's lab
-database, and read back through the HTTP routes the page calls. Two are named
-after the built-in ``mcr_curve``, recorded with a bare definition, so what they
-are drawn with has to come from the procedure as it is now; a third belongs to
-a procedure that no longer exists, so it falls back to what it recorded.
+database, and read back through the HTTP routes the page calls. Two are runs of
+the built-in ``mcr_curve``; a third belongs to a procedure that does not exist.
+Every run is drawn with the plots and derived columns it recorded, whatever its
+procedure says now.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from lab_procedure import Sequence, Status, Step, Sweep, WithParameter
+from lab_wizard.lib.procedures.storage import load_procedure, save_procedure
 from lab_wizard.lib.task_adapters.run import run_procedure
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 from lab_wizard.wizard.backend.main import app
@@ -98,9 +99,9 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def client(workspace):
     """Three runs: mcr_curve on A7 and B2, then a probe run, in that order."""
-    bare = {"name": "mcr_curve", "body": {"type": "wait", "seconds": 0}}
-    _record(workspace.projects_dir, "mcr_a", "A7", "mcr_curve", mcr_tree(1000.0), bare, gate=0.1)
-    _record(workspace.projects_dir, "mcr_b", "B2", "mcr_curve", mcr_tree(2000.0), bare, gate=0.2)
+    mcr = load_procedure(workspace.config_dir, "mcr_curve").model_dump(mode="json")
+    _record(workspace.projects_dir, "mcr_a", "A7", "mcr_curve", mcr_tree(1000.0), mcr, gate=0.1)
+    _record(workspace.projects_dir, "mcr_b", "B2", "mcr_curve", mcr_tree(2000.0), mcr, gate=0.2)
     probe = Sweep("bias", [0.1, 0.2], lambda b: Measure(counts=lambda p: p["bias"] * 10))
     _record(workspace.projects_dir, "probe", "A7", "probe", probe, PROBE_DEFINITION, gate=0.1)
     return TestClient(app)
@@ -179,10 +180,9 @@ def _ids(client) -> dict[str, int]:
     return {r["project"]: r["id"] for r in client.get("/api/data/runs").json()["runs"]}
 
 
-def test_a_run_is_shown_with_its_procedures_current_plots_and_derived_columns(client):
-    """Recorded with a bare definition; drawn by mcr_curve as it is now."""
+def test_a_run_is_shown_with_the_plots_and_derived_columns_it_recorded(client):
     detail = client.get(f"/api/data/runs/{_ids(client)['mcr_a']}").json()
-    assert detail["definition_source"] == "procedure"
+    assert detail["procedure_exists"] is True
     assert [p["name"] for p in detail["plots"]] == ["MCR", "Attenuation reached", "Device voltage"]
     assert all(p["runs"] == [_ids(client)["mcr_a"]] for p in detail["plots"])
     assert "rate_above_dark" in detail["derived"]
@@ -194,9 +194,24 @@ def test_a_run_is_shown_with_its_procedures_current_plots_and_derived_columns(cl
 
 def test_a_run_whose_procedure_is_gone_is_drawn_as_it_recorded(client):
     detail = client.get(f"/api/data/runs/{_ids(client)['probe']}").json()
-    assert detail["definition_source"] == "recorded"
+    assert detail["procedure_exists"] is False
     assert [p["name"] for p in detail["plots"]] == ["Doubled"]
     assert detail["derived"] == {"double": "counts * 2"}
+
+
+def test_editing_a_procedure_leaves_its_past_runs_as_they_were(client, workspace):
+    run_id = _ids(client)["mcr_a"]
+    spec = client.get(f"/api/data/runs/{run_id}").json()["plots"][0]
+    before = client.post("/api/data/plot", json={"spec": spec}).json()
+
+    # The procedure's plots and its derived formula change after the run.
+    edited = load_procedure(workspace.config_dir, "mcr_curve")
+    derived = {name: "count_rate * 0" for name in edited.derived}
+    save_procedure(workspace.config_dir, edited.model_copy(update={"derived": derived, "plots": edited.plots[:1]}))
+
+    detail = client.get(f"/api/data/runs/{run_id}").json()
+    assert [p["name"] for p in detail["plots"]] == ["MCR", "Attenuation reached", "Device voltage"]
+    assert client.post("/api/data/plot", json={"spec": spec}).json() == before
 
 
 def test_an_unknown_run_is_not_found(client):
@@ -249,11 +264,10 @@ def test_a_plot_the_page_cannot_draw_says_why(client):
     assert empty.status_code == 422 and "choose" in empty.json()["detail"]
 
 
-def test_the_notebook_carries_the_derived_columns_it_needs(client):
+def test_the_notebook_draws_what_the_page_draws(client):
     source = client.post("/api/data/plot/notebook", json={"spec": _mcr_spec(client)}).json()["source"]
     compile(source, "notebook", "exec")
-    assert "rate_above_dark" in source
-    assert "mean(count_rate, phase == \"background\")" in source.replace("'", '"')
+    assert "rate_above_dark" in source  # the y it plots
     assert "load_plot(spec" in source
 
 
@@ -264,9 +278,9 @@ def test_a_plot_built_on_the_page_is_saved_into_its_procedure(client, workspace)
     assert [p["name"] for p in saved["plots"]][-1] == "Raw counts"
     assert saved["plots"][-1]["runs"] == []  # a procedure's plot is for any run
 
-    # Every mcr_curve run, past ones included, now offers it.
+    # It is for the runs recorded from now on; a past run keeps what it recorded.
     detail = client.get(f"/api/data/runs/{_ids(client)['mcr_a']}").json()
-    assert "Raw counts" in [p["name"] for p in detail["plots"]]
+    assert "Raw counts" not in [p["name"] for p in detail["plots"]]
 
     # Saving under an existing name replaces it.
     replaced = client.post(

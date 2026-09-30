@@ -39,8 +39,9 @@ wizard offers it beside the procedures (marked *custom*). A new workspace
 starts with two examples there, which are also the documentation:
 
 - **`bias_sweep.py`** — the smallest complete one, built from existing steps.
-- **`find_switching_voltage.py`** — a `Step` of its own whose `run()` is plain
-  Python: it raises the bias until the detector switches, then stops.
+- **`find_switching_voltage.py`** — written as `measure(resources, run)`, a
+  plain Python loop: it raises the bias until the detector switches, then
+  stops.
 
 A file declares:
 
@@ -48,16 +49,28 @@ A file declares:
 |---|---|
 | `Params` | a pydantic model of its settings, every field with a default. They become the project's `measurement.params` |
 | `Resources` | a dataclass: one field per instrument role, typed by the behavior it needs, and a `params` field |
-| `build_procedure(resources)` | the step tree for one run |
+| `measure(resources, run)` *or* `build_procedure(resources)` | what one run does: plain Python recording rows through `run`, or a step tree |
 | `PLOTS` (optional) | plot specs, as a procedure's `plots:` — what the Data page and the live views draw |
 
 Its first docstring line is its description in the wizard. A file whose name
 starts with `_` is a helper, not a measurement, and a file that does not load
-is listed with the reason. Inside a step of your own, record with
-`self.context.observe({...})` and wait with `self.sleep(seconds)`, which
-returns False when the run is stopped. From there a custom measurement is like
-any other: its project copies the file, and every run is recorded, saved and
-plotted the same way. See
+is listed with the reason.
+
+In `measure`, `run` records the data ([`recording.py`](../../lab_wizard/lib/recording.py)):
+
+```python
+for bias in biases:
+    source.set_voltage(bias)
+    run.sleep(settle_s)                      # stops promptly when the run is stopped
+    with run.at(bias_voltage=bias):          # the parameters these rows were taken at
+        run.row(sense_voltage=sense.get_voltage())   # one call, one row
+```
+
+The same calls work in a script or a notebook, outside any project, with
+`with record_run("quick_iv", device="A7") as run:`; the run is recorded in the
+workspace's lab database like any other. From there a custom measurement is
+like any other: its project copies the file, and every run is recorded, saved
+and plotted the same way. See
 [`custom_measurements.py`](../../lab_wizard/lib/custom_measurements.py).
 
 ## Matching resources to requirements
@@ -103,12 +116,16 @@ does three things:
    - `resource_fields` — the dataclass field declarations,
    - `instantiation` — the construction lines,
    - `return_fields` — wiring the constructed objects into the `Resources`.
-3. **Copies the measurement source** (`<name>.py`) into the project. The
-   generated setup imports this sibling module, so edits made inside the project
-   are the code that runs.
+3. **Copies the measurement source** into the project, as
+   `_measurement/<name>.py`. The setup loads it by its path, so edits made
+   inside the project are the code that runs.
 
 The project folder is timestamped, e.g. `projects/iv_curve_20260528_143012/`,
-containing `<folder>.yaml`, `<name>_setup.py`, and `<name>.py`.
+containing `<folder>.yaml`, `<name>_setup.py`, and `_measurement/<name>.py`.
+The module sits one folder down because a script's own folder comes first on
+Python's import path: a measurement named `queue.py` beside the setup would be
+what every `import queue` in the run found, the standard library's included.
+See [`project_module.py`](../../lab_wizard/lib/project_module.py).
 
 ### What a project contains
 

@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.procedures.codegen import (
     DEFINITION_BLOCK,
     PROCEDURE_BLOCK,
@@ -86,8 +87,8 @@ def refresh_procedure_source(config_dir: Path, project_dir: Path) -> Path:
     """
     project = load_project_config(project_dir / f"{project_dir.name}.yaml")
     definition = load_procedure(config_dir, project.measurement_type)
-    module_path = project_dir / f"{definition.name}.py"
-    text = module_path.read_text(encoding="utf-8")
+    path = module_path(project_dir, definition.name)
+    text = path.read_text(encoding="utf-8")
 
     block, needed = procedure_block(definition)
     text = _replace_wizard_block(text, PROCEDURE_BLOCK, block)
@@ -106,6 +107,6 @@ def refresh_procedure_source(config_dir: Path, project_dir: Path) -> Path:
         anchor = "from __future__ import annotations\n"
         text = text.replace(anchor, f"{anchor}\n{additions}\n", 1) if anchor in text else f"{additions}\n{text}"
 
-    module_path.write_text(format_python_code(text), encoding="utf-8")
-    logger.info("Refreshed the procedure block in %s", module_path)
-    return module_path
+    path.write_text(format_python_code(text), encoding="utf-8")
+    logger.info("Refreshed the procedure block in %s", path)
+    return path

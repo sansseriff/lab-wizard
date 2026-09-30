@@ -9,7 +9,8 @@
 	import Pill from '$lib/components/Pill.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap, type Schemas } from '$lib/api';
+	import { nodeAddress } from '$lib/instruments/model';
 
 	type MatchingReq = {
 		module: string;
@@ -219,7 +220,7 @@
 			return;
 		}
 		let cancelled = false;
-		fetchWithConfig<ConflictCheck>('/api/transport-status/check', 'POST', { paths })
+		unwrap<ConflictCheck>(api.POST('/api/transport-status/check', { body: { paths } }))
 			.then((res) => {
 				// A stale reply must not overwrite a newer one.
 				if (!cancelled) conflicts = res;
@@ -273,8 +274,16 @@
 	function pathKey(source: string, path: TreePathRef[]): string {
 		return `${source}::${path.map((p) => `${p.type}:${p.key}`).join('|')}`;
 	}
-	function pathDisplay(path: TreePathRef[]): string {
-		return path.map((p) => `${p.type}(${p.key})`).join(' -> ');
+	/** A tree path as Manage Instruments names it: type and address, not hash keys. */
+	function pathDisplay(source: Source, path: TreePathRef[]): string {
+		let nodes: TreeItem[] = source.tree ?? [];
+		return path
+			.map((p) => {
+				const node = nodes.find((n) => n.type === p.type && n.key === p.key);
+				nodes = Object.values(node?.children ?? {});
+				return node ? `${p.type} ${nodeAddress(node)}` : p.type;
+			})
+			.join(' → ');
 	}
 	function channelCount(node: TreeItem): number {
 		return typeof node.num_channels === 'number' ? node.num_channels : 0;
@@ -352,9 +361,11 @@
 			sourceKind: source.kind,
 			type: node.type,
 			key: node.key,
-			attribute: source.kind === 'local' ? null : attributeOf(node, channelIndex),
+			// A node with at most one channel is addressed by its own name, as the
+			// backend does for a local one (channel_index is sent only when cc > 1).
+			attribute: source.kind === 'local' ? null : attributeOf(node, cc > 1 ? channelIndex : null),
 			pathLeafToRoot: [...rootToNodePath].reverse(),
-			pathDisplay: pathDisplay(rootToNodePath),
+			pathDisplay: pathDisplay(source, rootToNodePath),
 			pathKey: pathKey(source.name, rootToNodePath),
 			channelCount: cc,
 			channelIndex
@@ -406,7 +417,7 @@
 		// The channel carries its own attribute_name, so a routed selection's
 		// handle changes with the channel.
 		if (cur.sourceKind !== 'local' && node) {
-			cur.attribute = attributeOf(node, cur.channelIndex);
+			cur.attribute = attributeOf(node, cur.channelCount > 1 ? cur.channelIndex : null);
 		}
 		if (cur.channelIndex !== null) activeRequirement = nextIncompleteAfter(activeRequirement);
 	}
@@ -468,24 +479,26 @@
 				});
 			}
 
-			const body: Record<string, any> = {
-				measurement_name: measurementName,
+			const body: Schemas['GenerateProjectRequest'] = {
+				measurement_name: measurementName!,
 				kind: measurementKind,
 				selected_resources,
 				generation_style: generationStyle,
-				outputs: { files: saveFiles, live_plot: livePlot }
+				outputs: { files: saveFiles, live_plot: livePlot, plot: '' },
+				params_preset: paramsPreset || null,
+				project_prefix: projectPrefix.trim() || null
 			};
-			if (paramsPreset) body.params_preset = paramsPreset;
-			if (projectPrefix.trim()) body.project_prefix = projectPrefix.trim();
-			const res = await fetchWithConfig('/api/create-measurement-project', 'POST', body);
+			const res = await unwrap<{ project_name: string; project_dir: string; yaml_file: string; setup_file: string }>(
+				api.POST('/api/create-measurement-project', { body })
+			);
 			createResult = {
 				project_name: res.project_name,
 				project_dir: res.project_dir,
 				yaml_file: res.yaml_file,
 				setup_file: res.setup_file
 			};
-		} catch (err: any) {
-			createError = err?.message ?? 'Failed to create project';
+		} catch (err) {
+			createError = errorMessage(err) || 'Failed to create project';
 		} finally {
 			creatingProject = false;
 		}

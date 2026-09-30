@@ -29,7 +29,7 @@ plugin({
 				transpileModule(
 					readFileSync(path, 'utf8').replace(
 						"'$lib/api'",
-						JSON.stringify(resolve(dirname(path), '../api.ts'))
+						JSON.stringify(resolve(dirname(path), '../api/index.ts'))
 					),
 					{ compilerOptions: { target: ScriptTarget.ESNext, module: ModuleKind.ESNext } }
 				).outputText,
@@ -206,12 +206,16 @@ test('a stale validation response cannot mark the edited definition current', as
 	const editor = editorFor({ type: 'wait', seconds: 1 });
 	const originalFetch = globalThis.fetch;
 	let respond!: (response: Response) => void;
+	let requested!: () => void;
+	const inFlight = new Promise<void>((resolve) => (requested = resolve));
 	globalThis.fetch = (() =>
 		new Promise<Response>((resolve) => {
 			respond = resolve;
+			requested();
 		})) as unknown as typeof fetch;
 	try {
 		const check = editor.runCheck();
+		await inFlight; // the check is on its way; the edit below races it
 		editor.setAt(['body', 'seconds'], 2);
 		editor.scheduleCheck(60_000);
 		respond(Response.json({ ok: true, problems: [], records: [], python: '' }));

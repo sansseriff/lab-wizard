@@ -2,7 +2,7 @@
 
 Since instrument params left the project YAML (procedure plan 5.4), a project
 names each instrument and resolves it against its workspace's config — or, for
-an older or embedded-style project, against its own copy, exactly as before.
+an embedded-style project, builds it from the params in its own Python.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from lab_wizard.lib.client.project_resources import (
     WorkspaceNotFound,
     local_claims_for,
     resource_source_for,
-    uses_workspace_tree,
+    is_embedded,
 )
 from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
 from lab_wizard.lib.utilities.config_io import load_instruments, save_instruments_to_config
@@ -65,7 +65,7 @@ def _names(config_dir: Path, rig) -> tuple[str, str]:
 def test_a_project_resolves_its_instruments_from_the_workspace(tmp_path: Path, rig):
     project_dir = _iv_project(tmp_path, rig)
     project = load_project_config(project_dir / f"{project_dir.name}.yaml")
-    assert uses_workspace_tree(project)
+    assert not is_embedded(project)
 
     source = resource_source_for(project, project_dir)
     assert isinstance(source, CompositeResources)
@@ -145,13 +145,13 @@ def test_a_remote_override_claims_nothing_locally(tmp_path: Path, rig):
     assert local_claims_for(project, project_dir, owner="iv", remote="tcp://lab:12300") == []
 
 
-# --------------------------- older and embedded projects ---------------------------
+# --------------------------- embedded projects ---------------------------
 
 
-def test_a_project_with_its_own_instrument_copy_is_resolved_as_before(tmp_path: Path, no_servers, rig):
+def test_an_embedded_project_claims_its_own_instrument_copy(tmp_path: Path, no_servers, rig):
     project_dir = _iv_project(tmp_path, rig, style="pedagogical_embedded")
     project = load_project_config(project_dir / f"{project_dir.name}.yaml")
-    assert not uses_workspace_tree(project)
+    assert is_embedded(project)
 
     assert resource_source_for(project, project_dir) is project.resources
     claims = local_claims_for(project, project_dir, owner="iv")

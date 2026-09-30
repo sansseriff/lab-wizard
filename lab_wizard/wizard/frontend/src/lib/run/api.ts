@@ -1,66 +1,25 @@
 /** A project's settings and runs, for the Run page (backend/routes/runs.py). */
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap, type Schemas } from '$lib/api';
 
-export type RunDetails = {
-	device: string | null;
-	operator: string | null;
-	notes: string | null;
-	metadata: Record<string, unknown>;
-};
-
-export type Outputs = { files: boolean; live_plot: 'none' | 'window' | 'web'; plot: string };
-
-export type ProjectSettings = {
-	name: string;
-	path: string;
-	measurement: string;
-	kind: 'procedure' | 'custom';
-	setup_file: string | null;
-	yaml: string;
-	run: RunDetails;
-	params: Record<string, unknown>;
-	outputs: Outputs;
+export type RunDetails = Schemas['RunConfig'];
+export type Outputs = Schemas['OutputsConfig-Output'];
+export type ProjectSettings = Omit<Schemas['ProjectSettings'], 'params_schema'> & {
 	params_schema: import('./schema').JsonSchema | null;
 };
+export type LaunchStatus = Schemas['LaunchStatus'];
+export type { Problem } from '$lib/api';
 
-/** Where a problem is, as the backend's model saw it: ``["measurement", "params", "settle_s"]``. */
-export type Problem = { path: (string | number)[]; message: string };
-
-export type LaunchStatus = {
-	state: 'idle' | 'starting' | 'running' | 'ended';
-	launch_id?: string;
-	pid?: number;
-	started_at?: string;
-	run_id?: number | null;
-	exit_code?: number | null;
-	log?: string;
-	log_file?: string;
-};
-
-const base = (name: string) => `/api/projects/${encodeURIComponent(name)}`;
+const project = (name: string) => ({ params: { path: { name } } });
 
 export const runApi = {
-	settings: (name: string) => fetchWithConfig<ProjectSettings>(`${base(name)}/settings`, 'GET'),
-	/** Save; a refusal comes back as its problems, not as a thrown error. */
-	async save(
+	settings: async (name: string) =>
+		(await unwrap(api.GET('/api/projects/{name}/settings', project(name)))) as ProjectSettings,
+	/** Save; a refusal throws an `ApiError` whose `problems` say where. */
+	save: async (
 		name: string,
 		body: { yaml: string } | Partial<{ run: RunDetails; params: Record<string, unknown>; outputs: Outputs }>
-	): Promise<{ ok: true; settings: ProjectSettings } | { ok: false; message: string; problems: Problem[] }> {
-		const response = await fetch(`${base(name)}/settings`, {
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(body)
-		});
-		const data = await response.json().catch(() => ({}));
-		if (response.ok) return { ok: true, settings: data as ProjectSettings };
-		const detail = data?.detail;
-		return {
-			ok: false,
-			message: typeof detail === 'string' ? detail : (detail?.message ?? `HTTP ${response.status}`),
-			problems: detail?.problems ?? []
-		};
-	},
-	status: (name: string) => fetchWithConfig<LaunchStatus>(`${base(name)}/launch`, 'GET'),
-	launch: (name: string) => fetchWithConfig<LaunchStatus>(`${base(name)}/launch`, 'POST'),
-	stop: (name: string) => fetchWithConfig<LaunchStatus>(`${base(name)}/stop`, 'POST')
+	) => (await unwrap(api.PUT('/api/projects/{name}/settings', { ...project(name), body }))) as ProjectSettings,
+	status: (name: string) => unwrap(api.GET('/api/projects/{name}/launch', project(name))),
+	launch: (name: string) => unwrap(api.POST('/api/projects/{name}/launch', project(name))),
+	stop: (name: string) => unwrap(api.POST('/api/projects/{name}/stop', project(name)))
 };

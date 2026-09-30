@@ -11,10 +11,12 @@ declares:
     (``VSource``, ``Counter``, ...), and a ``params`` field.
 ``Params``
     a pydantic model of the measurement's settings, with defaults.
-``build_procedure(resources) -> Step``
-    the step tree for one run. Steps from ``lab_procedure`` and
-    ``lab_wizard.lib.task_adapters.instrument_steps``, or a ``Step`` subclass of
-    your own whose ``run()`` is any Python.
+``measure(resources, run)`` *or* ``build_procedure(resources) -> Step``
+    what one run does. ``measure`` is plain Python — loops, ifs, any calls —
+    recording each row with ``run.row(...)`` (:mod:`lab_wizard.lib.recording`).
+    ``build_procedure`` returns a step tree instead, from ``lab_procedure`` and
+    ``lab_wizard.lib.task_adapters.instrument_steps``, when the measurement is
+    made of steps that already exist.
 ``PLOTS`` (optional)
     plot specs, as a procedure's ``plots:`` — what the Data page and a live
     plot draw for a run.
@@ -28,24 +30,28 @@ way. ``wizard init`` puts two examples in the folder.
 from __future__ import annotations
 
 import dataclasses
-import importlib.util
 import inspect
-import sys
+import keyword
+import re
 import typing
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any, get_args, get_origin
 
+from lab_procedure import Step
 from pydantic import BaseModel
 
 from lab_wizard.lib.procedures.codegen import class_prefix
+from lab_wizard.lib.project_module import load_module
+from lab_wizard.lib.recording import MeasureStep
 
 __all__ = [
     "CustomMeasurement",
     "custom_setup_template_source",
     "list_custom_measurements",
     "load_custom_measurement",
+    "measurement_procedure",
 ]
 
 
@@ -62,40 +68,32 @@ class CustomMeasurement:
     plots: list[dict[str, Any]]
 
 
-def _import(path: Path) -> ModuleType:
-    """Import ``path`` fresh, so an edit shows up without restarting the wizard."""
-    folder = str(path.parent)
-    if folder not in sys.path:
-        # A measurement may import a helper module that sits beside it.
-        sys.path.append(folder)
-    module_name = f"lab_wizard_custom_measurements.{path.stem}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"{path} is not a Python module")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module  # dataclasses look their module up here
-    try:
-        spec.loader.exec_module(module)
-    except BaseException:
-        sys.modules.pop(module_name, None)
-        raise
-    return module
-
-
 def load_custom_measurement(path: str | Path) -> CustomMeasurement:
     """Read one custom measurement file; ``ValueError`` says what it is missing."""
     path = Path(path)
-    module = _import(path)
-    missing = [name for name in ("Resources", "Params", "build_procedure") if not hasattr(module, name)]
+    if not path.stem.isidentifier() or keyword.iskeyword(path.stem):
+        raise ValueError(
+            f"{path.name}: a measurement's file name is its name in Python code, so it must be "
+            "letters, digits and underscores, not starting with a digit — rename it, e.g. "
+            f"{re.sub(r'\W', '_', path.stem).lstrip('0123456789') or 'measurement'}.py"
+        )
+    module = load_module(path)
+    missing = [name for name in ("Resources", "Params") if not hasattr(module, name)]
+    has_measure, has_build = hasattr(module, "measure"), hasattr(module, "build_procedure")
+    if not (has_measure or has_build):
+        missing.append("measure (or build_procedure)")
     if missing:
         raise ValueError(f"{path.name} does not define {', '.join(missing)}; see an example in this folder")
+    if has_measure and has_build:
+        raise ValueError(f"{path.name} defines both measure and build_procedure; a measurement is one or the other")
     resources_cls, params_model = module.Resources, module.Params
     if not dataclasses.is_dataclass(resources_cls):
         raise ValueError(f"{path.name}: Resources must be a @dataclass")
     if not (isinstance(params_model, type) and issubclass(params_model, BaseModel)):
         raise ValueError(f"{path.name}: Params must be a pydantic BaseModel")
-    if not callable(module.build_procedure):
-        raise ValueError(f"{path.name}: build_procedure must be a function")
+    entry = "measure" if has_measure else "build_procedure"
+    if not callable(getattr(module, entry)):
+        raise ValueError(f"{path.name}: {entry} must be a function")
 
     hints = typing.get_type_hints(resources_cls)
     roles: dict[str, tuple[type, bool]] = {}
@@ -121,6 +119,18 @@ def load_custom_measurement(path: str | Path) -> CustomMeasurement:
         params_model=params_model,
         plots=list(getattr(module, "PLOTS", []) or []),
     )
+
+
+def measurement_procedure(module: ModuleType, resources: Any) -> Step:
+    """The step tree for one run of a custom measurement module.
+
+    A ``measure(resources, run)`` function runs as one step; a
+    ``build_procedure(resources)`` returns its own tree.
+    """
+    measure = getattr(module, "measure", None)
+    if measure is not None:
+        return MeasureStep(measure, resources, name="measure")
+    return module.build_procedure(resources)
 
 
 def list_custom_measurements(folder: str | Path | None) -> dict[str, CustomMeasurement | str]:
@@ -149,24 +159,33 @@ def custom_setup_template_source(measurement: CustomMeasurement) -> str:
     return f'''"""
 Setup for the custom measurement ``{name}``, generated by lab_wizard.
 
-``{name}.py`` beside this file is the measurement itself, copied from the
+``_measurement/{name}.py`` is the measurement itself, copied from the
 workspace's measurements folder; edit it freely. The project generator fills
 the ``wizard:<block>`` regions with the selected instruments.
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lab_procedure import Status
 
 from lab_wizard.lib.client.claims import RoutedClaims
 from lab_wizard.lib.client.project_resources import local_claims_for, resource_source_for
+from lab_wizard.lib.custom_measurements import measurement_procedure
+from lab_wizard.lib.project_module import load_module, module_path
 from lab_wizard.lib.task_adapters.lifecycle import RunLifecycle
 from lab_wizard.lib.task_adapters.run import run_procedure
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
 
-# The measurement module is copied beside this setup file.
-from {name} import Params, Resources, build_procedure
-import {name} as {name}_module
+# The measurement is copied into _measurement/ beside this file, and loaded by
+# its path so its name can never shadow another module (project_module.py).
+# The import is only for your editor, to follow Params and Resources to their code.
+if TYPE_CHECKING:
+    import _measurement.{name} as {name}_module
+    from _measurement.{name} import Params, Resources
+else:
+    {name}_module = load_module(module_path(Path(__file__).parent, "{name}"))
+    Params, Resources = {name}_module.Params, {name}_module.Resources
 
 # wizard:imports:start
 # wizard inserts concrete instrument imports here
@@ -196,7 +215,7 @@ def create_instrument_resources(
 def run_measurement(resources: Resources, project_dir: Path) -> Status:
     """Run once, recorded in the lab database with this project's run details."""
     return run_procedure(
-        build_procedure(resources),
+        measurement_procedure({name}_module, resources),
         resources,
         procedure="{name}",
         definition={prefix.upper()}_DEFINITION,

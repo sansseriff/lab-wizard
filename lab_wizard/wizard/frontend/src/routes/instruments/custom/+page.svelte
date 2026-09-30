@@ -7,7 +7,7 @@
 	import type { TreeItem, TreePathRef } from '$lib/components/TreeNode.svelte';
 	import Trash from 'phosphor-svelte/lib/Trash';
 	import Plus from 'phosphor-svelte/lib/Plus';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 
 	type AttributeEntry = {
 		attribute_name: string;
@@ -287,15 +287,17 @@
 				resource_class_name: resourceClassName.trim() || 'CustomResources',
 				persist_attribute_names: generationStyle === 'production' && persistAttributeNames
 			};
-			const res = await fetchWithConfig('/api/create-custom-resource-project', 'POST', body);
+			const res = await unwrap<{ project_name: string; project_dir: string; yaml_file: string; setup_file: string }>(
+				api.POST('/api/create-custom-resource-project', { body })
+			);
 			createResult = {
 				project_name: res.project_name,
 				project_dir: res.project_dir,
 				yaml_file: res.yaml_file,
 				setup_file: res.setup_file
 			};
-		} catch (err: any) {
-			createError = err?.message ?? 'Failed to create custom resource project';
+		} catch (err) {
+			createError = errorMessage(err) || 'Failed to create custom resource project';
 		} finally {
 			creating = false;
 		}

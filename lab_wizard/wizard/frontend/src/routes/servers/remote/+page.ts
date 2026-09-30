@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 
 export type RemoteServer = { name: string; url: string };
 
@@ -24,7 +24,7 @@ export const load = async () => {
 	if (!browser) {
 		return { servers: [] } as RemoteServersData;
 	}
-	const data = await fetchWithConfig<RemoteServersData>('/api/remote-servers', 'GET');
+	const data = await unwrap<RemoteServersData>(api.GET('/api/remote-servers'));
 	return { servers: data?.servers ?? [] };
 };
 

@@ -22,7 +22,8 @@ from lab_wizard.lib.data.plot import default_plot
 from lab_wizard.lib.data.run_folder import export_run, folder_name
 from lab_wizard.lib.data.settings import DataSettings, FileSettings, save_data_settings
 from lab_wizard.lib.plotters import MplPlotter, WebPlotter
-from lab_wizard.lib.savers import FileSaver, SaverContext, StandInSaver
+from lab_wizard.lib.savers import FileSaver
+from lab_wizard.lib.task_adapters.sinks import RunInfo, StandInSink
 from lab_wizard.lib.task_adapters.run import project_outputs, run_procedure
 from lab_wizard.lib.workspace import initialize_workspace
 
@@ -74,8 +75,8 @@ def _project(tmp_path: Path, device: str = "A7", outputs: str = "") -> Path:
 def _run(tmp_path: Path, saver: FileSaver | None, **kwargs: Any) -> Path:
     """Run the probe in a project; ``saver`` replaces the ones its outputs: asks for."""
     project_dir = kwargs.pop("project_dir", None) or _project(tmp_path)
-    savers = None if saver is None else [saver]
-    status = run_procedure(tree(), Resources(), procedure="probe", definition=DEFINITION, project_dir=project_dir, savers=savers)
+    sinks = None if saver is None else [saver]
+    status = run_procedure(tree(), Resources(), procedure="probe", definition=DEFINITION, project_dir=project_dir, sinks=sinks)
     assert status is Status.SUCCESS
     return project_dir
 
@@ -199,23 +200,22 @@ def test_a_project_with_files_off_is_only_recorded_in_the_database(tmp_path: Pat
 
 
 def test_a_projects_live_plot_is_the_one_it_names(tmp_path: Path):
-    none = project_outputs(_project(tmp_path / "a", outputs="{files: false}"))
-    assert none == ([], [])
+    assert project_outputs(_project(tmp_path / "a", outputs="{files: false}")) == []
 
-    _savers, [window] = project_outputs(_project(tmp_path / "b", outputs="{live_plot: window, plot: Counts}"))
+    _files, window = project_outputs(_project(tmp_path / "b", outputs="{live_plot: window, plot: Counts}"))
     assert isinstance(window, MplPlotter) and window.plot_name == "Counts"
 
-    _savers, [web] = project_outputs(_project(tmp_path / "c", outputs="{live_plot: web}"))
+    _files, web = project_outputs(_project(tmp_path / "c", outputs="{live_plot: web}"))
     assert isinstance(web, WebPlotter) and web.plot_name == ""
 
 
 def test_a_crash_mid_run_leaves_a_readable_folder(tmp_path: Path):
     """No RunEnded: the process died. What was recorded is on disk already."""
     saver = FileSaver(root=str(tmp_path / "files"), path="{procedure}")
-    saver.attach(*_buses(), SaverContext())
-    saver.handle(RunStarted(procedure="probe", columns={"bias": {"unit": "V"}, "counts": {"unit": None}}))
+    run = RunInfo()
+    saver.handle(RunStarted(procedure="probe", columns={"bias": {"unit": "V"}, "counts": {"unit": None}}), run)
     for seq in range(2):
-        saver.handle(Point(seq=seq, t=datetime.now().astimezone(), values={"bias": seq * 0.1, "counts": 5}))
+        saver.handle(Point(seq=seq, t=datetime.now().astimezone(), values={"bias": seq * 0.1, "counts": 5}), run)
 
     folder = tmp_path / "files" / "probe"
     assert yaml.safe_load((folder / "run.yaml").read_text())["status"] == "running"
@@ -224,19 +224,13 @@ def test_a_crash_mid_run_leaves_a_readable_folder(tmp_path: Path):
     assert [[r[0], *r[2:]] for r in rows[1:]] == [["0", "0.0", "5", ""], ["1", "0.1", "5", ""]]
 
 
-def _buses():
-    from lab_procedure import MessageBus
-
-    return MessageBus(), MessageBus()
-
-
 def test_a_saver_that_fails_does_not_fail_the_run(tmp_path: Path, caplog):
     blocker = tmp_path / "not-a-folder"
     blocker.write_text("in the way")
     saver = FileSaver(root=str(blocker))
     project_dir = _run(tmp_path, saver)  # asserts SUCCESS
 
-    assert "FileSaver failed and has stopped saving" in caplog.text
+    assert "FileSaver failed and has stopped" in caplog.text
     assert find(db=project_dir / "data" / "lab.db").table()["status"].to_list() == ["success"]
 
 
@@ -244,8 +238,8 @@ def test_a_saver_that_fails_does_not_fail_the_run(tmp_path: Path, caplog):
 
 
 def test_a_saver_sees_every_run_message(tmp_path: Path):
-    saver = StandInSaver()
-    run_procedure(tree(), Resources(), procedure="probe", savers=[saver])
+    saver = StandInSink()
+    run_procedure(tree(), Resources(), procedure="probe", sinks=[saver])
     kinds = {type(m).__name__ for m in saver.messages}
     assert kinds == {"RunStarted", "StepBegan", "StepEnded", "Point", "RunEnded"}
     assert saver.run_started.procedure == "probe"

@@ -1,0 +1,3995 @@
+{
+ "components": {
+  "schemas": {
+   "CustomResourceSelection": {
+    "properties": {
+     "attribute": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Attribute"
+     },
+     "behavior_abc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Behavior Abc"
+     },
+     "channel_index": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Channel Index"
+     },
+     "key": {
+      "default": "",
+      "title": "Key",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/SelectedNodeRef"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Path"
+     },
+     "source": {
+      "default": "local",
+      "title": "Source",
+      "type": "string"
+     },
+     "type": {
+      "default": "",
+      "title": "Type",
+      "type": "string"
+     },
+     "variable_name": {
+      "title": "Variable Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "variable_name"
+    ],
+    "title": "CustomResourceSelection",
+    "type": "object"
+   },
+   "FileSettings-Input": {
+    "additionalProperties": false,
+    "description": "Where each run's folder of CSV and YAML files goes, and what it holds.",
+    "properties": {
+     "path": {
+      "default": "{date}/{procedure}_{device}_{time}",
+      "description": "Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {run.<metadata>} {param.<path>} {run_id}",
+      "title": "Path",
+      "type": "string"
+     },
+     "plot_png": {
+      "default": true,
+      "description": "Also save the run's default plot as plot.png",
+      "title": "Plot Png",
+      "type": "boolean"
+     },
+     "root": {
+      "default": "",
+      "description": "Folder to save runs under; empty for the workspace's data/files. A relative path is relative to the workspace.",
+      "title": "Root",
+      "type": "string"
+     }
+    },
+    "title": "FileSettings",
+    "type": "object"
+   },
+   "FileSettings-Output": {
+    "additionalProperties": false,
+    "description": "Where each run's folder of CSV and YAML files goes, and what it holds.",
+    "properties": {
+     "path": {
+      "default": "{date}/{procedure}_{device}_{time}",
+      "description": "Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {run.<metadata>} {param.<path>} {run_id}",
+      "title": "Path",
+      "type": "string"
+     },
+     "plot_png": {
+      "default": true,
+      "description": "Also save the run's default plot as plot.png",
+      "title": "Plot Png",
+      "type": "boolean"
+     },
+     "root": {
+      "default": "",
+      "description": "Folder to save runs under; empty for the workspace's data/files. A relative path is relative to the workspace.",
+      "title": "Root",
+      "type": "string"
+     }
+    },
+    "required": [
+     "root",
+     "path",
+     "plot_png"
+    ],
+    "title": "FileSettings",
+    "type": "object"
+   },
+   "FileSettingsView": {
+    "properties": {
+     "example": {
+      "title": "Example",
+      "type": "string"
+     },
+     "files": {
+      "$ref": "#/components/schemas/FileSettings-Output"
+     },
+     "folder": {
+      "title": "Folder",
+      "type": "string"
+     },
+     "keys": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Keys",
+      "type": "array"
+     },
+     "problems": {
+      "items": {
+       "$ref": "#/components/schemas/TemplateProblem"
+      },
+      "title": "Problems",
+      "type": "array"
+     }
+    },
+    "required": [
+     "example",
+     "problems",
+     "files",
+     "folder",
+     "keys"
+    ],
+    "title": "FileSettingsView",
+    "type": "object"
+   },
+   "GenerateCustomResourceRequest": {
+    "properties": {
+     "file_style": {
+      "default": "dataclass",
+      "title": "File Style",
+      "type": "string"
+     },
+     "generation_style": {
+      "default": "production",
+      "enum": [
+       "production",
+       "pedagogical_embedded"
+      ],
+      "title": "Generation Style",
+      "type": "string"
+     },
+     "persist_attribute_names": {
+      "default": false,
+      "title": "Persist Attribute Names",
+      "type": "boolean"
+     },
+     "project_prefix": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Project Prefix"
+     },
+     "resource_class_name": {
+      "default": "CustomResources",
+      "title": "Resource Class Name",
+      "type": "string"
+     },
+     "selections": {
+      "items": {
+       "$ref": "#/components/schemas/CustomResourceSelection"
+      },
+      "title": "Selections",
+      "type": "array"
+     }
+    },
+    "title": "GenerateCustomResourceRequest",
+    "type": "object"
+   },
+   "GenerateProjectRequest": {
+    "properties": {
+     "generation_style": {
+      "default": "production",
+      "enum": [
+       "production",
+       "pedagogical_embedded"
+      ],
+      "title": "Generation Style",
+      "type": "string"
+     },
+     "kind": {
+      "default": "procedure",
+      "enum": [
+       "procedure",
+       "custom"
+      ],
+      "title": "Kind",
+      "type": "string"
+     },
+     "measurement_name": {
+      "title": "Measurement Name",
+      "type": "string"
+     },
+     "outputs": {
+      "$ref": "#/components/schemas/OutputsConfig-Input"
+     },
+     "params_preset": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Params Preset"
+     },
+     "project_prefix": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Project Prefix"
+     },
+     "selected_resources": {
+      "items": {
+       "$ref": "#/components/schemas/SelectedResource"
+      },
+      "title": "Selected Resources",
+      "type": "array"
+     }
+    },
+    "required": [
+     "measurement_name"
+    ],
+    "title": "GenerateProjectRequest",
+    "type": "object"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "title": "Detail",
+      "type": "array"
+     }
+    },
+    "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "LaunchStatus": {
+    "description": "Whether the project is running from here: ``idle``, ``starting``, ``running`` or ``ended``.",
+    "properties": {
+     "exit_code": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Exit Code"
+     },
+     "launch_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Launch Id"
+     },
+     "log": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Log"
+     },
+     "log_file": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Log File"
+     },
+     "pid": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pid"
+     },
+     "run_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Run Id"
+     },
+     "started_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Started At"
+     },
+     "state": {
+      "enum": [
+       "idle",
+       "starting",
+       "running",
+       "ended"
+      ],
+      "title": "State",
+      "type": "string"
+     }
+    },
+    "required": [
+     "state",
+     "launch_id",
+     "pid",
+     "started_at",
+     "run_id",
+     "exit_code",
+     "log",
+     "log_file"
+    ],
+    "title": "LaunchStatus",
+    "type": "object"
+   },
+   "OutputsConfig-Input": {
+    "description": "What a run produces besides its record in the lab database, which is always written.",
+    "properties": {
+     "files": {
+      "default": true,
+      "title": "Files",
+      "type": "boolean"
+     },
+     "live_plot": {
+      "default": "none",
+      "enum": [
+       "none",
+       "window",
+       "web"
+      ],
+      "title": "Live Plot",
+      "type": "string"
+     },
+     "plot": {
+      "default": "",
+      "title": "Plot",
+      "type": "string"
+     }
+    },
+    "title": "OutputsConfig",
+    "type": "object"
+   },
+   "OutputsConfig-Output": {
+    "description": "What a run produces besides its record in the lab database, which is always written.",
+    "properties": {
+     "files": {
+      "default": true,
+      "title": "Files",
+      "type": "boolean"
+     },
+     "live_plot": {
+      "default": "none",
+      "enum": [
+       "none",
+       "window",
+       "web"
+      ],
+      "title": "Live Plot",
+      "type": "string"
+     },
+     "plot": {
+      "default": "",
+      "title": "Plot",
+      "type": "string"
+     }
+    },
+    "required": [
+     "files",
+     "live_plot",
+     "plot"
+    ],
+    "title": "OutputsConfig",
+    "type": "object"
+   },
+   "ProjectSettings": {
+    "description": "A project's settings, as the Run page edits them: fields, and the YAML they come from.",
+    "properties": {
+     "kind": {
+      "enum": [
+       "procedure",
+       "custom"
+      ],
+      "title": "Kind",
+      "type": "string"
+     },
+     "measurement": {
+      "title": "Measurement",
+      "type": "string"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "outputs": {
+      "$ref": "#/components/schemas/OutputsConfig-Output"
+     },
+     "params": {
+      "additionalProperties": true,
+      "title": "Params",
+      "type": "object"
+     },
+     "params_schema": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Params Schema"
+     },
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "run": {
+      "$ref": "#/components/schemas/RunConfig"
+     },
+     "setup_file": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Setup File"
+     },
+     "yaml": {
+      "title": "Yaml",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "path",
+     "measurement",
+     "kind",
+     "setup_file",
+     "yaml",
+     "run",
+     "params",
+     "outputs",
+     "params_schema"
+    ],
+    "title": "ProjectSettings",
+    "type": "object"
+   },
+   "RunConfig": {
+    "description": "Who and what a run is about. Read at the start of every run and recorded with it.",
+    "properties": {
+     "device": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "The device under test, by its name in the lab database",
+      "title": "Device"
+     },
+     "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+     },
+     "notes": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notes"
+     },
+     "operator": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Operator"
+     }
+    },
+    "required": [
+     "device",
+     "operator",
+     "notes",
+     "metadata"
+    ],
+    "title": "RunConfig",
+    "type": "object"
+   },
+   "SelectedNodeRef": {
+    "properties": {
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type",
+     "key"
+    ],
+    "title": "SelectedNodeRef",
+    "type": "object"
+   },
+   "SelectedResource": {
+    "description": "The instrument picked for one role.",
+    "properties": {
+     "attribute": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Attribute"
+     },
+     "channel_index": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Channel Index"
+     },
+     "key": {
+      "default": "",
+      "title": "Key",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "items": {
+         "$ref": "#/components/schemas/SelectedNodeRef"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Path"
+     },
+     "source": {
+      "default": "local",
+      "title": "Source",
+      "type": "string"
+     },
+     "type": {
+      "default": "",
+      "title": "Type",
+      "type": "string"
+     },
+     "variable_name": {
+      "title": "Variable Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "variable_name"
+    ],
+    "title": "SelectedResource",
+    "type": "object"
+   },
+   "SettingsBody": {
+    "description": "The whole YAML, or any of the sections.",
+    "properties": {
+     "outputs": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Outputs"
+     },
+     "params": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Params"
+     },
+     "run": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Run"
+     },
+     "yaml": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Yaml"
+     }
+    },
+    "title": "SettingsBody",
+    "type": "object"
+   },
+   "TemplateCheck": {
+    "properties": {
+     "example": {
+      "title": "Example",
+      "type": "string"
+     },
+     "problems": {
+      "items": {
+       "$ref": "#/components/schemas/TemplateProblem"
+      },
+      "title": "Problems",
+      "type": "array"
+     }
+    },
+    "required": [
+     "example",
+     "problems"
+    ],
+    "title": "TemplateCheck",
+    "type": "object"
+   },
+   "TemplateProblem": {
+    "description": "Something wrong with a folder template: an error blocks saving, a warning does not.",
+    "properties": {
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "level": {
+      "enum": [
+       "error",
+       "warning"
+      ],
+      "title": "Level",
+      "type": "string"
+     },
+     "message": {
+      "title": "Message",
+      "type": "string"
+     }
+    },
+    "required": [
+     "level",
+     "key",
+     "message"
+    ],
+    "title": "TemplateProblem",
+    "type": "object"
+   },
+   "ValidationError": {
+    "properties": {
+     "ctx": {
+      "title": "Context",
+      "type": "object"
+     },
+     "input": {
+      "title": "Input"
+     },
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "title": "Location",
+      "type": "array"
+     },
+     "msg": {
+      "title": "Message",
+      "type": "string"
+     },
+     "type": {
+      "title": "Error Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError",
+    "type": "object"
+   },
+   "WorkspacePaths": {
+    "description": "Where this workspace keeps each kind of thing, as lab-wizard.toml resolves it.",
+    "properties": {
+     "config_dir": {
+      "title": "Config Dir",
+      "type": "string"
+     },
+     "data_dir": {
+      "title": "Data Dir",
+      "type": "string"
+     },
+     "database": {
+      "title": "Database",
+      "type": "string"
+     },
+     "database_warning": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Database Warning"
+     },
+     "logs_dir": {
+      "title": "Logs Dir",
+      "type": "string"
+     },
+     "manifest": {
+      "title": "Manifest",
+      "type": "string"
+     },
+     "projects_dir": {
+      "title": "Projects Dir",
+      "type": "string"
+     },
+     "root": {
+      "title": "Root",
+      "type": "string"
+     }
+    },
+    "required": [
+     "root",
+     "manifest",
+     "config_dir",
+     "projects_dir",
+     "logs_dir",
+     "data_dir",
+     "database",
+     "database_warning"
+    ],
+    "title": "WorkspacePaths",
+    "type": "object"
+   },
+   "_AddBody": {
+    "properties": {
+     "chain": {
+      "items": {
+       "$ref": "#/components/schemas/_ChainStep"
+      },
+      "title": "Chain",
+      "type": "array"
+     }
+    },
+    "required": [
+     "chain"
+    ],
+    "title": "_AddBody",
+    "type": "object"
+   },
+   "_ApplyChildrenBody": {
+    "properties": {
+     "children": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Children",
+      "type": "array"
+     },
+     "parent_key": {
+      "title": "Parent Key",
+      "type": "string"
+     },
+     "parent_type": {
+      "title": "Parent Type",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": {
+          "type": "string"
+         },
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Path"
+     }
+    },
+    "required": [
+     "parent_type",
+     "parent_key",
+     "children"
+    ],
+    "title": "_ApplyChildrenBody",
+    "type": "object"
+   },
+   "_ChainStep": {
+    "properties": {
+     "action": {
+      "title": "Action",
+      "type": "string"
+     },
+     "children": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Children",
+      "type": "array"
+     },
+     "extra": {
+      "additionalProperties": true,
+      "title": "Extra",
+      "type": "object"
+     },
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type",
+     "key",
+     "action"
+    ],
+    "title": "_ChainStep",
+    "type": "object"
+   },
+   "_ConflictCheckRequest": {
+    "properties": {
+     "paths": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Paths",
+      "type": "array"
+     }
+    },
+    "title": "_ConflictCheckRequest",
+    "type": "object"
+   },
+   "_DefinitionBody": {
+    "properties": {
+     "definition": {
+      "additionalProperties": true,
+      "title": "Definition",
+      "type": "object"
+     }
+    },
+    "required": [
+     "definition"
+    ],
+    "title": "_DefinitionBody",
+    "type": "object"
+   },
+   "_DeviceBody": {
+    "properties": {
+     "notes": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notes"
+     },
+     "properties": {
+      "additionalProperties": true,
+      "title": "Properties",
+      "type": "object"
+     }
+    },
+    "title": "_DeviceBody",
+    "type": "object"
+   },
+   "_DiscoverBody": {
+    "properties": {
+     "action": {
+      "title": "Action",
+      "type": "string"
+     },
+     "draft_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Draft Id"
+     },
+     "params": {
+      "additionalProperties": true,
+      "title": "Params",
+      "type": "object"
+     },
+     "parent_chain": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Parent Chain",
+      "type": "array"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type",
+     "action"
+    ],
+    "title": "_DiscoverBody",
+    "type": "object"
+   },
+   "_DuplicateCheckRequest": {
+    "properties": {
+     "include_local": {
+      "default": true,
+      "title": "Include Local",
+      "type": "boolean"
+     },
+     "key": {
+      "default": "",
+      "title": "Key",
+      "type": "string"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type"
+    ],
+    "title": "_DuplicateCheckRequest",
+    "type": "object"
+   },
+   "_ForceReleaseClaimRequest": {
+    "properties": {
+     "unit": {
+      "title": "Unit",
+      "type": "string"
+     },
+     "url": {
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "url",
+     "unit"
+    ],
+    "title": "_ForceReleaseClaimRequest",
+    "type": "object"
+   },
+   "_InstrumentPath": {
+    "properties": {
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type",
+     "key"
+    ],
+    "title": "_InstrumentPath",
+    "type": "object"
+   },
+   "_PresetBody": {
+    "properties": {
+     "values": {
+      "additionalProperties": true,
+      "title": "Values",
+      "type": "object"
+     }
+    },
+    "required": [
+     "values"
+    ],
+    "title": "_PresetBody",
+    "type": "object"
+   },
+   "_ReleaseRequest": {
+    "properties": {
+     "path": {
+      "title": "Path",
+      "type": "string"
+     },
+     "url": {
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "url",
+     "path"
+    ],
+    "title": "_ReleaseRequest",
+    "type": "object"
+   },
+   "_RemoteDiscoverRequest": {
+    "properties": {
+     "action": {
+      "title": "Action",
+      "type": "string"
+     },
+     "config_dir": {
+      "title": "Config Dir",
+      "type": "string"
+     },
+     "params": {
+      "additionalProperties": true,
+      "title": "Params",
+      "type": "object"
+     },
+     "parent_chain": {
+      "items": {},
+      "title": "Parent Chain",
+      "type": "array"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "config_dir",
+     "type",
+     "action"
+    ],
+    "title": "_RemoteDiscoverRequest",
+    "type": "object"
+   },
+   "_RemoteEditRequest": {
+    "properties": {
+     "config_dir": {
+      "title": "Config Dir",
+      "type": "string"
+     },
+     "operation": {
+      "title": "Operation",
+      "type": "string"
+     },
+     "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+     }
+    },
+    "required": [
+     "config_dir",
+     "operation"
+    ],
+    "title": "_RemoteEditRequest",
+    "type": "object"
+   },
+   "_RemoteServerRequest": {
+    "properties": {
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "url": {
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "url"
+    ],
+    "title": "_RemoteServerRequest",
+    "type": "object"
+   },
+   "_RemoteTestRequest": {
+    "properties": {
+     "url": {
+      "title": "Url",
+      "type": "string"
+     }
+    },
+    "required": [
+     "url"
+    ],
+    "title": "_RemoteTestRequest",
+    "type": "object"
+   },
+   "_RemoteTreeRequest": {
+    "properties": {
+     "config_dir": {
+      "title": "Config Dir",
+      "type": "string"
+     }
+    },
+    "required": [
+     "config_dir"
+    ],
+    "title": "_RemoteTreeRequest",
+    "type": "object"
+   },
+   "_RemoveBody": {
+    "properties": {
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": {
+          "type": "string"
+         },
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Path"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type",
+     "key"
+    ],
+    "title": "_RemoveBody",
+    "type": "object"
+   },
+   "_ResetBody": {
+    "properties": {
+     "key": {
+      "title": "Key",
+      "type": "string"
+     },
+     "path": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": {
+          "type": "string"
+         },
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Path"
+     },
+     "type": {
+      "title": "Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "type",
+     "key"
+    ],
+    "title": "_ResetBody",
+    "type": "object"
+   },
+   "_SavePermissionsRequest": {
+    "properties": {
+     "permissions": {
+      "additionalProperties": true,
+      "title": "Permissions",
+      "type": "object"
+     }
+    },
+    "title": "_SavePermissionsRequest",
+    "type": "object"
+   },
+   "_SavePlotBody": {
+    "properties": {
+     "plot": {
+      "additionalProperties": true,
+      "title": "Plot",
+      "type": "object"
+     },
+     "replace": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Replace"
+     }
+    },
+    "required": [
+     "plot"
+    ],
+    "title": "_SavePlotBody",
+    "type": "object"
+   },
+   "_ServerBindRequest": {
+    "properties": {
+     "bind": {
+      "title": "Bind",
+      "type": "string"
+     }
+    },
+    "required": [
+     "bind"
+    ],
+    "title": "_ServerBindRequest",
+    "type": "object"
+   },
+   "_ServerStartRequest": {
+    "properties": {
+     "detached": {
+      "default": false,
+      "title": "Detached",
+      "type": "boolean"
+     }
+    },
+    "title": "_ServerStartRequest",
+    "type": "object"
+   },
+   "_SpecBody": {
+    "properties": {
+     "spec": {
+      "additionalProperties": true,
+      "title": "Spec",
+      "type": "object"
+     }
+    },
+    "required": [
+     "spec"
+    ],
+    "title": "_SpecBody",
+    "type": "object"
+   },
+   "_TemplateBody": {
+    "properties": {
+     "path": {
+      "title": "Path",
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ],
+    "title": "_TemplateBody",
+    "type": "object"
+   },
+   "_UpdateInstrumentBody": {
+    "properties": {
+     "expected_fields": {
+      "additionalProperties": true,
+      "title": "Expected Fields",
+      "type": "object"
+     },
+     "fields": {
+      "additionalProperties": true,
+      "title": "Fields",
+      "type": "object"
+     },
+     "path": {
+      "items": {
+       "$ref": "#/components/schemas/_InstrumentPath"
+      },
+      "title": "Path",
+      "type": "array"
+     }
+    },
+    "required": [
+     "path",
+     "fields",
+     "expected_fields"
+    ],
+    "title": "_UpdateInstrumentBody",
+    "type": "object"
+   },
+   "_YamlBody": {
+    "properties": {
+     "yaml": {
+      "title": "Yaml",
+      "type": "string"
+     }
+    },
+    "required": [
+     "yaml"
+    ],
+    "title": "_YamlBody",
+    "type": "object"
+   }
+  }
+ },
+ "info": {
+  "title": "FastAPI",
+  "version": "0.1.0"
+ },
+ "openapi": "3.1.0",
+ "paths": {
+  "/api/create-custom-resource-project": {
+   "post": {
+    "description": "Create a new timestamped project containing a programmatically built setup file.",
+    "operationId": "api_create_custom_resource_project_api_create_custom_resource_project_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/GenerateCustomResourceRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Create Custom Resource Project"
+   }
+  },
+  "/api/create-measurement-project": {
+   "post": {
+    "description": "Create a project from a procedure or a custom measurement (``body.kind``).",
+    "operationId": "api_create_measurement_project_api_create_measurement_project_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/GenerateProjectRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Create Measurement Project"
+   }
+  },
+  "/api/data/devices": {
+   "get": {
+    "operationId": "api_data_devices_api_data_devices_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Data Devices"
+   }
+  },
+  "/api/data/devices/{name}": {
+   "put": {
+    "description": "Create or update a device; its properties become filters on all its runs.",
+    "operationId": "api_data_device_save_api_data_devices__name__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_DeviceBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Device Save"
+   }
+  },
+  "/api/data/facets": {
+   "get": {
+    "description": "Every filter, with how many runs each value leaves under ``filters`` (JSON).",
+    "operationId": "api_data_facets_api_data_facets_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "filters",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Filters"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Facets"
+   }
+  },
+  "/api/data/plot": {
+   "post": {
+    "operationId": "api_data_plot_api_data_plot_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_SpecBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Plot"
+   }
+  },
+  "/api/data/plot/notebook": {
+   "post": {
+    "operationId": "api_data_plot_notebook_api_data_plot_notebook_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_SpecBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Plot Notebook"
+   }
+  },
+  "/api/data/runs": {
+   "get": {
+    "operationId": "api_data_runs_api_data_runs_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "filters",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Filters"
+      }
+     },
+     {
+      "in": "query",
+      "name": "page",
+      "required": false,
+      "schema": {
+       "default": 1,
+       "title": "Page",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "page_size",
+      "required": false,
+      "schema": {
+       "default": 100,
+       "title": "Page Size",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Runs"
+   }
+  },
+  "/api/data/runs/{run_id}": {
+   "get": {
+    "operationId": "api_data_run_api_data_runs__run_id__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "run_id",
+      "required": true,
+      "schema": {
+       "title": "Run Id",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Run"
+   }
+  },
+  "/api/data/runs/{run_id}/export": {
+   "get": {
+    "description": "The run as a zipped folder of CSV and YAML, as the file saver writes it.",
+    "operationId": "api_data_export_api_data_runs__run_id__export_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "run_id",
+      "required": true,
+      "schema": {
+       "title": "Run Id",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Export"
+   }
+  },
+  "/api/data/runs/{run_id}/points/{seq}": {
+   "get": {
+    "operationId": "api_data_point_api_data_runs__run_id__points__seq__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "run_id",
+      "required": true,
+      "schema": {
+       "title": "Run Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "path",
+      "name": "seq",
+      "required": true,
+      "schema": {
+       "title": "Seq",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Point"
+   }
+  },
+  "/api/data/runs/{run_id}/steps": {
+   "get": {
+    "operationId": "api_data_run_steps_api_data_runs__run_id__steps_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "run_id",
+      "required": true,
+      "schema": {
+       "title": "Run Id",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Run Steps"
+   }
+  },
+  "/api/get-resources/{name}": {
+   "get": {
+    "description": "Return the instrument roles a measurement needs, each with what could fill it.\n\n``kind`` is ``procedure`` for a procedure definition or ``custom`` for a\ncustom measurement; both answer the same shape.\n``matching_instruments`` is populated by class-hierarchy discovery and\n``matching_remote`` from registered servers.",
+    "operationId": "get_resources_api_get_resources__name__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "kind",
+      "required": false,
+      "schema": {
+       "default": "procedure",
+       "title": "Kind",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "verbose",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Verbose",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Resources"
+   }
+  },
+  "/api/hardware-owner": {
+   "get": {
+    "description": "Which process currently owns this workspace's hardware.\n\n``server`` means the wizard routes hardware operations through it; the UI\nshould say so, since it explains why discovery behaves differently.",
+    "operationId": "api_hardware_owner_api_hardware_owner_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Hardware Owner"
+   }
+  },
+  "/api/health": {
+   "get": {
+    "description": "Liveness probe, and proof of *which* wizard is answering.\n\nThe workspace is included because several wizards can run on one machine.\nWithout it, a second instance whose port was taken would happily open a\nwindow onto the first instance's server and show the wrong workspace's\ninstruments \u2014 which looks like a working app, not a failure.",
+    "operationId": "health_api_health_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Health"
+   }
+  },
+  "/api/instrument-sources": {
+   "get": {
+    "description": "Every place this workspace can get an instrument from.\n\nLocal tree, other workspaces' daemons on this machine (full trees, editable),\nand registered remote servers (named leaves only \u2014 a remote peer gets read +\ncall, never reconfiguration). Unreachable sources are reported rather than\nraised so one rack being off does not block authoring against the others.",
+    "operationId": "api_instrument_sources_api_instrument_sources_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Instrument Sources"
+   }
+  },
+  "/api/local-servers": {
+   "get": {
+    "description": "Every instrument server running on this machine.\n\nNot just this workspace's. A server started from another workspace holds\nreal hardware and its endpoint is not derivable from here, so the UI needs\nthe machine-local registry to say which workspace owns which rack.",
+    "operationId": "api_local_servers_api_local_servers_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Local Servers"
+   }
+  },
+  "/api/local-servers/claims": {
+   "get": {
+    "description": "Run claims held on every instrument server on this machine.\n\nA claim is how a running measurement keeps other runs off the instruments\nit drives (``plans/server_plan.md`` Phase 9), so this answers \"why was my\nrun refused\" and \"is something still holding that counter\". A server that\ndoes not answer is reported rather than raised: one stopped daemon must not\nblank the page.",
+    "operationId": "api_local_server_claims_api_local_servers_claims_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Local Server Claims"
+   }
+  },
+  "/api/local-servers/claims/force-release": {
+   "post": {
+    "description": "End every claim touching ``unit`` on one server.\n\nFor a run that is stuck, or whose client disappeared. The server resets the\nreleased instruments to baseline before anyone else can claim them.",
+    "operationId": "api_force_release_claim_api_local_servers_claims_force_release_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ForceReleaseClaimRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Force Release Claim"
+   }
+  },
+  "/api/local-servers/release": {
+   "post": {
+    "description": "Ask a server to disconnect and evict one root.\n\nHands a rack back without stopping the whole server, which is what a user\nwants when a local project needs the bus. The path stays servable \u2014 the next\ncall through the server reopens it.",
+    "operationId": "api_release_hardware_api_local_servers_release_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ReleaseRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Release Hardware"
+   }
+  },
+  "/api/manage-instruments": {
+   "get": {
+    "description": "Return the configured tree and metadata for all discoverable types.",
+    "operationId": "api_manage_instruments_api_manage_instruments_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Manage Instruments"
+   }
+  },
+  "/api/manage-instruments/add": {
+   "post": {
+    "description": "Add an instrument (with optional parent chain creation).\n\nRouted through this workspace's server when one is running, so a local edit\ngets the same held-rack refusal, registry reload and audit entry that an\nedit from another workspace already got.",
+    "operationId": "api_add_instrument_api_manage_instruments_add_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_AddBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Add Instrument"
+   }
+  },
+  "/api/manage-instruments/apply-children": {
+   "post": {
+    "operationId": "api_apply_children_api_manage_instruments_apply_children_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ApplyChildrenBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Apply Children"
+   }
+  },
+  "/api/manage-instruments/discover": {
+   "post": {
+    "description": "Run a discovery action defined on an instrument's Params class.",
+    "operationId": "api_discover_api_manage_instruments_discover_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_DiscoverBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Discover"
+   }
+  },
+  "/api/manage-instruments/drafts": {
+   "post": {
+    "operationId": "api_create_instrument_draft_api_manage_instruments_drafts_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Create Instrument Draft"
+   }
+  },
+  "/api/manage-instruments/drafts/{draft_id}": {
+   "delete": {
+    "operationId": "api_cancel_instrument_draft_api_manage_instruments_drafts__draft_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "draft_id",
+      "required": true,
+      "schema": {
+       "title": "Draft Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Cancel Instrument Draft"
+   },
+   "put": {
+    "operationId": "api_stage_instrument_draft_api_manage_instruments_drafts__draft_id__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "draft_id",
+      "required": true,
+      "schema": {
+       "title": "Draft Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_AddBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Stage Instrument Draft"
+   }
+  },
+  "/api/manage-instruments/drafts/{draft_id}/commit": {
+   "post": {
+    "operationId": "api_commit_instrument_draft_api_manage_instruments_drafts__draft_id__commit_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "draft_id",
+      "required": true,
+      "schema": {
+       "title": "Draft Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Commit Instrument Draft"
+   }
+  },
+  "/api/manage-instruments/removal-impact": {
+   "post": {
+    "description": "What breaks if this instrument is removed.\n\nA rule referencing a vanished attribute fails closed \u2014 it denies everything\nit covered \u2014 so removing one instrument can make a *different* one\nun-callable. Surfaced before the confirm, not discovered later.",
+    "operationId": "api_removal_impact_api_manage_instruments_removal_impact_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoveBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Removal Impact"
+   }
+  },
+  "/api/manage-instruments/remove": {
+   "post": {
+    "description": "Remove an instrument from config.",
+    "operationId": "api_remove_instrument_api_manage_instruments_remove_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoveBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Remove Instrument"
+   }
+  },
+  "/api/manage-instruments/reset": {
+   "post": {
+    "description": "Reset an instrument's config to factory defaults (preserves children).",
+    "operationId": "api_reset_instrument_api_manage_instruments_reset_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ResetBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Reset Instrument"
+   }
+  },
+  "/api/manage-instruments/update": {
+   "post": {
+    "operationId": "api_update_instrument_api_manage_instruments_update_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_UpdateInstrumentBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Update Instrument"
+   }
+  },
+  "/api/measurement-choices": {
+   "get": {
+    "description": "Everything a measurement can be created from, in one list.\n\nProcedures \u2014 this workspace's own, and the ones built into lab_wizard \u2014 and\nthe workspace's custom measurements (Python files in its measurements\nfolder) are offered side by side, because to the person creating a\nmeasurement they are the same kind of thing: roles to bind, params to set.\nA file that cannot be loaded is listed with why, not hidden.",
+    "operationId": "api_measurement_choices_api_measurement_choices_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Measurement Choices"
+   }
+  },
+  "/api/permissions": {
+   "get": {
+    "description": "Return the local instrument tree + permission vocabulary + current rules.\n\n``tree`` mirrors manage-instruments; ``instruments`` carries the state keys\nand methods the rule builder offers per node; ``permissions`` is the current\n``permissions:`` block from server.yaml.",
+    "operationId": "api_get_permissions_api_permissions_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Get Permissions"
+   },
+   "put": {
+    "description": "Validate and persist the ``permissions:`` block to server.yaml.",
+    "operationId": "api_save_permissions_api_permissions_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_SavePermissionsRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Save Permissions"
+   }
+  },
+  "/api/procedures": {
+   "get": {
+    "description": "Every procedure \u2014 built in and this workspace's \u2014 with whether it checks.",
+    "operationId": "api_procedures_api_procedures_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Procedures"
+   }
+  },
+  "/api/procedures/catalog": {
+   "get": {
+    "description": "Step types, behaviors, and which of this workspace's instruments fill each.",
+    "operationId": "api_procedure_catalog_api_procedures_catalog_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Procedure Catalog"
+   }
+  },
+  "/api/procedures/check": {
+   "post": {
+    "description": "Problems with a definition being edited, each with its path, and its Python.",
+    "operationId": "api_procedure_check_api_procedures_check_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_DefinitionBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Check"
+   }
+  },
+  "/api/procedures/from-yaml": {
+   "post": {
+    "operationId": "api_procedure_from_yaml_api_procedures_from_yaml_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_YamlBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure From Yaml"
+   }
+  },
+  "/api/procedures/to-yaml": {
+   "post": {
+    "operationId": "api_procedure_to_yaml_api_procedures_to_yaml_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_DefinitionBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure To Yaml"
+   }
+  },
+  "/api/procedures/{name}": {
+   "delete": {
+    "description": "Delete this workspace's copy. Deleting an override brings the built-in back.",
+    "operationId": "api_procedure_delete_api_procedures__name__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Delete"
+   },
+   "get": {
+    "operationId": "api_procedure_detail_api_procedures__name__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Detail"
+   },
+   "put": {
+    "description": "Save to this workspace. A built-in's name saves a workspace override of it.",
+    "operationId": "api_procedure_save_api_procedures__name__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_DefinitionBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Save"
+   }
+  },
+  "/api/procedures/{name}/plots": {
+   "post": {
+    "description": "Save a plot built on the Data page into its procedure.",
+    "operationId": "api_procedure_save_plot_api_procedures__name__plots_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_SavePlotBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Save Plot"
+   }
+  },
+  "/api/procedures/{name}/presets": {
+   "get": {
+    "operationId": "api_procedure_presets_api_procedures__name__presets_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Presets"
+   }
+  },
+  "/api/procedures/{name}/presets/{preset}": {
+   "delete": {
+    "operationId": "api_procedure_preset_delete_api_procedures__name__presets__preset__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "preset",
+      "required": true,
+      "schema": {
+       "title": "Preset",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Preset Delete"
+   },
+   "put": {
+    "operationId": "api_procedure_preset_save_api_procedures__name__presets__preset__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     },
+     {
+      "in": "path",
+      "name": "preset",
+      "required": true,
+      "schema": {
+       "title": "Preset",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_PresetBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Procedure Preset Save"
+   }
+  },
+  "/api/projects": {
+   "get": {
+    "description": "Projects this workspace has already generated, newest first.\n\nRead back off disk from the YAML generation already writes, so this records\nno new state and cannot disagree with what is actually there.",
+    "operationId": "api_list_projects_api_projects_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api List Projects"
+   }
+  },
+  "/api/projects/{name}/launch": {
+   "get": {
+    "operationId": "api_project_launch_status_api_projects__name__launch_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LaunchStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Project Launch Status"
+   },
+   "post": {
+    "description": "Run the project's setup file, as its own process.",
+    "operationId": "api_project_launch_api_projects__name__launch_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LaunchStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Project Launch"
+   }
+  },
+  "/api/projects/{name}/settings": {
+   "get": {
+    "description": "The project's run details, params and outputs, as fields and as its YAML.",
+    "operationId": "api_project_settings_api_projects__name__settings_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProjectSettings"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Project Settings"
+   },
+   "put": {
+    "description": "Save ``{\"yaml\"}``, or any of ``{\"run\", \"params\", \"outputs\"}``; 422 lists every problem.",
+    "operationId": "api_project_settings_save_api_projects__name__settings_put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SettingsBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ProjectSettings"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Project Settings Save"
+   }
+  },
+  "/api/projects/{name}/stop": {
+   "post": {
+    "description": "Ctrl-C the run: it aborts and puts its instruments in their safe state.",
+    "operationId": "api_project_stop_api_projects__name__stop_post",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LaunchStatus"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Project Stop"
+   }
+  },
+  "/api/remote-servers": {
+   "get": {
+    "description": "Return the registered remote servers (the client address book).",
+    "operationId": "api_get_remote_servers_api_remote_servers_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Get Remote Servers"
+   },
+   "post": {
+    "description": "Add (or update by name) a remote server.",
+    "operationId": "api_add_remote_server_api_remote_servers_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoteServerRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Add Remote Server"
+   }
+  },
+  "/api/remote-servers/test": {
+   "post": {
+    "description": "Live-test a remote server URL and return its attributes (never errors).",
+    "operationId": "api_test_remote_server_api_remote_servers_test_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoteTestRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Test Remote Server"
+   }
+  },
+  "/api/remote-servers/{name}": {
+   "delete": {
+    "description": "Remove a remote server by name.",
+    "operationId": "api_remove_remote_server_api_remote_servers__name__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Remove Remote Server"
+   }
+  },
+  "/api/remote-tree": {
+   "post": {
+    "description": "Tree, schema and recent activity of another workspace's server.\n\nThe schema comes from that server, not this build: it decides which\ninstrument types exist and what fields they take.",
+    "operationId": "api_remote_tree_api_remote_tree_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoteTreeRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Remote Tree"
+   }
+  },
+  "/api/remote-tree/discover": {
+   "post": {
+    "description": "Run a discovery scan on another workspace's server.\n\nThe scan has to happen where the hardware is. Without it, adding an\ninstrument to another workspace would mean knowing its bus address by heart.",
+    "operationId": "api_remote_discover_api_remote_tree_discover_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoteDiscoverRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Remote Discover"
+   }
+  },
+  "/api/remote-tree/edit": {
+   "post": {
+    "description": "Add, remove, or reset an instrument on another workspace's server.\n\nThe server enforces both rules that matter \u2014 same-machine only, and not\nwhile the rack is open \u2014 so a refusal here is its answer, not ours.",
+    "operationId": "api_remote_tree_edit_api_remote_tree_edit_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoteEditRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Remote Tree Edit"
+   }
+  },
+  "/api/remote-tree/events": {
+   "post": {
+    "description": "Recent notable events recorded by that server.",
+    "operationId": "api_remote_events_api_remote_tree_events_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_RemoteTreeRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Remote Events"
+   }
+  },
+  "/api/server/bind": {
+   "put": {
+    "description": "Persist this workstation's server bind address.",
+    "operationId": "api_server_set_bind_api_server_bind_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ServerBindRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Server Set Bind"
+   }
+  },
+  "/api/server/disable-hosting": {
+   "post": {
+    "description": "Stop hosting and return this workspace to being a client.",
+    "operationId": "api_disable_hosting_api_server_disable_hosting_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Disable Hosting"
+   }
+  },
+  "/api/server/enable-hosting": {
+   "post": {
+    "description": "Make this workspace a hardware host, serving this machine over ipc.\n\nCreating the server config is the opt-in; a workspace without one is a\nclient, which is what keeps a cloned workspace from racing the host for the\nsame instruments. No address is chosen \u2014 add a bind only when another\nmachine needs to connect.",
+    "operationId": "api_enable_hosting_api_server_enable_hosting_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Enable Hosting"
+   }
+  },
+  "/api/server/restart": {
+   "post": {
+    "description": "Restart the server \u2014 used to apply edited permission rules.",
+    "operationId": "api_server_restart_api_server_restart_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ServerStartRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Server Restart"
+   }
+  },
+  "/api/server/start": {
+   "post": {
+    "description": "Start the instrument server (managed child or detached daemon).",
+    "operationId": "api_server_start_api_server_start_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ServerStartRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Server Start"
+   }
+  },
+  "/api/server/status": {
+   "get": {
+    "description": "Return whether this workstation's instrument server is running.",
+    "operationId": "api_server_status_api_server_status_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Server Status"
+   }
+  },
+  "/api/server/stop": {
+   "post": {
+    "description": "Stop the running instrument server (any mode).",
+    "operationId": "api_server_stop_api_server_stop_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Server Stop"
+   }
+  },
+  "/api/server/suggest-port": {
+   "get": {
+    "description": "Return a tcp://host:port bind on a currently-free port (not persisted).\n\n``prefer_default=true`` offers the standard/existing port first when free \u2014\nused for the initial suggestion before the server is configured.",
+    "operationId": "api_server_suggest_port_api_server_suggest_port_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "prefer_default",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Prefer Default",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Server Suggest Port"
+   }
+  },
+  "/api/settings/files": {
+   "get": {
+    "description": "How runs of projects with file saving on are laid out on disk.",
+    "operationId": "api_settings_files_api_settings_files_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FileSettingsView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Settings Files"
+   },
+   "put": {
+    "operationId": "api_settings_files_save_api_settings_files_put",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/FileSettings-Input"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FileSettingsView"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Settings Files Save"
+   }
+  },
+  "/api/settings/files/check": {
+   "post": {
+    "description": "What a folder template would name the latest run's folder, and what is wrong with it.",
+    "operationId": "api_settings_files_check_api_settings_files_check_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_TemplateBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/TemplateCheck"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Settings Files Check"
+   }
+  },
+  "/api/settings/workspace": {
+   "get": {
+    "description": "Where this workspace keeps each kind of thing, as the manifest resolves it.",
+    "operationId": "api_settings_workspace_api_settings_workspace_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WorkspacePaths"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Settings Workspace"
+   }
+  },
+  "/api/transport-status": {
+   "get": {
+    "description": "Per-root sharing/authority declarations plus what the server holds now.\n\nLets the tree show whether a rack is exclusive or shared, and whether it is\ncurrently in use, without the user having to run anything to find out.",
+    "operationId": "api_transport_status_api_transport_status_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Transport Status"
+   }
+  },
+  "/api/transport-status/check": {
+   "post": {
+    "description": "Would a *local* project using these instruments contend with the server?\n\nUsed during measurement creation so a conflict is a design-time answer\nrather than a 2am failure.",
+    "operationId": "api_transport_conflicts_api_transport_status_check_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ConflictCheckRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Transport Conflicts"
+   }
+  },
+  "/api/transport-status/duplicate-check": {
+   "post": {
+    "description": "Would adding this instrument point a second config at one device?\n\nAsked before the write. Two workspaces naming one serial port is a mistake\nwhose first symptom is otherwise a lease refusal in the middle of a run.",
+    "operationId": "api_duplicate_transport_api_transport_status_duplicate_check_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_DuplicateCheckRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Duplicate Transport"
+   }
+  }
+ }
+}

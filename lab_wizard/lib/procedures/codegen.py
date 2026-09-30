@@ -175,7 +175,8 @@ class {prefix}Measurement:
             self.resources,
             procedure={definition.name!r},
             definition=DEFINITION,
-            project_dir=Path(__file__).resolve().parent,
+            # This module sits in the project's _measurement/ folder.
+            project_dir=Path(__file__).resolve().parent.parent,
         )
 '''
 
@@ -203,15 +204,24 @@ instruments.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from lab_procedure import Status
 
 from lab_wizard.lib.client.claims import RoutedClaims
 from lab_wizard.lib.client.project_resources import local_claims_for, resource_source_for
+from lab_wizard.lib.project_module import load_module, module_path
 from lab_wizard.lib.task_adapters.lifecycle import RunLifecycle
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, load_project_config
 {template_imports}
+
+# The procedure module is generated into _measurement/ beside this file, and
+# loaded by its path so its name can never shadow another module
+# (project_module.py). The import is only for your editor, to follow it to its code.
+if TYPE_CHECKING:
+    from _measurement.{definition.name} import {prefix}Measurement
+else:
+    {prefix}Measurement = load_module(module_path(Path(__file__).parent, "{definition.name}")).{prefix}Measurement
 
 # wizard:imports:start
 # wizard inserts concrete instrument imports here
@@ -248,9 +258,6 @@ def create_instrument_resources(
 
 if __name__ == "__main__":
     import argparse
-
-    # The procedure module is generated beside this setup file.
-    from {definition.name} import {prefix}Measurement
 
     parser = argparse.ArgumentParser()
     parser.add_argument(

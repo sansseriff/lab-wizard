@@ -1,5 +1,5 @@
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 
 export type TreeItem = {
 	type: string;
@@ -83,10 +83,10 @@ export const load = async () => {
 			suggestedBind: 'tcp://0.0.0.0:12300'
 		} as PermissionsData;
 	}
-	const data = await fetchWithConfig<PermissionsData>('/api/permissions', 'GET');
+	const data = await unwrap<PermissionsData>(api.GET('/api/permissions'));
 	let serverStatus: ServerStatus | null = null;
 	try {
-		serverStatus = await fetchWithConfig<ServerStatus>('/api/server/status', 'GET');
+		serverStatus = await unwrap<ServerStatus>(api.GET('/api/server/status'));
 	} catch {
 		serverStatus = null;
 	}
@@ -94,9 +94,8 @@ export const load = async () => {
 	// otherwise an auto-picked free port).
 	let suggestedBind = 'tcp://0.0.0.0:12300';
 	try {
-		const r = await fetchWithConfig<{ bind: string }>(
-			'/api/server/suggest-port?prefer_default=true',
-			'GET'
+		const r = await unwrap<{ bind: string }>(
+			api.GET('/api/server/suggest-port', { params: { query: { prefer_default: true } } })
 		);
 		suggestedBind = r.bind;
 	} catch {

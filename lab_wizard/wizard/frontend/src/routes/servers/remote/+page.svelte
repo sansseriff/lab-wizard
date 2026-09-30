@@ -10,7 +10,7 @@
 	 * rather than a tree. That is also why they get no tab on Configured
 	 * instruments.
 	 */
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 	import IconButton from '$lib/components/IconButton.svelte';
 	import { ask } from '$lib/confirm.svelte';
 	import Panel from '$lib/components/Panel.svelte';
@@ -46,10 +46,7 @@
 		busy = true;
 		statusMessage = null;
 		try {
-			const res = await fetchWithConfig<{ servers: RemoteServer[] }>('/api/remote-servers', 'POST', {
-				name,
-				url
-			});
+			const res = await unwrap<{ servers: RemoteServer[] }>(api.POST('/api/remote-servers', { body: { name, url } }));
 			servers = res.servers;
 			newName = '';
 			newUrl = '';
@@ -72,15 +69,14 @@
 		busy = true;
 		statusMessage = null;
 		try {
-			const res = await fetchWithConfig<{ servers: RemoteServer[] }>(
-				`/api/remote-servers/${encodeURIComponent(name)}`,
-				'DELETE'
+			const res = await unwrap<{ servers: RemoteServer[] }>(
+				api.DELETE('/api/remote-servers/{name}', { params: { path: { name } } })
 			);
 			servers = res.servers;
 			delete testResults[name];
 			testResults = { ...testResults };
 		} catch (e) {
-			statusMessage = { text: e instanceof Error ? e.message : 'Failed to remove.', ok: false };
+			statusMessage = { text: errorMessage(e) || 'Failed to remove.', ok: false };
 		} finally {
 			busy = false;
 		}
@@ -90,15 +86,13 @@
 		testing[server.name] = true;
 		testing = { ...testing };
 		try {
-			testResults[server.name] = await fetchWithConfig<TestResult>(
-				'/api/remote-servers/test',
-				'POST',
-				{ url: server.url }
+			testResults[server.name] = await unwrap<TestResult>(
+				api.POST('/api/remote-servers/test', { body: { url: server.url } })
 			);
 		} catch (e) {
 			testResults[server.name] = {
 				ok: false,
-				error: e instanceof Error ? e.message : 'Test failed.'
+				error: errorMessage(e) || 'Test failed.'
 			};
 		} finally {
 			testResults = { ...testResults };

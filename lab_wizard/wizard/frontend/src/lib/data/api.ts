@@ -1,43 +1,35 @@
-/** The lab database API (lab_wizard/wizard/backend/data_api.py), typed. */
-import { fetchWithConfig } from '$lib/api';
+/** The lab database API (backend/routes/data.py), over the typed client. */
+import { api, unwrap } from '$lib/api';
 import type { Device, Facet, Filters, LineShape, PlotSpec, Point, RunDetail, RunRow, Series, Step } from './model';
 
-function query(filters: Filters, extra: Record<string, string | number> = {}): string {
-	const params = new URLSearchParams();
-	if (Object.keys(filters).length) params.set('filters', JSON.stringify(filters));
-	for (const [key, value] of Object.entries(extra)) params.set(key, String(value));
-	const text = params.toString();
-	return text ? `?${text}` : '';
-}
+/** Filters as the backend takes them: one JSON query parameter, absent when empty. */
+const filtersQuery = (filters: Filters) =>
+	Object.keys(filters).length ? { filters: JSON.stringify(filters) } : {};
 
 export const dataApi = {
 	facets: (filters: Filters) =>
-		fetchWithConfig<{ runs: number; facets: Facet[] }>(`/api/data/facets${query(filters)}`, 'GET'),
+		unwrap<{ runs: number; facets: Facet[] }>(api.GET('/api/data/facets', { params: { query: filtersQuery(filters) } })),
 	runs: (filters: Filters, page = 1, pageSize = 100) =>
-		fetchWithConfig<{ total: number; page: number; page_size: number; runs: RunRow[] }>(
-			`/api/data/runs${query(filters, { page, page_size: pageSize })}`,
-			'GET'
+		unwrap<{ total: number; page: number; page_size: number; runs: RunRow[] }>(
+			api.GET('/api/data/runs', { params: { query: { ...filtersQuery(filters), page, page_size: pageSize } } })
 		),
-	run: (id: number) => fetchWithConfig<RunDetail>(`/api/data/runs/${id}`, 'GET'),
-	steps: (id: number) => fetchWithConfig<{ steps: Step[] }>(`/api/data/runs/${id}/steps`, 'GET'),
-	point: (id: number, seq: number) => fetchWithConfig<Point>(`/api/data/runs/${id}/points/${seq}`, 'GET'),
+	run: (id: number) => unwrap<RunDetail>(api.GET('/api/data/runs/{run_id}', { params: { path: { run_id: id } } })),
+	steps: (id: number) =>
+		unwrap<{ steps: Step[] }>(api.GET('/api/data/runs/{run_id}/steps', { params: { path: { run_id: id } } })),
+	point: (id: number, seq: number) =>
+		unwrap<Point>(api.GET('/api/data/runs/{run_id}/points/{seq}', { params: { path: { run_id: id, seq } } })),
 	plot: (spec: PlotSpec) =>
-		fetchWithConfig<{ series: Series[]; units: Record<string, string | null>; shape: LineShape }>(
-			'/api/data/plot',
-			'POST',
-			{ spec }
+		unwrap<{ series: Series[]; units: Record<string, string | null>; shape: LineShape }>(
+			api.POST('/api/data/plot', { body: { spec } })
 		),
-	notebook: (spec: PlotSpec) =>
-		fetchWithConfig<{ source: string }>('/api/data/plot/notebook', 'POST', { spec }),
+	notebook: (spec: PlotSpec) => unwrap<{ source: string }>(api.POST('/api/data/plot/notebook', { body: { spec } })),
 	savePlot: (procedure: string, plot: PlotSpec, replace: string | null = null) =>
-		fetchWithConfig<{ plots: PlotSpec[]; origin: string }>(
-			`/api/procedures/${encodeURIComponent(procedure)}/plots`,
-			'POST',
-			{ plot, replace }
+		unwrap<{ plots: PlotSpec[]; origin: string }>(
+			api.POST('/api/procedures/{name}/plots', { params: { path: { name: procedure } }, body: { plot, replace } })
 		),
-	devices: () => fetchWithConfig<{ devices: Device[] }>('/api/data/devices', 'GET'),
+	devices: () => unwrap<{ devices: Device[] }>(api.GET('/api/data/devices')),
 	saveDevice: (name: string, properties: Device['properties'], notes: string | null) =>
-		fetchWithConfig<Device>(`/api/data/devices/${encodeURIComponent(name)}`, 'PUT', { properties, notes }),
+		unwrap<Device>(api.PUT('/api/data/devices/{name}', { params: { path: { name } }, body: { properties, notes } })),
 	/** The run's export URL; the browser downloads what it returns. */
 	exportUrl: (id: number) => `/api/data/runs/${id}/export`
 };

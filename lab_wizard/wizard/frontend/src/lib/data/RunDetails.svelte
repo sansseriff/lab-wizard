@@ -80,14 +80,8 @@
 			'No columns recorded.'
 		)}
 		{#if Object.keys(detail.derived).length}
-			<h4 class="mt-3 mb-1 text-xs font-semibold text-ink-2">Derived, computed when read</h4>
+			<h4 class="mt-3 mb-1 text-xs font-semibold text-ink-2">Derived, as recorded with the run</h4>
 			{@render table(Object.entries(detail.derived), '')}
-		{/if}
-		{#if detail.definition_source === 'recorded'}
-			<p class="mt-2 text-xs text-muted">
-				Its procedure no longer exists, so its plots and derived columns are the ones it was recorded
-				with.
-			</p>
 		{/if}
 	</section>
 </div>

@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 import type {
 	InstrumentMeta,
 	LocalServer,
@@ -20,7 +20,7 @@ export const load: PageLoad = async () => {
 			servers: [] as LocalServer[]
 		};
 	}
-	const data: ManageData = await fetchWithConfig('/api/manage-instruments', 'GET');
+	const data = await unwrap<ManageData>(api.GET('/api/manage-instruments'));
 
 	// Transport status is best-effort: the tree must still render if no server
 	// is around to ask, so a failure here costs badges, not the page.
@@ -35,8 +35,8 @@ export const load: PageLoad = async () => {
 	let servers: LocalServer[] = [];
 	try {
 		const [status, local] = await Promise.all([
-			fetchWithConfig<{ roots: Record<string, RootTransport> }>('/api/transport-status', 'GET'),
-			fetchWithConfig<{ servers: LocalServer[] }>('/api/local-servers', 'GET')
+			unwrap<{ roots: Record<string, RootTransport> }>(api.GET('/api/transport-status')),
+			unwrap<{ servers: LocalServer[] }>(api.GET('/api/local-servers'))
 		]);
 		roots = status.roots ?? {};
 		// This workspace's own daemon serves the very tree already shown on the

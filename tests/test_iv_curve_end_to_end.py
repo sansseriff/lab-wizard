@@ -134,7 +134,7 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path, rig) -> None:
     ast.parse(setup_text)
     ast.parse(measurement_text)
 
-    assert "from iv_curve import IvCurveMeasurement" in setup_text
+    assert "from _measurement.iv_curve import IvCurveMeasurement" in setup_text
     assert "class IvCurveMeasurement" in measurement_text
 
     config = load_instruments(tmp_path / "config")

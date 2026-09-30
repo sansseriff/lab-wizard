@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, unwrap } from '$lib/api';
 import type { LocalServer, RootTransport, TreeItem } from '$lib/types/instruments';
 
 export type OverviewData = {
@@ -49,19 +49,19 @@ export const load: PageLoad = async () => {
 	};
 
 	const [instruments, transport, remotes, locals, projects] = await Promise.all([
-		settle(fetchWithConfig<{ tree: TreeItem[] }>('/api/manage-instruments', 'GET'), { tree: [] }),
+		settle(unwrap<{ tree: TreeItem[] }>(api.GET('/api/manage-instruments')), { tree: [] }),
 		settle(
-			fetchWithConfig<{
+			unwrap<{
 				roots: Record<string, RootTransport>;
 				duplicate_transports: Record<string, string[]>;
-			}>('/api/transport-status', 'GET'),
+			}>(api.GET('/api/transport-status')),
 			{ roots: {}, duplicate_transports: {} }
 		),
-		settle(fetchWithConfig<{ servers: unknown[] }>('/api/remote-servers', 'GET'), { servers: [] }),
-		settle(fetchWithConfig<{ servers: LocalServer[] }>('/api/local-servers', 'GET'), {
+		settle(unwrap<{ servers: unknown[] }>(api.GET('/api/remote-servers')), { servers: [] }),
+		settle(unwrap<{ servers: LocalServer[] }>(api.GET('/api/local-servers')), {
 			servers: []
 		}),
-		settle(fetchWithConfig<{ projects: OverviewData['projects'] }>('/api/projects', 'GET'), {
+		settle(unwrap<{ projects: OverviewData['projects'] }>(api.GET('/api/projects')), {
 			projects: []
 		})
 	]);

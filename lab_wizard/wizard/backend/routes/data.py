@@ -14,6 +14,7 @@ from lab_wizard.wizard.backend.deps import (
     workspace_database,
 )
 from lab_wizard.wizard.backend.models import Env
+from fastapi.responses import Response
 
 logger = logging.getLogger("lab_wizard.wizard.backend.routes.data")
 router = APIRouter()
@@ -62,7 +63,6 @@ def api_data_point(run_id: int, seq: int, env: Env = Depends(get_env)):
 @router.get("/api/data/runs/{run_id}/export")
 def api_data_export(run_id: int, env: Env = Depends(get_env)):
     """The run as a zipped folder of CSV and YAML, as the file saver writes it."""
-    from fastapi.responses import Response
 
     content, filename = call_data_api(data_api.export_zip, workspace_database(env), run_id)
     return Response(
@@ -74,12 +74,12 @@ def api_data_export(run_id: int, env: Env = Depends(get_env)):
 
 @router.post("/api/data/plot")
 def api_data_plot(body: _SpecBody, env: Env = Depends(get_env)):
-    return call_data_api(data_api.plot, workspace_database(env), workspace_config_dir(env), body.spec)
+    return call_data_api(data_api.plot, workspace_database(env), body.spec)
 
 
 @router.post("/api/data/plot/notebook")
 def api_data_plot_notebook(body: _SpecBody, env: Env = Depends(get_env)):
-    return call_data_api(data_api.notebook, workspace_database(env), workspace_config_dir(env), body.spec)
+    return call_data_api(data_api.notebook, workspace_database(env), body.spec)
 
 
 @router.get("/api/data/devices")

@@ -44,6 +44,8 @@ from lab_wizard.wizard.backend.server_control import (
     stop_server,
     suggest_free_bind,
 )
+from lab_wizard.lib.client import server_registry
+from lab_wizard.lib.client.session import Session
 
 logger = logging.getLogger("lab_wizard.wizard.backend.routes.servers")
 router = APIRouter()
@@ -57,10 +59,6 @@ def api_local_servers(env: Env = Depends(get_env)):
     real hardware and its endpoint is not derivable from here, so the UI needs
     the machine-local registry to say which workspace owns which rack.
     """
-    from lab_wizard.lib.client.server_registry import (
-        list_local_servers,
-        local_server_endpoints,
-    )
 
     # Flagged so the UI can distinguish "our own server" from "another
     # workspace's" — the two mean different things to a user, and only the
@@ -70,10 +68,10 @@ def api_local_servers(env: Env = Depends(get_env)):
         "servers": [
             {
                 **entry,
-                "endpoints": local_server_endpoints(entry),
+                "endpoints": server_registry.local_server_endpoints(entry),
                 "is_this_workspace": entry.get("config_dir") == own,
             }
-            for entry in list_local_servers()
+            for entry in server_registry.list_local_servers()
         ]
     }
 
@@ -88,15 +86,10 @@ def api_local_server_claims():
     does not answer is reported rather than raised: one stopped daemon must not
     blank the page.
     """
-    from lab_wizard.lib.client.server_registry import (
-        list_local_servers,
-        local_server_endpoints,
-    )
-    from lab_wizard.lib.client.session import Session
 
     out = []
-    for entry in list_local_servers():
-        endpoints = local_server_endpoints(entry)
+    for entry in server_registry.list_local_servers():
+        endpoints = server_registry.local_server_endpoints(entry)
         if not endpoints:
             continue
         url = endpoints[0]
@@ -131,7 +124,6 @@ def api_force_release_claim(req: _ForceReleaseClaimRequest):
     For a run that is stuck, or whose client disappeared. The server resets the
     released instruments to baseline before anyone else can claim them.
     """
-    from lab_wizard.lib.client.session import Session
 
     try:
         session = Session(req.url, timeout_ms=10_000)
@@ -157,7 +149,6 @@ def api_release_hardware(req: _ReleaseRequest):
     wants when a local project needs the bus. The path stays servable — the next
     call through the server reopens it.
     """
-    from lab_wizard.lib.client.session import Session
 
     try:
         session = Session(req.url, timeout_ms=10_000)

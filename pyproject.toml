@@ -29,6 +29,7 @@ lab-sim = { workspace = true, editable = true }
 
 [dependency-groups]
 dev = [
+    "pytest>=8.4.1",
     "ty>=0.0.81",
     "zensical>=0.0.43",
 ]
@@ -37,6 +38,10 @@ dev = [
 # lab_procedure is a workspace member whose package lives one level down, under
 # procedure_framework/; the editable install's import hook is invisible to ty.
 extra-paths = ["procedure_framework", "simulator"]
+
+[tool.pytest.ini_options]
+# ref/ holds vendored projects with test suites of their own.
+testpaths = ["tests"]
 
 [tool.ty.src]
 # ref/ holds vendored and legacy reference code, not this project's source.

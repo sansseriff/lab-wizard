@@ -29,7 +29,8 @@
 		success: 'ok',
 		running: 'accent',
 		failed: 'crit',
-		aborted: 'warn'
+		aborted: 'warn',
+		interrupted: 'crit'
 	};
 
 	function pick(event: MouseEvent, id: number) {

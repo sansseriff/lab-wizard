@@ -34,7 +34,7 @@ DEFAULT_TEMPLATE = "{date}/{procedure}_{device}_{time}"
 class FileSettings(BaseModel):
     """Where each run's folder of CSV and YAML files goes, and what it holds."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_serialization_defaults_required=True)
 
     root: str = Field(
         default="",

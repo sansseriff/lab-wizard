@@ -11,7 +11,10 @@ from lab_wizard.lib.utilities.config_io import (
     reinitialize_instrument,
     remove_instrument,
 )
-from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
+from lab_wizard.lib.utilities.resource_catalog import (
+    get_instrument_metadata,
+    load_params_class,
+)
 from lab_wizard.wizard.backend.deps import (
     get_env,
     workspace_config_dir,
@@ -33,6 +36,15 @@ from lab_wizard.wizard.backend.transport_status import (
     conflicts_for_selection,
     duplicate_transport_check,
     transport_overview,
+)
+from lab_wizard.lib.utilities.config_io import (
+    update_instrument_params,
+    apply_discovered_children,
+)
+from lab_wizard.lib.server.registry import InstrumentRegistry
+from lab_wizard.lib.utilities.instrument_discovery import (
+    discover_with_registry,
+    draft_discovery_tree,
 )
 
 logger = logging.getLogger("lab_wizard.wizard.backend.routes.instruments")
@@ -173,8 +185,6 @@ class _UpdateInstrumentBody(BaseModel):
 
 @router.post("/api/manage-instruments/update")
 def api_update_instrument(body: _UpdateInstrumentBody, env: Env = Depends(get_env)):
-    from lab_wizard.lib.utilities.config_io import update_instrument_params
-
     config_dir = workspace_config_dir(env)
     payload = body.model_dump()
     try:
@@ -266,7 +276,6 @@ class _DiscoverBody(BaseModel):
 @router.post("/api/manage-instruments/discover")
 def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
     """Run a discovery action defined on an instrument's Params class."""
-    from lab_wizard.lib.utilities.resource_catalog import load_params_class
 
     cls = load_params_class(body.type)
     actions = {a.name: a for a in getattr(cls, "discovery_actions", lambda: [])()}
@@ -287,12 +296,6 @@ def api_discover(body: _DiscoverBody, env: Env = Depends(get_env)):
         raise HTTPException(400, str(exc)) from exc
 
     def _in_process() -> dict:
-        from lab_wizard.lib.server.registry import InstrumentRegistry
-        from lab_wizard.lib.utilities.instrument_discovery import (
-            discover_with_registry,
-            draft_discovery_tree,
-        )
-
         if draft_chain:
             registry, path = draft_discovery_tree(workspace_config_dir(env), draft_chain)
         else:
@@ -339,8 +342,6 @@ class _ApplyChildrenBody(BaseModel):
 
 @router.post("/api/manage-instruments/apply-children")
 def api_apply_children(body: _ApplyChildrenBody, env: Env = Depends(get_env)):
-    from lab_wizard.lib.utilities.config_io import apply_discovered_children
-
     config_dir = workspace_config_dir(env)
     payload = body.model_dump()
     try:

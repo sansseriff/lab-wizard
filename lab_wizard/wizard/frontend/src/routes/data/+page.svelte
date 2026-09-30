@@ -24,6 +24,7 @@
 	import RunDetails from '$lib/data/RunDetails.svelte';
 	import RunList from '$lib/data/RunList.svelte';
 	import Timeline from '$lib/data/Timeline.svelte';
+	import { errorMessage } from '$lib/api';
 	import { dataApi } from '$lib/data/api';
 	import {
 		axisLabel,
@@ -56,9 +57,7 @@
 		}
 	}
 
-	function message(e: unknown): string {
-		return (e instanceof Error ? e.message : String(e)).replace(/^Failed to fetch: HTTP \d+: /, '');
-	}
+	const message = errorMessage;
 
 	// ---- what is chosen: in the URL, so a view can be reloaded or shared ----
 	let filters = $state<Filters>(fromUrl('filters', JSON.parse, {}));
@@ -505,7 +504,7 @@
 {#if saving && detail}
 	<Modal
 		title="Save plot to {detail.run.procedure}"
-		subtitle="Every run of {detail.run.procedure}, past ones included, will offer it."
+		subtitle="Every run of {detail.run.procedure} recorded from now on will offer it. Past runs keep the plots they recorded."
 		onclose={() => (saving = null)}
 	>
 		<label class="block text-xs text-ink-2"
@@ -515,8 +514,11 @@
 		{#if detail.plots.some((p) => p.name === saving?.name.trim())}
 			<p class="mt-2 text-xs text-warn">The procedure already has a plot named this; saving replaces it.</p>
 		{/if}
-		{#if detail.definition_source === 'recorded'}
-			<p class="mt-2 text-xs text-warn">This run's procedure no longer exists, so there is nowhere to save it.</p>
+		{#if !detail.procedure_exists}
+			<p class="mt-2 text-xs text-warn">
+				There is no composed procedure named {detail.run.procedure} to save it into: it was deleted, or
+				this is a custom measurement, whose plots are its PLOTS in Python.
+			</p>
 		{/if}
 		<p class="mt-2 text-xs text-muted">
 			Saving to a built-in procedure makes this workspace's own copy of it, as any edit does.
@@ -524,7 +526,7 @@
 		{#if saving.error}<p class="mt-2 text-xs text-crit" role="alert">{saving.error}</p>{/if}
 		{#snippet footer()}
 			<button class="lw-btn" onclick={() => (saving = null)}>Cancel</button>
-			<button class="lw-btn lw-btn-primary" onclick={savePlot} disabled={detail?.definition_source === 'recorded'}
+			<button class="lw-btn lw-btn-primary" onclick={savePlot} disabled={!detail?.procedure_exists}
 				>Save</button
 			>
 		{/snippet}

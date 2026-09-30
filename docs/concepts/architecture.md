@@ -19,13 +19,14 @@ between the library and GUI.
   thin orchestration layer — almost every endpoint delegates to functions in
   `lib/utilities` or `wizard/backend`.
 
-The GUI is essentially a friendly editor for the config tree plus a code
-generator. Nothing the GUI does is magic — it writes YAML and generates Python
-you can read.
+The GUI is a friendly editor for the config tree, a code generator, a launcher
+for the projects it generates, and a viewer of the lab database they record
+into. Nothing it does is magic — it writes YAML, generates Python you can read,
+starts that Python as its own process, and reads `data/lab.db`.
 
 Installed Python and compiled frontend files are immutable package resources.
 `wizard init` creates `lab-wizard.toml` plus the mutable `config/`, `projects/`,
-`logs/` and `data/` directories outside the package. The same layout is used whether
+`logs/`, `data/` and `measurements/` directories outside the package. The same layout is used whether
 the package is installed editable from this repository or from PyPI.
 
 ## The four layers
@@ -40,6 +41,7 @@ graph TD
     BE --> GEN[wizard/backend<br/>project_generation, get_measurements]
     GEN --> MEAS[lib/procedures<br/>definitions + code generation]
     INST --> SRV[lib/server + lib/client<br/>remote control]
+    BE --> DATA[lib/data<br/>the lab database]
 ```
 
 1. **Instrument layer** (`lib/instruments`) — the typed model of hardware. Every
@@ -64,7 +66,7 @@ This pattern recurs everywhere, so internalize it early:
 | Serializable? | Yes (to/from YAML) | No |
 | Has a `type` discriminator? | Yes (`type: Literal["dbay"]`) | No |
 | Created by | parsing YAML | `params.create_inst()` / `Parent.make_child()` |
-| Knows its runtime class? | Yes, via the `inst` property | — |
+| Knows its runtime class? | Yes, via the `resource_class()` classmethod | — |
 
 A `Params` object describes *what* an instrument is and how to reach it; calling
 `create_inst()` (or `from_params(params)`) produces the live `Instrument`. This
@@ -86,7 +88,7 @@ sequenceDiagram
     W->>C: write YAML (config_io)
     U->>W: Create measurement (pick resources)
     W->>C: load_instruments + load_resources
-    W->>P: write project.yaml + <m>_setup.py + <m>.py
+    W->>P: write project.yaml + <m>_setup.py + _measurement/<m>.py
     U->>R: uv run <m>_setup.py
     R->>P: read project.yaml (params + instrument names)
     R->>C: resolve those names against config/instruments
@@ -119,10 +121,6 @@ and proxies both satisfy.
 The exception is the [embedded generation style](../wizard/measurements.md#generation-styles),
 which writes every setting into the Python so the project can run with no
 workspace at all.
-
-The measurement code is identical in both cases because it consumes instruments
-through **behavior ABCs** (`VSource`, `VSense`, `Counter`) that both real
-instruments and remote proxies satisfy.
 
 ## The three workstation roles
 

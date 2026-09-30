@@ -283,3 +283,83 @@ def test_a_project_run_records_its_run_block(tmp_path: Path):
     assert (run["operator"], run["notes"], run["project"]) == ("andrew", "first cooldown", "probe_1")
     assert json.loads(run["metadata"]) == {"cryostat": "BlueFors1"}
     assert run["definition"] is None  # a step tree with no definition behind it
+
+
+# --------------------------------------------------------------------------
+# A run whose process dies without ending it
+# --------------------------------------------------------------------------
+
+_RECORD_THEN_DIE = """
+import os, sys
+from lab_procedure import MessageBus, Point, RunStarted, StepBegan
+from lab_procedure.messages import now
+from lab_wizard.lib.data import DatabaseRecorder
+
+recorder = DatabaseRecorder(sys.argv[1])
+data, status = MessageBus(), MessageBus()
+recorder.attach(data, status)
+data.emit(RunStarted(procedure="probe"))
+status.emit(StepBegan(("sweep",), None, "sweep", True, kind="sweep"))
+data.emit(Point(seq=0, t=now(), values={"bias": 0.1, "counts": 7}))
+print("recorded", flush=True)
+sys.stdin.read()          # the test kills this process here
+"""
+
+
+def test_a_run_whose_process_is_killed_ends_interrupted(tmp_path: Path) -> None:
+    import signal
+    import subprocess
+    import sys
+
+    from lab_wizard.lib.data import find
+
+    db = tmp_path / "lab.db"
+    process = subprocess.Popen(
+        [sys.executable, "-c", _RECORD_THEN_DIE, str(db)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None and process.stdout.readline().strip() == "recorded"
+        # Alive: still running, whoever looks.
+        (run,) = find(db=db).table().to_dicts()
+        assert run["status"] == "running"
+
+        process.send_signal(signal.SIGKILL)
+        process.wait(10)
+    finally:
+        process.kill()
+
+    runs = find(db=db)
+    (run,) = runs.table().to_dicts()
+    assert run["status"] == "interrupted"
+    assert run["ended_at"] is not None
+    # Its columns survive, and it is found by filters like any ended run.
+    assert list(runs.columns()) == ["bias", "counts"]
+    assert len(find({"status": "interrupted"}, db=db)) == 1
+    (step,) = runs.steps().to_dicts()
+    assert step["status"] == "interrupted" and step["ended_at"] is not None
+
+
+def test_a_run_that_ends_normally_is_not_marked_interrupted(tmp_path: Path) -> None:
+    from lab_wizard.lib.data import find
+
+    _record(tmp_path, Record(counts=3))
+    (run,) = find(db=tmp_path / "lab.db").table().to_dicts()
+    assert run["status"] == "success"
+    assert not list((tmp_path / ".running").glob("*.lock"))
+
+
+def test_a_database_on_a_network_share_is_warned_about(tmp_path: Path, monkeypatch, caplog):
+    from lab_wizard.lib.data import network
+
+    share = (tmp_path / "share").resolve()
+    share.mkdir()
+    monkeypatch.setattr(network.sys, "platform", "darwin")
+    monkeypatch.setattr(network, "_mounts", lambda: [("/", "apfs"), (str(share), "smbfs")])
+    assert network.network_filesystem(share / "data" / "lab.db") == "smbfs"  # not created yet
+    assert network.network_filesystem(tmp_path / "local.db") is None
+
+    DatabaseRecorder(share / "lab.db").close()
+    assert "network share (smbfs)" in caplog.text

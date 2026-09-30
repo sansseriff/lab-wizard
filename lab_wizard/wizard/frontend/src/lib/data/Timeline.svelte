@@ -56,7 +56,8 @@
 	const bar: Record<string, string> = {
 		success: 'bg-accent/60',
 		failed: 'bg-crit',
-		aborted: 'bg-warn'
+		aborted: 'bg-warn',
+		interrupted: 'bg-crit'
 	};
 </script>
 

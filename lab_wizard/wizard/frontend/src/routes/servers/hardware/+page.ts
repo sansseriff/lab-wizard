@@ -1,6 +1,6 @@
 import type { PageLoad } from './$types';
 import { browser } from '$app/environment';
-import { fetchWithConfig } from '$lib/api';
+import { api, errorMessage, unwrap } from '$lib/api';
 
 export type RootStatus = {
 	root: string;
@@ -88,10 +88,10 @@ export const load: PageLoad = async () => {
 		// Fetched together so the page shows one coherent picture rather than
 		// three panels that can disagree with each other.
 		const [owner, transport, servers, claims] = await Promise.all([
-			fetchWithConfig<HardwareOwner>('/api/hardware-owner', 'GET'),
-			fetchWithConfig<TransportStatus>('/api/transport-status', 'GET'),
-			fetchWithConfig<{ servers: LocalServer[] }>('/api/local-servers', 'GET'),
-			fetchWithConfig<{ servers: ServerClaims[] }>('/api/local-servers/claims', 'GET')
+			unwrap<HardwareOwner>(api.GET('/api/hardware-owner')),
+			unwrap<TransportStatus>(api.GET('/api/transport-status')),
+			unwrap<{ servers: LocalServer[] }>(api.GET('/api/local-servers')),
+			unwrap<{ servers: ServerClaims[] }>(api.GET('/api/local-servers/claims'))
 		]);
 		return {
 			owner,
@@ -102,7 +102,7 @@ export const load: PageLoad = async () => {
 	} catch (e) {
 		return {
 			...EMPTY,
-			error: e instanceof Error ? e.message : String(e)
+			error: errorMessage(e)
 		} satisfies HardwareStatusData;
 	}
 };

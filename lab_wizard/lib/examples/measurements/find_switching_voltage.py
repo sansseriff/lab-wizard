@@ -5,27 +5,29 @@ decides as it goes. A sweep visits every value it was given; this stops at the
 first reading above a threshold, so a fast search never drives the detector
 far past where it switched.
 
-The decision lives in ``RampUntilSwitch``, a ``Step`` of our own. Its ``run()``
-is ordinary Python. Two rules make it behave like every other step:
+It is written as ``measure(resources, run)``: plain Python, a ``for`` loop and
+an ``if``. Three calls on ``run`` are all it needs:
 
-* record with ``self.context.observe({...})``. Each call that repeats a field
-  starts a new row, so one call per bias value is one row per bias value.
-* wait with ``self.sleep(seconds)``, not ``time.sleep``. It returns False when
-  the run is stopped, so Stop in the wizard and Ctrl-C in a terminal work.
+* ``with run.at(bias_voltage=bias):`` — the parameters the rows inside were
+  taken at. They are columns like a sweep's, and the Data page can draw or
+  filter by them.
+* ``run.row(sense_voltage=..., switched=...)`` — record one row. One call is
+  one row, always.
+* ``run.sleep(seconds)`` — wait, and stop promptly if the run is stopped.
 
-See ``bias_sweep.py`` for what the rest of this file declares.
+See ``bias_sweep.py`` for what the rest of this file declares, and for a
+measurement built from steps instead.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from lab_procedure import Status, Step
 from pydantic import BaseModel, Field
 
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
-from lab_wizard.lib.task_adapters.instrument_steps import SourceGuard
+from lab_wizard.lib.recording import Recording
 
 
 class Params(BaseModel):
@@ -48,37 +50,31 @@ PLOTS = [
 ]
 
 
-class RampUntilSwitch(Step):
-    """Raise the bias until the sensed voltage crosses the threshold."""
+def measure(resources: Resources, run: Recording) -> None:
+    """One run: ramp the bias until the sensed voltage crosses the threshold.
 
-    def __init__(self, source: VSource, sense: VSense, params: Params, name: str | None = None) -> None:
-        super().__init__(name=name)
-        self.source = source
-        self.sense = sense
-        self.params = params
-
-    def run(self) -> Status:
-        assert self.context is not None
-        p = self.params
-        steps = int(round((p.stop_v - p.start_v) / p.step_v))
+    The ``finally`` puts the source back at 0 V and off however the loop
+    ends — switched, gave up, failed, or stopped.
+    """
+    p = resources.params
+    source, sense = resources.voltage_source, resources.voltage_sense
+    steps = int(round((p.stop_v - p.start_v) / p.step_v))
+    source.set_voltage(p.start_v)
+    source.turn_on()
+    try:
         for i in range(steps + 1):
             # Computed from the index, so a thousand small steps do not drift.
             bias = p.start_v + i * p.step_v
-            self.source.set_voltage(bias)
-            if not self.sleep(p.settle_s):
-                return Status.ABORTED
-            sensed = self.sense.get_voltage()
+            source.set_voltage(bias)
+            run.sleep(p.settle_s)
+            sensed = sense.get_voltage()
             switched = sensed > p.threshold_v
-            self.context.observe({"bias_voltage": bias, "sense_voltage": sensed, "switched": switched})
+            with run.at(bias_voltage=bias):
+                run.row(sense_voltage=sensed, switched=switched)
             if switched:
-                return Status.SUCCESS
+                break
         # Reaching stop_v without switching is still a complete run: the rows
         # say it never switched.
-        return Status.SUCCESS
-
-
-def build_procedure(resources: Resources) -> Step:
-    return SourceGuard(
-        source=resources.voltage_source,
-        body=RampUntilSwitch(resources.voltage_source, resources.voltage_sense, resources.params),
-    )
+    finally:
+        source.set_voltage(0.0)
+        source.turn_off()

@@ -258,12 +258,13 @@ class RunFolder:
             writer.writerows([_cell(seq), *[_cell(v) for v in values]] for seq, values in rows)
 
     def _write_plot(self) -> None:
-        """The run's default plot, drawn without a display."""
+        """The run's default plot, drawn without a display, as the plot window draws it."""
         import polars as pl
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         from matplotlib.figure import Figure
 
-        from lab_wizard.lib.data.plot import default_plot, evaluate_plot, to_series
+        from lab_wizard.lib.data.plot import default_plot, derive_per_run, evaluate_plot
+        from lab_wizard.lib.plotters.draw import draw_plot
 
         spec = default_plot(self.definition, self._columns())
         if spec is None or not self.points:
@@ -273,25 +274,16 @@ class RunFolder:
             infer_schema_length=None,
             strict=False,
         )
-        derived = (self.definition or {}).get("derived") or {}
-        rows = evaluate_plot(spec, frame, params={0: self.run.get("params") or {}}, derived=derived)
+        params = {0: self.run.get("params") or {}}
+        derived = {0: (self.definition or {}).get("derived") or {}}
+        columns = self.run.get("columns") or {}
+        bins = {name: meta["bins"] for name, meta in columns.items() if isinstance(meta, dict) and meta.get("bins")}
+        rows = evaluate_plot(spec, derive_per_run(frame, derived, params), params=params, bins=bins)
         figure = Figure(figsize=(7, 4.5))
         FigureCanvasAgg(figure)
-        axes = {"y": figure.add_subplot()}
-        if spec.y2:
-            axes["y2"] = axes["y"].twinx()
-        for series in to_series(rows):
-            style = "o" if spec.kind == "scatter" or spec.connect == "none" else "-o"
-            axes[series["axis"]].plot(series["x"], series["y"], style, label=series["label"] or series["y_name"], markersize=3)
-        axes["y"].set_xlabel(spec.x)
-        axes["y"].set_ylabel(", ".join(spec.y))
-        if spec.log_x:
-            axes["y"].set_xscale("log")
-        if spec.log_y:
-            axes["y"].set_yscale("log")
-        axes["y"].set_title(spec.name or f"{self.run.get('procedure')} · {self.run.get('device') or 'no device'}")
-        if len(spec.y) + len(spec.y2) > 1:
-            figure.legend()
+        ax = figure.add_subplot()
+        draw_plot(ax, spec, rows, columns)
+        ax.set_title(spec.name or f"{self.run.get('procedure')} · {self.run.get('device') or 'no device'}")
         figure.tight_layout()
         figure.savefig(self.path / "plot.png", dpi=120)
 

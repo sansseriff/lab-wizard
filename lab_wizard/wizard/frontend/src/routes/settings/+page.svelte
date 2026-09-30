@@ -5,6 +5,7 @@
 	 * outputs); what is here applies to every project at once.
 	 */
 	import { onMount } from 'svelte';
+	import Callout from '$lib/components/Callout.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import FileSettingsForm from '$lib/settings/FileSettingsForm.svelte';
@@ -41,6 +42,10 @@
 		title="Settings"
 		lede="Choices that apply to every project in this workspace. A project's own choices live in its YAML."
 	/>
+
+	{#if paths?.database_warning}
+		<Callout tone="warn">{paths.database_warning}</Callout>
+	{/if}
 
 	<FileSettingsForm />
 

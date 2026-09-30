@@ -10,7 +10,7 @@
 	import RowContextMenu from '$lib/components/menu/RowContextMenu.svelte';
 	import type { MenuAction } from '$lib/components/menu/items';
 	import { ask } from '$lib/confirm.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage } from '$lib/api';
 	import Callout from '$lib/components/Callout.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Panel from '$lib/components/Panel.svelte';
@@ -47,11 +47,11 @@
 		});
 		if (!yes) return;
 		try {
-			await fetchWithConfig(`/api/procedures/${encodeURIComponent(p.name)}`, 'DELETE');
+			await api.DELETE('/api/procedures/{name}', { params: { path: { name: p.name } } });
 			actionError = null;
 			await invalidateAll();
 		} catch (e) {
-			actionError = e instanceof Error ? e.message : String(e);
+			actionError = errorMessage(e);
 		}
 	}
 </script>

@@ -144,15 +144,23 @@ class WaitStepParams(StepParams):
 
 
 class RetryStepParams(StepParams):
-    """Run ``child`` until it succeeds, up to ``max_attempts`` times; errors are retried too."""
+    """Run ``child`` until it succeeds, up to ``max_attempts`` times; errors are retried too.
+
+    Each attempt's rows carry ``parameter`` = 0, 1, 2 ..., so what a failed
+    attempt recorded stays in the data, apart from the attempt that succeeded.
+    """
 
     type: Literal["retry"] = "retry"
     max_attempts: Value = 3
+    parameter: str = Field(default="attempt", json_schema_extra={"column": "records"})
     child: AnyStep
 
     @classmethod
     def step_class(cls) -> StepClass:
         return Retry
+
+    def swept_parameters(self) -> tuple[str, ...]:
+        return (self.parameter,)
 
 
 class IfStepParams(StepParams):

@@ -20,8 +20,7 @@ Ownership is recorded **in the project YAML**, not passed on the command line:
 
 so a project runs the same way for everyone, is inspectable, and is
 reproducible six months later — none of which is true of a flag someone has to
-remember. An attribute with no entry defaults to ``local``, which keeps every
-existing project working untouched.
+remember. An attribute with no entry is ``local``.
 """
 
 from __future__ import annotations
@@ -52,10 +51,9 @@ class CompositeResources:
         self._local = local
         self._remotes = dict(remotes or {})
         self._sources = dict(sources or {})
-        # Where an attribute with no explicit entry comes from. ``local`` for a
-        # normal project — which is why existing projects need no mapping — and
-        # a server name for the ``--remote`` override, where every instrument
-        # is remote.
+        # Where an attribute with no explicit entry comes from: ``local`` for a
+        # project, and a server name for the ``--remote`` override, where every
+        # instrument is remote.
         self._default_source = default_source
         self._cache: dict[str, Any] = {}
 
@@ -72,9 +70,8 @@ class CompositeResources:
     ) -> "CompositeResources":
         """Build from a project's own ``instrument_sources`` mapping.
 
-        ``local`` is what local attributes resolve against — the workspace's
-        instrument tree for a current project. It defaults to the project's own
-        resources, which is where an older project carries its instruments.
+        ``local`` is what local attributes resolve against: the workspace's
+        instrument tree. ``None`` for a project that uses no local instrument.
 
         ``server_urls`` maps a source name to a URL — normally the address book
         in ``config/remote/servers.yaml``. Only servers a project actually
@@ -98,7 +95,7 @@ class CompositeResources:
             logger.info("Connected to %s (%s) for this project", name, url)
 
         return cls(
-            local=local if local is not None else project.resources,
+            local=local,
             remotes=remotes,
             sources=sources,
         )

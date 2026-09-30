@@ -16,8 +16,9 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from lab_wizard.lib.data.plot import PlotSpec, load_plot, run_plots, to_series
+from lab_wizard.lib.data.plot import PlotSpec, load_plot, run_plots
 from lab_wizard.lib.data.read import Lab
+from lab_wizard.lib.plotters.draw import draw_plot
 
 __all__ = ["draw", "main", "run_state"]
 
@@ -37,42 +38,9 @@ def run_state(db: Path, run_id: int, plot_name: str = "") -> tuple[dict[str, Any
     return summary, spec, columns
 
 
-def _label(names: list[str], columns: dict[str, Any]) -> str:
-    parts = []
-    for name in names:
-        unit = (columns.get(name) or {}).get("unit")
-        parts.append(f"{name} ({unit})" if unit else name)
-    return ", ".join(parts)
-
-
 def draw(ax: Any, spec: PlotSpec, db: Path, columns: dict[str, Any]) -> None:
-    """Draw ``spec`` on ``ax``, as the notebook export does."""
-    series_list = to_series(load_plot(spec, db))
-    ax.clear()
-    for twin in [a for a in ax.figure.axes if a is not ax]:
-        twin.remove()
-    axes = {"y": ax}
-    if spec.y2:
-        axes["y2"] = ax.twinx()
-        axes["y2"].set_ylabel(_label(spec.y2, columns))
-    if spec.kind == "waterfall":
-        for series in series_list:
-            ax.scatter(series["x"], series["y"], c=series["z"], marker="s")
-    else:
-        style = "o" if spec.kind == "scatter" or spec.connect == "none" else "-o"
-        for series in series_list:
-            axes[series["axis"]].plot(
-                series["x"], series["y"], style, markersize=3, label=series["label"] or series["y_name"]
-            )
-        if len(series_list) > 1:
-            ax.legend(loc="best", fontsize="small")
-    ax.set_xlabel(_label([spec.x], columns))
-    ax.set_ylabel(_label(spec.y, columns))
-    if spec.log_x:
-        ax.set_xscale("log")
-    if spec.log_y:
-        ax.set_yscale("log")
-    ax.grid(True, alpha=0.3)
+    """Draw ``spec`` on ``ax`` from the run as recorded so far."""
+    draw_plot(ax, spec, load_plot(spec, db), columns)
 
 
 def main(argv: list[str] | None = None) -> None:

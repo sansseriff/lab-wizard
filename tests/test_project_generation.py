@@ -126,7 +126,7 @@ def test_generate_project_writes_sources_yaml_and_setup(tmp_path: Path) -> None:
 
     setup_text = setup_path.read_text(encoding="utf-8")
     ast.parse(setup_text)
-    assert "from iv_curve import IvCurveMeasurement" in setup_text
+    assert "from _measurement.iv_curve import IvCurveMeasurement" in setup_text
     assert f"voltage_source_1 = resources.from_attribute({source_name!r})" in setup_text
     assert f"voltage_sense_1 = resources.from_attribute({sense_name!r})" in setup_text
     assert ".from_config(resources, key=" not in setup_text

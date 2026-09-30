@@ -55,14 +55,9 @@ class Params2Inst(Generic[E_co], ABC):
     def resource_class(cls) -> type[E_co]:
         """Return the runtime class described by this Params class.
 
-        The relationship belongs to the class, not to an individual config.
-        The temporary fallback keeps external Params classes using the former
-        ``inst`` property functional during the API transition.
+        The relationship belongs to the class, not to an individual config, so
+        every Params class overrides this classmethod.
         """
-        instance = cls()  # type: ignore[call-arg]
-        legacy = getattr(instance, "inst", None)
-        if isinstance(legacy, type):
-            return legacy
         raise NotImplementedError(f"{cls.__name__} must define resource_class()")
 
 

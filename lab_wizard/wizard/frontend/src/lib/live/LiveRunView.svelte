@@ -51,6 +51,7 @@
 		success: 'ok',
 		failed: 'crit',
 		aborted: 'warn',
+		interrupted: 'crit',
 		running: 'accent'
 	};
 </script>

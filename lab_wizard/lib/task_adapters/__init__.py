@@ -1,3 +1,3 @@
-from lab_wizard.lib.task_adapters.plotters import PlotterSink
+from lab_wizard.lib.task_adapters.sinks import RunInfo, RunOutputs, RunSink
 
-__all__ = ["PlotterSink"]
+__all__ = ["RunInfo", "RunOutputs", "RunSink"]

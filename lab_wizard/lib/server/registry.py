@@ -84,18 +84,14 @@ def _channel_class(parent_inst_cls: type | None) -> type | None:
 
 
 def _params_resource_class(params: Any | None) -> type | None:
-    """Resolve the class-level Params contract, with legacy extension support."""
-    if params is None:
+    """The runtime class ``params`` describes (its ``resource_class()``), or ``None``."""
+    getter = getattr(type(params), "resource_class", None) if params is not None else None
+    if not callable(getter):
         return None
-    getter = getattr(type(params), "resource_class", None)
-    if callable(getter):
-        try:
-            candidate = getter()
-            if isinstance(candidate, type):
-                return candidate
-        except (NotImplementedError, TypeError):
-            pass
-    candidate = getattr(params, "inst", None)
+    try:
+        candidate = getter()
+    except NotImplementedError:  # a Params class that has not declared one
+        return None
     return candidate if isinstance(candidate, type) else None
 
 

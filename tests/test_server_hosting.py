@@ -75,8 +75,8 @@ class _LeafParams(BaseModel):
     num_channels: ClassVar[int] = 2
     channels: dict[int, _ChannelParams] = Field(default_factory=dict)
 
-    @property
-    def inst(self) -> type:
+    @classmethod
+    def resource_class(cls) -> type:
         return _FakeLeaf
 
 
@@ -84,8 +84,8 @@ class _RootParams(BaseModel):
     attribute_name: str = ""
     children: dict[str, _LeafParams] = Field(default_factory=dict)
 
-    @property
-    def inst(self) -> type:
+    @classmethod
+    def resource_class(cls) -> type:
         return _FakeRoot
 
     def create_inst(self) -> _FakeRoot:

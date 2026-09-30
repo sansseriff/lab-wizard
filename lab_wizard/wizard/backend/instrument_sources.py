@@ -38,6 +38,14 @@ from lab_wizard.lib.client.server_registry import (
     local_server_endpoints,
 )
 from lab_wizard.lib.client.session import Session
+from lab_wizard.lib.server.registry import InstrumentRegistry
+from lab_wizard.lib.utilities.config_io import get_configured_tree
+from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
+from lab_wizard.lib.server.claims import overlaps
+from lab_wizard.wizard.backend.remote_servers import (
+    load_remote_servers,
+    add_remote_server,
+)
 
 
 logger = logging.getLogger("lab_wizard.wizard.backend.instrument_sources")
@@ -94,10 +102,6 @@ def _unique(name: str, taken: set[str]) -> str:
 
 
 def _local_source(config_dir: str) -> dict[str, Any]:
-    from lab_wizard.lib.server.registry import InstrumentRegistry
-    from lab_wizard.lib.utilities.config_io import get_configured_tree
-    from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
-
     try:
         registry = InstrumentRegistry.from_config_dir(config_dir)
         attributes = registry.list_descriptions()
@@ -144,7 +148,6 @@ def _claims_for(session: Session, name: str) -> list[dict[str, Any]]:
 
 def _mark_claimed(source: dict[str, Any]) -> None:
     """Tag each attribute a claim covers with who is holding it."""
-    from lab_wizard.lib.server.claims import overlaps
 
     units = [
         (unit, claim.get("holder") or "a run")
@@ -254,7 +257,6 @@ def list_instrument_sources(config_dir: str | Path) -> dict[str, Any]:
     conflict warning for a local selection points at it as the fix. It is also
     reported as ``own_server``.
     """
-    from lab_wizard.wizard.backend.remote_servers import load_remote_servers
 
     # Resolved, because a server advertises its resolved config dir; comparing
     # raw strings would make this workspace's own daemon look like someone
@@ -348,10 +350,6 @@ def ensure_source_registered(config_dir: str | Path, name: str, url: str) -> str
     else is never rewritten — another project may depend on it — so a suffixed
     name is allocated instead, and that is what the caller must record.
     """
-    from lab_wizard.wizard.backend.remote_servers import (
-        add_remote_server,
-        load_remote_servers,
-    )
 
     existing = {s["name"]: s["url"] for s in load_remote_servers(config_dir)}
     if existing.get(name) == url:

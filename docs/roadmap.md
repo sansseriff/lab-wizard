@@ -87,7 +87,7 @@ Most additions are drop-in, thanks to
 
 | To add… | Do this |
 |---|---|
-| A saver | A `GenericSaver` subclass, handed to `run_procedure(..., savers=[...])` |
+| A saver | A `RunSink` subclass, handed to `run_procedure(..., sinks=[...])` |
 | An instrument | A `Params`/`Instrument` pair under `lib/instruments/<vendor>/`, inheriting the right KeyLike and behavior ABC |
 | A behavior ABC | Add it under `lib/instruments/general/`, register a proxy in `lib/client/proxies/registry.py`, and add the steps that drive it |
 | A procedure step | A `*StepParams` schema in `lib/procedures/steps/` whose field names match the runtime step's constructor — the generator and the composer both pick it up with no further change |

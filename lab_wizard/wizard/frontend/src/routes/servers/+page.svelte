@@ -13,7 +13,7 @@
 	 */
 	import { untrack } from 'svelte';
 	import Tooltip from '$lib/components/Tooltip.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 	import Pill from '$lib/components/Pill.svelte';
 	import { workstation, type ServerStatus } from '$lib/stores/workstation.svelte';
 
@@ -43,21 +43,22 @@
 		await workstation.refresh();
 	}
 
-	async function serverAction(path: string, body?: Record<string, any> | null) {
+	async function serverAction(call: () => Promise<{ data?: unknown }>) {
 		serverBusy = true;
 		serverError = null;
 		try {
-			await apply(await fetchWithConfig<ServerStatus>(path, 'POST', body ?? null));
+			await apply(await unwrap<ServerStatus>(call()));
 		} catch (e) {
-			serverError = e instanceof Error ? e.message : 'Server action failed.';
+			serverError = errorMessage(e) || 'Server action failed.';
 		} finally {
 			serverBusy = false;
 		}
 	}
 
-	const startServer = () => serverAction('/api/server/start', { detached: keepAsDaemon });
-	const stopServer = () => serverAction('/api/server/stop');
-	const restartServer = () => serverAction('/api/server/restart', { detached: keepAsDaemon });
+	const startServer = () => serverAction(() => api.POST('/api/server/start', { body: { detached: keepAsDaemon } }));
+	const stopServer = () => serverAction(() => api.POST('/api/server/stop'));
+	const restartServer = () =>
+		serverAction(() => api.POST('/api/server/restart', { body: { detached: keepAsDaemon } }));
 
 	/** Become a hardware host, serving this machine over ipc with no bind.
 	 *
@@ -69,9 +70,9 @@
 		serverBusy = true;
 		serverError = null;
 		try {
-			await apply(await fetchWithConfig<ServerStatus>('/api/server/enable-hosting', 'POST', null));
+			await apply(await unwrap<ServerStatus>(api.POST('/api/server/enable-hosting')));
 		} catch (e) {
-			serverError = e instanceof Error ? e.message : 'Could not enable hosting.';
+			serverError = errorMessage(e) || 'Could not enable hosting.';
 		} finally {
 			serverBusy = false;
 		}
@@ -79,11 +80,11 @@
 
 	async function findFreePort() {
 		try {
-			const res = await fetchWithConfig<{ bind: string }>('/api/server/suggest-port', 'GET');
+			const res = await unwrap<{ bind: string }>(api.GET('/api/server/suggest-port'));
 			bindDraft = res.bind;
 			editingBind = true;
 		} catch (e) {
-			serverError = e instanceof Error ? e.message : 'Could not find a free port.';
+			serverError = errorMessage(e) || 'Could not find a free port.';
 		}
 	}
 
@@ -92,11 +93,11 @@
 		serverError = null;
 		try {
 			await apply(
-				await fetchWithConfig<ServerStatus>('/api/server/bind', 'PUT', { bind: bindDraft.trim() })
+				await unwrap<ServerStatus>(api.PUT('/api/server/bind', { body: { bind: bindDraft.trim() } }))
 			);
 			editingBind = false;
 		} catch (e) {
-			serverError = e instanceof Error ? e.message : 'Could not save bind.';
+			serverError = errorMessage(e) || 'Could not save bind.';
 		} finally {
 			serverBusy = false;
 		}

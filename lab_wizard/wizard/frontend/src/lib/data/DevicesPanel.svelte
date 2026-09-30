@@ -8,6 +8,7 @@
 	import { onMount } from 'svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import { whereValue } from '$lib/procedures/model';
+	import { errorMessage } from '$lib/api';
 	import { dataApi } from './api';
 	import { show, type Device } from './model';
 
@@ -64,7 +65,7 @@
 			await load(saved.name);
 			onchanged();
 		} catch (e) {
-			error = e instanceof Error ? e.message.replace(/^Failed to fetch: HTTP \d+: /, '') : String(e);
+			error = errorMessage(e);
 		} finally {
 			saving = false;
 		}

@@ -7,10 +7,10 @@ else (a notebook, a folder of files). It also keeps the device registry, whose
 properties are filters on every run of that device, saves a plot the page
 built back into its procedure, and keeps the workspace's file-saving settings.
 
-Plots and derived columns come from the procedure's **current** definition, so
-a plot or a derived column added to a procedure applies to the runs recorded
-before it; a run whose procedure has since been deleted falls back to the
-definition it recorded (``plans/semantic_data_plan.md`` §9).
+Everything a run is drawn with — its plots and its derived columns — comes
+from the definition it recorded, never from its procedure as it is now. A past
+run draws the same however its procedure has changed since, or whether it
+still exists.
 
 Every function takes the database path, and the workspace's config directory
 where it needs procedures, so the routes in ``main.py`` stay thin and tests can
@@ -28,13 +28,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import polars as pl
+
 from lab_wizard.lib.data.facets import metadata_units, write_run_facets
 from lab_wizard.lib.data.plot import (
     PlotSpec,
+    RunsContext,
+    draw_rows,
     line_shape,
-    load_plot,
     notebook_source,
     run_plots,
+    runs_context,
     to_series,
 )
 from lab_wizard.lib.data.read import Lab
@@ -56,6 +60,8 @@ from lab_wizard.lib.procedures.storage import (
     procedure_origin,
     save_procedure,
 )
+from lab_wizard.lib.data.expressions import ExpressionError
+from lab_wizard.lib.procedures.spec import ProcedureError
 
 __all__ = [
     "DataRequestError",
@@ -187,22 +193,14 @@ def run_list(db: Path, filters: Mapping[str, Any], *, page: int = 1, page_size: 
 # --------------------------- one run ---------------------------
 
 
-def _current_definition(config_dir: str | Path, procedure: str) -> dict[str, Any] | None:
-    try:
-        return load_procedure(config_dir, procedure).model_dump(mode="json")
-    except ValueError:  # deleted, or no longer valid
-        return None
-
-
 def run_detail(db: Path, config_dir: str | Path, run_id: int) -> dict[str, Any]:
-    """Everything about one run, with the plots and derived columns to show it by."""
+    """Everything about one run, with the plots and derived columns it recorded."""
     lab = Lab(db)
     runs = lab.runs([run_id])
     info = runs.info(run_id)
     (summary,) = runs.table().to_dicts()
 
-    current = _current_definition(config_dir, info["procedure"])
-    definition = current if current is not None else info["definition"]
+    definition = info["definition"]
     columns = info["columns"] or {}
     plots = run_plots(definition, list(columns))
     return {
@@ -212,9 +210,9 @@ def run_detail(db: Path, config_dir: str | Path, run_id: int) -> dict[str, Any]:
         "columns": columns,
         "derived": (definition or {}).get("derived") or {},
         "plots": [p.model_copy(update={"runs": [run_id]}).model_dump(mode="json") for p in plots],
-        # "procedure": today's definition; "recorded": the one the run was made
-        # with, because the procedure is gone; None: the run recorded none.
-        "definition_source": "procedure" if current is not None else ("recorded" if definition else None),
+        # Whether a composed procedure of this name exists now, for a plot
+        # built on the page to be saved into, for the runs it records next.
+        "procedure_exists": procedure_origin(config_dir, info["procedure"]) is not None,
     }
 
 
@@ -247,48 +245,30 @@ def _spec(data: Mapping[str, Any]) -> PlotSpec:
     return spec
 
 
-def _derived_for(lab: Lab, config_dir: str | Path, run_ids: list[int]) -> dict[str, str]:
-    """The derived columns of these runs' procedures, as they are now; first run's first."""
-    out: dict[str, str] = {}
-    current: dict[str, dict[str, Any] | None] = {}
-    runs = lab.runs(run_ids)
-    for run_id, procedure in zip(runs.table()["id"], runs.table()["procedure"]):
-        if procedure not in current:
-            current[procedure] = _current_definition(config_dir, procedure)
-        definition = current[procedure]
-        if definition is None:
-            definition = runs.info(run_id)["definition"]
-        for name, expression in ((definition or {}).get("derived") or {}).items():
-            out.setdefault(name, expression)
-    return out
-
-
-def plot(db: Path, config_dir: str | Path, data: Mapping[str, Any]) -> dict[str, Any]:
-    """The series ``data`` (a plot spec) draws, the units of its columns, and the lines' shape."""
-    from lab_wizard.lib.data.expressions import ExpressionError
-
-    spec = _spec(data)
-    lab = Lab(db)
-    derived = _derived_for(lab, config_dir, spec.runs)
+def drawn(spec: PlotSpec, points: pl.DataFrame, context: RunsContext) -> dict[str, Any]:
+    """What the page draws: the series, the units of their columns, and the lines' shape."""
     try:
-        rows = load_plot(spec, db, derived=derived)
+        rows = draw_rows(spec, points, context)
     except ExpressionError as e:
         raise DataRequestError(str(e)) from e
-    runs = lab.runs(spec.runs)
-    units = {name: meta.get("unit") for name, meta in runs.columns().items() if isinstance(meta, dict)}
     # How the rows fall into lines, so the page can say what it drew.
-    return {"series": to_series(rows), "units": units, "shape": line_shape(rows)}
+    return {"series": to_series(rows), "units": context.units, "shape": line_shape(rows)}
 
 
-def notebook(db: Path, config_dir: str | Path, data: Mapping[str, Any]) -> dict[str, Any]:
+def plot(db: Path, data: Mapping[str, Any]) -> dict[str, Any]:
+    """The series ``data`` (a plot spec) draws, the units of its columns, and the lines' shape."""
+    spec = _spec(data)
+    lab = Lab(db)
+    return drawn(spec, lab.runs(spec.runs).points(), runs_context(lab, spec.runs, spec.label))
+
+
+def notebook(db: Path, data: Mapping[str, Any]) -> dict[str, Any]:
     """Python that draws ``data`` in a notebook, exactly as the page does.
 
-    The procedures' current derived columns go into the spec itself, so the
-    notebook does not depend on the procedure staying as it is.
+    ``load_plot`` takes each run's derived columns from what it recorded, as
+    the page does, so the notebook needs nothing else.
     """
-    spec = _spec(data)
-    derived = {**_derived_for(Lab(db), config_dir, spec.runs), **spec.derived}
-    return {"source": notebook_source(spec.model_copy(update={"derived": derived}), db)}
+    return {"source": notebook_source(_spec(data), db)}
 
 
 def save_plot_to_procedure(
@@ -299,7 +279,6 @@ def save_plot_to_procedure(
     Saving to a built-in writes this workspace's own copy of it, as any edit of
     a built-in does.
     """
-    from lab_wizard.lib.procedures.spec import ProcedureError
 
     definition = load_procedure(config_dir, procedure)
     try:

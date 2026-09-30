@@ -30,7 +30,9 @@ from uuid import uuid4
 
 from uvicorn import Config, Server
 
+from lab_wizard.lib.data.network import warn_if_networked
 from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
+from lab_wizard.wizard.backend.errors import install_error_handlers
 from lab_wizard.wizard.backend.location import WEB_DIR
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
 from lab_wizard.wizard.backend.models import Env
@@ -66,6 +68,8 @@ async def lifespan(app: FastAPI):
     # the health-poll in start_window therefore returns OK at exactly the
     # right moment.
     await asyncio.to_thread(get_instrument_metadata)
+    if env.data_dir is not None:
+        await asyncio.to_thread(warn_if_networked, env.data_dir)
 
     # Find-or-start this workspace's instrument server, so hardware has exactly
     # one owner and the wizard is a client of it. Off the event loop because
@@ -100,6 +104,7 @@ async def lifespan(app: FastAPI):
 
 # Pass the lifespan manager to the FastAPI app
 app = FastAPI(lifespan=lifespan)
+install_error_handlers(app)
 
 
 @app.middleware("http")

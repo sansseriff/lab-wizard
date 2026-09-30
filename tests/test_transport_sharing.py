@@ -26,8 +26,8 @@ def test_defaults_are_conservative():
         type: Literal["bare"] = "bare"
         children: dict = Field(default_factory=dict)
 
-        @property
-        def inst(self):
+        @classmethod
+        def resource_class(cls):
             return object
 
         def create_inst(self):
@@ -86,8 +86,8 @@ class _Root(BaseModel):
     key: str | None = None
     children: dict = Field(default_factory=dict)
 
-    @property
-    def inst(self):
+    @classmethod
+    def resource_class(cls):
         return object
 
     def create_inst(self) -> Any:
@@ -150,8 +150,8 @@ def test_root_without_declarations_still_registers():
         type: str = "undeclared"
         children: dict = Field(default_factory=dict)
 
-        @property
-        def inst(self):
+        @classmethod
+        def resource_class(cls):
             return object
 
         def create_inst(self):

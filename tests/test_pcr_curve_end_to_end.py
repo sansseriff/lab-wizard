@@ -350,7 +350,7 @@ def test_generated_setup_wires_the_simulated_counter(tmp_path: Path, rig) -> Non
     ast.parse(setup_text)
     ast.parse(measurement_text)
 
-    assert "from pcr_curve import PcrCurveMeasurement" in setup_text
+    assert "from _measurement.pcr_curve import PcrCurveMeasurement" in setup_text
     assert "class PcrCurveMeasurement" in measurement_text
     config = load_instruments(tmp_path / "config")
     counter_name = config[rig.counter].channels[0].attribute_name

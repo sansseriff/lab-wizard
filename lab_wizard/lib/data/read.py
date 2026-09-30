@@ -15,6 +15,7 @@ Nobody writes SQL; it all lives here.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from collections.abc import Iterable, Mapping
 from datetime import datetime
@@ -25,8 +26,11 @@ import polars as pl
 
 from lab_wizard.lib.data.expressions import derive
 from lab_wizard.lib.data.facets import facet_value
+from lab_wizard.lib.data.recorder import settle_interrupted_runs
 from lab_wizard.lib.data.schema import DATABASE_NAME, open_database
 from lab_wizard.lib.workspace import find_workspace
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["Lab", "Runs", "facets", "find", "lab_database"]
 
@@ -90,7 +94,14 @@ class Lab:
         self.path = Path(db) if db is not None else lab_database()
         if not self.path.is_file():
             raise FileNotFoundError(f"No lab database at {self.path}")
-        open_database(self.path).close()  # refuses a wrong schema version up front
+        connection = open_database(self.path)  # refuses a wrong schema version up front
+        try:
+            # A run whose process died reads as running until someone notices.
+            settle_interrupted_runs(connection, self.path)
+        except sqlite3.OperationalError:
+            logger.warning("Could not close interrupted runs in %s (read-only?)", self.path, exc_info=True)
+        finally:
+            connection.close()
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
         connection = open_database(self.path)
@@ -238,6 +249,20 @@ class Runs:
         where, ids = self._where()
         return {r[0]: json.loads(r[1] or "{}") for r in self.lab.query(f"SELECT id, params FROM runs WHERE id IN {where}", ids)}
 
+    def derived_by_run(self) -> dict[int, dict[str, str]]:
+        """``{run_id: {name: expression}}``: the ``derived:`` columns each run recorded.
+
+        Each run is computed with its own, so two runs whose procedure changed
+        a formula in between are each drawn as they were measured.
+        """
+        if not self.ids:
+            return {}
+        where, ids = self._where()
+        return {
+            run_id: dict(((json.loads(text) or {}).get("derived") or {}) if text else {})
+            for run_id, text in self.lab.query(f"SELECT id, definition FROM runs WHERE id IN {where}", ids)
+        }
+
     def derived(self) -> dict[str, str]:
         """The ``derived:`` columns the runs' procedures declare, first run's first."""
         out: dict[str, str] = {}
@@ -249,12 +274,14 @@ class Runs:
                 out.setdefault(name, expression)
         return out
 
-    def points(self, derived: Mapping[str, str] | None = None) -> pl.DataFrame:
+    def points(self, derived: Mapping[str, str] | None = None, *, after: int = -1) -> pl.DataFrame:
         """One row per point: ``run_id``, ``seq``, ``t``, then every column.
 
         Columns come in the runs' declared order. A value a row did not record
         is null. ``derived`` adds computed columns (see ``expressions``); the
         runs' own ``derived:`` columns are added with ``points(self.derived())``.
+        ``after`` reads only the points after that ``seq``: what a run being
+        followed has recorded since it was last read.
         """
         if not self.ids:
             return pl.DataFrame(schema={"run_id": pl.Int64, "seq": pl.Int64, "t": pl.Datetime("us", "UTC")})
@@ -262,7 +289,8 @@ class Runs:
         names = list(self.columns())
         records = []
         for run_id, seq, t, values in self.lab.query(
-            f'SELECT run_id, seq, t, "values" FROM points WHERE run_id IN {where} ORDER BY run_id, seq', params
+            f'SELECT run_id, seq, t, "values" FROM points WHERE run_id IN {where} AND seq > ? ORDER BY run_id, seq',
+            [*params, after],
         ):
             data = json.loads(values)
             for name in data:

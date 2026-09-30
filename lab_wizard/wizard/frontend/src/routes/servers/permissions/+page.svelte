@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import IconButton from '$lib/components/IconButton.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api } from '$lib/api';
 	import { workstation } from '$lib/stores/workstation.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -170,7 +170,7 @@
 		statusMessage = null;
 		try {
 			const permissions: Permissions = { state_defaults: stateDefaults, rules };
-			await fetchWithConfig('/api/permissions', 'PUT', { permissions });
+			await api.PUT('/api/permissions', { body: { permissions } });
 			// The chrome's rule count comes from the same status call, so refresh
 			// it here rather than leaving the topbar reporting a stale number.
 			await workstation.refresh();

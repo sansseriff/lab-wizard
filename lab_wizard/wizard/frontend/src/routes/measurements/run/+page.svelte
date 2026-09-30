@@ -12,10 +12,11 @@
 	 * live view reads it from the lab database as it records (backend/live.py).
 	 */
 	import '$lib/procedures/composer.css';
-	import { onDestroy, onMount } from 'svelte';
+	import { onDestroy, untrack } from 'svelte';
 	import { page } from '$app/state';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, ApiError, errorMessage, unwrap } from '$lib/api';
 	import Callout from '$lib/components/Callout.svelte';
+	import Combobox from '$lib/components/Combobox.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import Select from '$lib/components/Select.svelte';
@@ -77,7 +78,7 @@
 		try {
 			show(await runApi.settings(project));
 		} catch (e) {
-			loadError = e instanceof Error ? e.message.replace(/^Failed to fetch: HTTP \d+: /, '') : String(e);
+			loadError = errorMessage(e);
 		}
 	}
 
@@ -86,13 +87,13 @@
 		saveMessage = '';
 		serverProblems = {};
 		try {
-			const result = await runApi.save(project, mode === 'yaml' ? { yaml: yamlText } : { run, params, outputs });
-			if (result.ok) {
-				show(result.settings);
-				return true;
+			show(await runApi.save(project, mode === 'yaml' ? { yaml: yamlText } : { run, params, outputs }));
+			return true;
+		} catch (e) {
+			saveMessage = errorMessage(e);
+			if (e instanceof ApiError) {
+				serverProblems = Object.fromEntries(e.problems.map((p) => [pathKey(p.path), p.message]));
 			}
-			saveMessage = result.message;
-			serverProblems = Object.fromEntries(result.problems.map((p) => [pathKey(p.path), p.message]));
 			return false;
 		} finally {
 			saving = false;
@@ -116,15 +117,30 @@
 			const { facets } = await dataApi.facets({});
 			const values = (key: string) => facets.find((f) => f.key === key)?.values.map((v) => v.value) ?? [];
 			recorded = Object.fromEntries(facets.filter((f) => f.key.startsWith('run.')).map((f) => [f.key, f.values.map((v) => v.value)]));
-			devices = values('device');
 			operators = values('operator');
 		} catch {
 			// No runs yet: nothing to suggest.
 		}
+		try {
+			// Every device the lab has registered, measured yet or not.
+			devices = (await dataApi.devices()).devices.map((d) => d.name);
+		} catch {
+			devices = [];
+		}
 	}
 
 	// ---- running ----
-	let status = $state<LaunchStatus>({ state: 'idle' });
+	const IDLE: LaunchStatus = {
+		state: 'idle',
+		launch_id: null,
+		pid: null,
+		started_at: null,
+		run_id: null,
+		exit_code: null,
+		log: null,
+		log_file: null
+	};
+	let status = $state<LaunchStatus>(IDLE);
 	let lastRunId = $state<number | null>(null);
 	let runError = $state('');
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -163,7 +179,7 @@
 			status = await runApi.launch(project);
 			poll();
 		} catch (e) {
-			runError = e instanceof Error ? e.message.replace(/^Failed to fetch: HTTP \d+: /, '') : String(e);
+			runError = errorMessage(e);
 		}
 	}
 
@@ -171,22 +187,35 @@
 		try {
 			status = await runApi.stop(project);
 		} catch (e) {
-			runError = e instanceof Error ? e.message.replace(/^Failed to fetch: HTTP \d+: /, '') : String(e);
+			runError = errorMessage(e);
 		}
 	}
 
 	// ---- no project chosen: pick one ----
 	let projects = $state<{ name: string; measurement: string | null }[]>([]);
 
-	onMount(async () => {
-		if (!project) {
-			projects = (await fetchWithConfig<{ projects: typeof projects }>('/api/projects', 'GET')).projects;
+	// Keyed on the project, not on mount: choosing one from the list below stays
+	// on this route, so SvelteKit keeps the component and only the query changes.
+	$effect(() => {
+		const name = project;
+		untrack(() => open(name));
+	});
+	onDestroy(() => clearTimeout(timer));
+
+	async function open(name: string) {
+		clearTimeout(timer);
+		settings = null;
+		loadError = '';
+		runError = '';
+		status = IDLE;
+		lastRunId = null;
+		if (!name) {
+			projects = (await unwrap<{ projects: typeof projects }>(api.GET('/api/projects'))).projects;
 			return;
 		}
 		await Promise.all([load(), findLastRun(), loadSuggestions()]);
-		poll();
-	});
-	onDestroy(() => clearTimeout(timer));
+		if (name === project) poll();
+	}
 
 	const stateTone = { idle: 'neutral', starting: 'accent', running: 'accent', ended: 'neutral' } as const;
 	const stateLabel = $derived(
@@ -290,10 +319,21 @@
 										<h3 class="text-2xs font-semibold uppercase tracking-[0.09em] text-muted">This run</h3>
 										<div>
 											<label class="lw-label" for="run-device">Device under test</label>
-											<input id="run-device" class="lw-input mono" list="known-devices" placeholder="A7" bind:value={() => run.device ?? '', (v) => (run.device = v.trim() ? v : null)} />
+											<Combobox
+												id="run-device"
+												mono
+												value={run.device}
+												options={devices.map((d) => ({ value: d, label: d }))}
+												onValueChange={(d) => (run.device = d)}
+												noneLabel="No device"
+											>
+												{#snippet empty(search)}
+													No device named “{search}”. Register it under
+													<a class="underline" href="/data">Data → Devices</a>.
+												{/snippet}
+											</Combobox>
 										</div>
 										{#if serverProblems['run.device']}<p class="text-fine text-crit">{serverProblems['run.device']}</p>{/if}
-										<datalist id="known-devices">{#each devices as d (d)}<option value={d}></option>{/each}</datalist>
 										<div>
 											<label class="lw-label" for="run-operator">Operator</label>
 											<input id="run-operator" class="lw-input" list="known-operators" bind:value={() => run.operator ?? '', (v) => (run.operator = v.trim() ? v : null)} />

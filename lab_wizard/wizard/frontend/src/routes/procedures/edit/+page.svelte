@@ -13,7 +13,7 @@
 	import { queryChoice, setQuery } from '$lib/url';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { ask, guardNavigation } from '$lib/confirm.svelte';
-	import { fetchWithConfig } from '$lib/api';
+	import { api, errorMessage, unwrap } from '$lib/api';
 	import Callout from '$lib/components/Callout.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Panel from '$lib/components/Panel.svelte';
@@ -106,21 +106,18 @@
 		const snapshot = $state.snapshot(editor.definition);
 		const savedName = snapshot.name;
 		try {
-			await fetchWithConfig(`/api/procedures/${encodeURIComponent(savedName)}`, 'PUT', {
-				definition: snapshot
-			});
+			await api.PUT('/api/procedures/{name}', { params: { path: { name: savedName } }, body: { definition: snapshot } });
 			let text = `Saved to config/procedures/${savedName}.yml.`;
 			if (previous && previous !== savedName && previousOrigin === 'workspace') {
-				await fetchWithConfig(`/api/procedures/${encodeURIComponent(previous)}`, 'DELETE');
+				await api.DELETE('/api/procedures/{name}', { params: { path: { name: previous } } });
 				text = `Renamed ${previous} to ${savedName}.`;
 			}
 			editor.markSaved('workspace', snapshot);
 			if (previous !== savedName) {
 				hasBuiltin = false;
 				try {
-					const detail = await fetchWithConfig<{ has_builtin: boolean }>(
-						`/api/procedures/${encodeURIComponent(savedName)}`,
-						'GET'
+					const detail = await unwrap<{ has_builtin: boolean }>(
+						api.GET('/api/procedures/{name}', { params: { path: { name: savedName } } })
 					);
 					hasBuiltin = detail.has_builtin;
 				} catch {
@@ -130,7 +127,7 @@
 			setQuery({ name: savedName, from: null });
 			saveMessage = { tone: 'ok', text };
 		} catch (e) {
-			saveMessage = { tone: 'crit', text: e instanceof Error ? e.message : String(e) };
+			saveMessage = { tone: 'crit', text: errorMessage(e) };
 		} finally {
 			saving = false;
 		}
@@ -155,13 +152,13 @@
 		yamlError = null;
 		const source = editor.json;
 		try {
-			const out = await fetchWithConfig<{ yaml: string }>('/api/procedures/to-yaml', 'POST', {
-				definition: JSON.parse(source)
-			});
+			const out = await unwrap<{ yaml: string }>(
+				api.POST('/api/procedures/to-yaml', { body: { definition: JSON.parse(source) } })
+			);
 			yamlText = yamlBaseline = out.yaml;
 			yamlSourceJson = source;
 		} catch (e) {
-			yamlError = e instanceof Error ? e.message : String(e);
+			yamlError = errorMessage(e);
 		} finally {
 			yamlBusy = false;
 		}
@@ -184,14 +181,12 @@
 		yamlBusy = true;
 		yamlError = null;
 		try {
-			const out = await fetchWithConfig<{ definition: Definition }>(
-				'/api/procedures/from-yaml',
-				'POST',
-				{ yaml: yamlText }
+			const out = await unwrap<{ definition: Definition }>(
+				api.POST('/api/procedures/from-yaml', { body: { yaml: yamlText } })
 			);
-			const checked = await fetchWithConfig<CheckResult>('/api/procedures/check', 'POST', {
-				definition: out.definition
-			});
+			const checked = await unwrap<CheckResult>(
+				api.POST('/api/procedures/check', { body: { definition: out.definition } })
+			);
 			if (!checked.ok) throw new Error(checked.problems.map(problemLabel).join('\n'));
 			if (editor.json !== source)
 				throw new Error(
@@ -210,7 +205,7 @@
 			yamlSourceJson = editor.json;
 			tab = 'compose';
 		} catch (e) {
-			yamlError = e instanceof Error ? e.message : String(e);
+			yamlError = errorMessage(e);
 		} finally {
 			yamlBusy = false;
 		}
@@ -331,7 +326,7 @@
 			}))
 		)
 			return;
-		await fetchWithConfig(`/api/procedures/${encodeURIComponent(name)}`, 'DELETE');
+		await api.DELETE('/api/procedures/{name}', { params: { path: { name } } });
 		editor.savedJson = editor.json; // leaving is intended
 		location.href = `/procedures/edit?name=${encodeURIComponent(name)}`;
 	}

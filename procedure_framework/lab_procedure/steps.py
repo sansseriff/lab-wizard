@@ -235,16 +235,21 @@ class Retry(Step):
     A child that returns FAILED *or raises* is tried again — a counter timeout
     is exactly the failure worth retrying. After the last attempt the final
     exception is re-raised, or FAILED returned.
+
+    Each attempt binds ``parameter`` to 0, 1, 2 ..., as a repeat does: what a
+    failed attempt recorded is still data, and the binding keeps it apart from
+    the attempt that succeeded.
     """
 
     determinate = False
 
-    def __init__(self, max_attempts: int, child: Step, name: str | None = None) -> None:
+    def __init__(self, max_attempts: int, child: Step, name: str | None = None, *, parameter: str = "attempt") -> None:
         super().__init__(name=name)
         if max_attempts < 1:
             raise ValueError("Retry max_attempts must be at least 1")
         self.max_attempts = max_attempts
         self.child = child
+        self.parameter = parameter
         self.add_child(child)
 
     def run(self) -> Status:
@@ -255,7 +260,8 @@ class Retry(Step):
                 return Status.ABORTED
             last_attempt = attempt == self.max_attempts - 1
             try:
-                status = self.child.execute(self.context, self.node_id, iteration=attempt)
+                with self.context.bound_parameter(self.parameter, attempt):
+                    status = self.child.execute(self.context, self.node_id, iteration=attempt)
             except Exception:
                 if last_attempt:
                     raise

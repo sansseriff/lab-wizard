@@ -151,3 +151,24 @@ def test_the_bias_sweep_example_runs_every_bias(workspace, rig):
     _run_script(out)
     rows = find(db=ws.data_dir / "lab.db", procedure="bias_sweep").points()
     assert rows["bias_voltage"].to_list() == [0.0, 0.01, 0.02]
+
+
+def test_a_measurement_named_like_a_standard_module_does_not_shadow_it(workspace, rig):
+    """It is loaded by path, in the wizard and in its project, never imported by its bare name."""
+    ws, client = workspace
+    source = (ws.measurements_dir / "bias_sweep.py").read_text(encoding="utf-8")
+    (ws.measurements_dir / "queue.py").write_text(source, encoding="utf-8")
+    out = _create(client, rig, "queue")
+    setup = Path(out["setup_file"]).read_text(encoding="utf-8")
+    assert "load_module(" in setup and not (Path(out["project_dir"]) / "queue.py").exists()
+    _set_params(Path(out["yaml_file"]), {"bias": {"mode": "explicit", "values": [0.0, 0.01]}, "settle_s": 0.0})
+    _run_script(out)  # the setup's own imports (logging, threading) use the real queue module
+    runs = find(db=ws.data_dir / "lab.db", procedure="queue")
+    assert runs.table()["status"].to_list() == ["success"]
+
+
+def test_a_file_name_that_is_not_a_python_name_is_listed_with_how_to_fix_it(tmp_path: Path):
+    ws, _ = initialize_workspace(tmp_path)
+    (ws.measurements_dir / "bias-sweep.py").write_text("x = 1\n", encoding="utf-8")
+    found = list_custom_measurements(ws.measurements_dir)
+    assert "rename it, e.g. bias_sweep.py" in found["bias-sweep"]

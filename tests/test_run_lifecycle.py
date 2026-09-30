@@ -18,7 +18,7 @@ from lab_wizard.lib.client.proxies.base import RemoteOpaque
 from lab_wizard.lib.client.session import Session
 from lab_wizard.lib.instruments.general.counter import StandInCounter
 from lab_wizard.lib.instruments.general.vsource import StandInVSource
-from lab_wizard.lib.savers.saver import StandInSaver
+from lab_wizard.lib.task_adapters.sinks import StandInSink
 from lab_wizard.lib.task_adapters.lifecycle import RunLifecycle, bound_instruments
 
 
@@ -73,7 +73,7 @@ def _lifecycle(events: list[str], *, claims=None, outcome=Status.SUCCESS, source
 
     def resolve() -> Resources:
         events.append("resolve")
-        return Resources(source=source, counter=Counter(events), savers=[StandInSaver()])
+        return Resources(source=source, counter=Counter(events), savers=[StandInSink()])
 
     def execute(_resources: Resources) -> Status:
         events.append("execute")
@@ -186,7 +186,7 @@ def test_bound_instruments_takes_behaviors_from_fields_and_lists_once_each():
 
     counters = [Counter(events), Counter(events)]
     found = bound_instruments(
-        Twice(bias=source, also_bias=source, detectors=counters, savers=[StandInSaver()], params={})
+        Twice(bias=source, also_bias=source, detectors=counters, savers=[StandInSink()], params={})
     )
     assert found == [source, *counters]
 

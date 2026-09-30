@@ -26,9 +26,56 @@ from lab_procedure.messages import NodeId
 
 from lab_wizard.lib.data.encoding import to_json
 from lab_wizard.lib.data.facets import write_run_facets
+from lab_wizard.lib.data.network import warn_if_networked
 from lab_wizard.lib.data.schema import open_database
+from lab_wizard.lib.utilities.process_lock import HeldLock, hold, is_held
 
-__all__ = ["DatabaseRecorder"]
+__all__ = ["INTERRUPTED", "DatabaseRecorder", "run_lock_path", "settle_interrupted_runs"]
+
+# The status of a run whose process ended without recording how the run ended.
+INTERRUPTED = "interrupted"
+
+
+def run_lock_path(db: str | Path, run_id: int) -> Path:
+    """The file a run's process holds locked while it records into ``db``."""
+    db = Path(db)
+    return db.parent / ".running" / f"{db.stem}-{run_id}.lock"
+
+
+def settle_interrupted_runs(connection: sqlite3.Connection, db: str | Path) -> list[int]:
+    """Close every ``running`` run whose process is gone; returns their ids.
+
+    Such a run ends ``interrupted``, at the last time it recorded anything, and
+    so do its steps that never ended. Its facets are written then, as they
+    would have been had it ended normally.
+    """
+    orphans = [
+        run_id
+        for (run_id,) in connection.execute("SELECT id FROM runs WHERE status = 'running'")
+        if not is_held(run_lock_path(db, run_id))
+    ]
+    for run_id in orphans:
+        (last,) = connection.execute(
+            """SELECT MAX(t) FROM (
+                   SELECT started_at AS t FROM runs WHERE id = :id
+                   UNION ALL SELECT t FROM points WHERE run_id = :id
+                   UNION ALL SELECT started_at FROM steps WHERE run_id = :id
+                   UNION ALL SELECT ended_at FROM steps WHERE run_id = :id)""",
+            {"id": run_id},
+        ).fetchone()
+        with connection:
+            connection.execute(
+                "UPDATE steps SET ended_at = ?, status = ? WHERE run_id = ? AND ended_at IS NULL",
+                (last, INTERRUPTED, run_id),
+            )
+            connection.execute(
+                "UPDATE runs SET status = ?, ended_at = ? WHERE id = ? AND status = 'running'",
+                (INTERRUPTED, last, run_id),
+            )
+            write_run_facets(connection, run_id)
+        run_lock_path(db, run_id).unlink(missing_ok=True)
+        logger.warning("Run %s in %s stopped recording without ending; marked %s", run_id, db, INTERRUPTED)
+    return orphans
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +85,25 @@ class DatabaseRecorder:
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        warn_if_networked(self.path)
         self.connection: sqlite3.Connection = open_database(self.path)
         self.run_id: int | None = None
         self._columns: dict[str, Any] = {}
         self._steps: dict[NodeId, list[int]] = {}
+        self._lock: HeldLock | None = None
 
     def attach(self, data_bus: MessageBus, status_bus: MessageBus) -> None:
         data_bus.subscribe((RunStarted, Point, RunEnded), self.handle)
         status_bus.subscribe((StepBegan, StepEnded), self.handle)
 
     def close(self) -> None:
+        self._release()
         self.connection.close()
+
+    def _release(self) -> None:
+        if self._lock is not None:
+            self._lock.release()
+            self._lock = None
 
     def handle(self, message: object) -> None:
         if isinstance(message, RunStarted):
@@ -73,6 +128,7 @@ class DatabaseRecorder:
         return self.connection.execute("SELECT id FROM devices WHERE name = ?", (name,)).fetchone()["id"]
 
     def _run_started(self, message: RunStarted) -> None:
+        self._release()
         self._columns = dict(message.columns)
         self._steps = {}
         with self.connection:
@@ -94,18 +150,27 @@ class DatabaseRecorder:
                     to_json(self._columns),
                 ),
             )
+            # Taken before the row is committed, so no reader ever sees this
+            # run as running without its lock held.
+            self._lock = hold(run_lock_path(self.path, cursor.lastrowid))
         self.run_id = cursor.lastrowid
 
     def _point(self, message: Point) -> None:
-        for name in message.values:
-            # A hand-written measurement declares no columns; the ones it
-            # records are learned as they arrive.
-            self._columns.setdefault(name, {"unit": None})
+        # A hand-written measurement declares no columns; the ones it records
+        # are learned as they arrive, and written as soon as they are, so a
+        # run that is interrupted still says what it recorded.
+        new = [name for name in message.values if name not in self._columns]
+        for name in new:
+            self._columns[name] = {"unit": None}
         with self.connection:
             self.connection.execute(
                 'INSERT INTO points (run_id, seq, t, steps, "values") VALUES (?, ?, ?, ?, ?)',
                 (self.run_id, message.seq, message.t.isoformat(), to_json(list(message.steps)), to_json(message.values)),
             )
+            if new:
+                self.connection.execute(
+                    "UPDATE runs SET columns = ? WHERE id = ?", (to_json(self._columns), self.run_id)
+                )
 
     def _step_began(self, message: StepBegan) -> None:
         with self.connection:
@@ -133,6 +198,7 @@ class DatabaseRecorder:
                 (message.status, message.t.isoformat(), to_json(self._columns), self.run_id),
             )
             write_run_facets(self.connection, self.run_id)
+        self._release()
         logger.info("Recorded run %s (%s) in %s", self.run_id, message.status, self.path)
 
     # ------------------------------------------------------------------
