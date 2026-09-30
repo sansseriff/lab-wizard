@@ -237,7 +237,7 @@
 			<div class="rounded border border-line bg-surface">
 				<div class="flex items-center justify-between border-b border-line px-3.5 py-2.5">
 					<h2 class="text-body font-semibold">Recent projects</h2>
-					<a class="text-xs text-accent no-underline hover:underline" href="/measurements/projects">
+					<a class="text-xs text-accent no-underline hover:underline" href="/measurements">
 						All →
 					</a>
 				</div>

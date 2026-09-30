@@ -1,13 +1,9 @@
 <script lang="ts">
 	/** The persistent navigation rail.
 	 *
-	 * Seven top-level sections, each a noun rather than a task. A section with
-	 * sub-pages expands when it is the active one; expanding is not a navigation
-	 * of its own, so clicking the header goes to the section's first page.
-	 *
-	 * Sub-pages stay hidden until their section is active. The rail is meant to
-	 * be readable at a glance, and thirteen always-visible entries is a menu, not
-	 * an orientation.
+	 * Seven top-level sections, each a noun rather than a task, and nothing
+	 * under them. Each goes to its section's most useful page; a section with
+	 * more than one page shows them as tabs across the top (SectionTabs).
 	 */
 	import { page } from '$app/state';
 	import logo from '$lib/assets/logo.svg';
@@ -20,77 +16,27 @@
 	import HardDrivesIcon from 'phosphor-svelte/lib/HardDrives';
 	import DatabaseIcon from 'phosphor-svelte/lib/Database';
 	import GearSixIcon from 'phosphor-svelte/lib/GearSix';
-	import CaretRightIcon from 'phosphor-svelte/lib/CaretRight';
 
-	type SubItem = { href: string; label: string };
-	type Section = {
-		href: string;
-		label: string;
-		icon: any;
-		/** Every path under this section, for deciding what is active. */
-		match: string;
-		children?: SubItem[];
-	};
+	type Section = { href: string; label: string; icon: any };
 
 	const sections: Section[] = [
-		{ href: '/', label: 'Overview', icon: GaugeIcon, match: '/' },
-		{
-			href: '/measurements/new',
-			label: 'Measurements',
-			icon: PulseIcon,
-			match: '/measurements',
-			children: [
-				{ href: '/measurements/new', label: 'Create' },
-				{ href: '/measurements/projects', label: 'Projects' },
-				{ href: '/measurements/run', label: 'Run' }
-			]
-		},
+		{ href: '/', label: 'Overview', icon: GaugeIcon },
+		{ href: '/measurements', label: 'Measurements', icon: PulseIcon },
 		// Beside Measurements: a procedure is what a measurement is created from.
-		{ href: '/procedures', label: 'Procedures', icon: TreeStructureIcon, match: '/procedures' },
-		{
-			href: '/instruments',
-			label: 'Instruments',
-			icon: CircuitryIcon,
-			match: '/instruments',
-			children: [
-				{ href: '/instruments', label: 'Configured' },
-				{ href: '/instruments/custom', label: 'Custom resources' }
-			]
-		},
-		{
-			href: '/servers',
-			label: 'Servers',
-			icon: HardDrivesIcon,
-			match: '/servers',
-			children: [
-				{ href: '/servers', label: 'This workspace' },
-				{ href: '/servers/permissions', label: 'Permissions' },
-				{ href: '/servers/hardware', label: 'Hardware ownership' },
-				{ href: '/servers/remote', label: 'Remote servers' }
-			]
-		},
-		{ href: '/data', label: 'Data', icon: DatabaseIcon, match: '/data' },
-		{ href: '/settings', label: 'Settings', icon: GearSixIcon, match: '/settings' }
+		{ href: '/procedures', label: 'Procedures', icon: TreeStructureIcon },
+		{ href: '/instruments', label: 'Instruments', icon: CircuitryIcon },
+		{ href: '/servers', label: 'Servers', icon: HardDrivesIcon },
+		{ href: '/data', label: 'Data', icon: DatabaseIcon },
+		{ href: '/settings', label: 'Settings', icon: GearSixIcon }
 	];
 
 	// `trailingSlash: 'always'` means the router reports `/instruments/`, while
-	// the hrefs here are written without one. Normalising once is what keeps
-	// both the section highlight and the sub-page highlight honest.
-	const path = $derived(normalize(page.url.pathname));
+	// the hrefs here are written without one.
+	const path = $derived(page.url.pathname.replace(/(.)\/$/, '$1'));
 
-	function normalize(p: string): string {
-		return p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p;
-	}
-
-	function isActiveSection(section: Section): boolean {
-		if (section.match === '/') return path === '/';
-		return path === section.match || path.startsWith(section.match + '/');
-	}
-
-	// Exact match only: `/instruments` and `/instruments/custom` are siblings in
-	// the sub-list, so a prefix test would light both.
-	function isActivePage(href: string): boolean {
-		return path === normalize(href);
+	function isActive(section: Section): boolean {
+		if (section.href === '/') return path === '/';
+		return path === section.href || path.startsWith(section.href + '/');
 	}
 </script>
 
@@ -113,7 +59,7 @@
 
 	<nav class="flex flex-1 flex-col gap-px p-2">
 		{#each sections as section (section.href)}
-			{@const active = isActiveSection(section)}
+			{@const active = isActive(section)}
 			{@const Icon = section.icon}
 			<a
 				href={section.href}
@@ -125,31 +71,7 @@
 			>
 				<Icon size={15} weight={active ? 'fill' : 'regular'} />
 				{section.label}
-				{#if section.children}
-					<CaretRightIcon
-						size={10}
-						class="ml-auto opacity-50 transition-transform {active ? 'rotate-90' : ''}"
-					/>
-				{/if}
 			</a>
-
-			{#if section.children && active}
-				<div class="flex flex-col gap-px py-0.5 pl-8">
-					{#each section.children as child (child.href)}
-						{@const childActive = isActivePage(child.href)}
-						<a
-							href={child.href}
-							aria-current={childActive ? 'page' : undefined}
-							class="-ml-px rounded border-l-[1.5px] px-2.5 py-1 text-xs no-underline transition-colors
-								{childActive
-								? 'border-accent font-semibold text-accent-strong'
-								: 'border-line text-muted hover:bg-surface-2 hover:text-ink'}"
-						>
-							{child.label}
-						</a>
-					{/each}
-				</div>
-			{/if}
 		{/each}
 	</nav>
 

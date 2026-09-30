@@ -32,15 +32,16 @@ graph LR
 
 ## The sections
 
-The left rail has seven sections, each a noun rather than a task. These docs
-mirror them.
+The left rail has seven sections, each a noun rather than a task. Each opens
+on its most useful page; a section with more than one page shows them as tabs
+across the top. These docs mirror them.
 
 ![The wizard's Overview page, showing this workstation's server state and hardware owner](../assets/screenshots/overview.webp)
 
 | Section | Route | What it is for | Page |
 |---|---|---|---|
 | Overview | `/` | what this workstation is doing right now: server state, hardware owner, recent projects | — |
-| Measurements | `/measurements/new`, `/measurements/projects` | pick something to run, bind instruments to it, generate a project; then list what has been generated | [Measurements](measurements.md) |
+| Measurements | `/measurements`, `/measurements/new`, `/measurements/run` | the projects this workspace has generated; create another (pick something to run, bind instruments to it); set one up and run it | [Measurements](measurements.md) |
 | Procedures | `/procedures` | write and edit procedures — roles, parameters, step tree | [Procedures](procedures.md) |
 | Instruments | `/instruments`, `/instruments/custom` | configure the hardware this workspace owns; build standalone resource files | [Instruments](instruments.md) |
 | Servers | `/servers`, `/servers/permissions`, `/servers/hardware`, `/servers/remote` | run a server, author safety rules, see who holds what, register servers elsewhere | [Servers](servers.md) |

@@ -21,26 +21,25 @@
 
 	// Breadcrumbs come from a table rather than from the path, because the URL
 	// segment and the human name differ where it matters (`/servers` is "This
-	// workspace", not "Servers / Servers"). Every crumb but the last is a link:
-	// a section has no page of its own, so its crumb goes to the page that
-	// opens it in the sidebar.
+	// workspace"). Every crumb but the last is a link; a section's crumb goes to
+	// its home, the page the sidebar opens.
 	type Crumb = { label: string; href?: string };
-	const MEASUREMENTS: Crumb = { label: 'Measurements', href: '/measurements/projects' };
-	const CREATE: Crumb = { label: 'Create', href: '/measurements/new' };
+	const MEASUREMENTS: Crumb = { label: 'Measurements', href: '/measurements' };
+	const NEW: Crumb = { label: 'New measurement', href: '/measurements/new' };
 	const PROCEDURES: Crumb = { label: 'Procedures', href: '/procedures' };
 	const INSTRUMENTS: Crumb = { label: 'Instruments', href: '/instruments' };
 	const SERVERS: Crumb = { label: 'Servers', href: '/servers' };
 	const crumbs: Record<string, Crumb[]> = {
 		'/': [{ label: 'Overview' }],
-		'/measurements/new': [MEASUREMENTS, { label: 'Create' }],
-		'/measurements/resources': [MEASUREMENTS, CREATE, { label: 'Instruments' }],
-		'/measurements/projects': [MEASUREMENTS, { label: 'Projects' }],
-		'/measurements/run': [MEASUREMENTS, { label: 'Run' }],
-		'/procedures': [{ label: 'Procedures' }],
-		'/procedures/edit': [PROCEDURES, { label: 'Edit' }],
-		'/instruments': [INSTRUMENTS, { label: 'Configured' }],
+		'/measurements': [MEASUREMENTS],
+		'/measurements/new': [MEASUREMENTS, NEW],
+		'/measurements/resources': [MEASUREMENTS, NEW, { label: 'Instruments' }],
+		'/measurements/run': [MEASUREMENTS],
+		'/procedures': [PROCEDURES],
+		'/procedures/edit': [PROCEDURES, { label: 'New procedure' }],
+		'/instruments': [INSTRUMENTS],
 		'/instruments/custom': [INSTRUMENTS, { label: 'Custom resources' }],
-		'/servers': [SERVERS, { label: 'This workspace' }],
+		'/servers': [SERVERS],
 		'/servers/permissions': [SERVERS, { label: 'Permissions' }],
 		'/servers/hardware': [SERVERS, { label: 'Hardware ownership' }],
 		'/servers/remote': [SERVERS, { label: 'Remote servers' }],
@@ -50,18 +49,17 @@
 
 	// `trailingSlash: 'always'` means the router reports `/instruments/`; the
 	// table above is keyed without one.
-	const key = $derived.by(() => {
-		const p = page.url.pathname;
-		return p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p;
-	});
+	const key = $derived(page.url.pathname.replace(/(.)\/$/, '$1'));
 	const trail = $derived.by(() => {
 		const base = crumbs[key] ?? [{ label: 'Lab Wizard' }];
-		// A run or an edit of one thing ends in that thing; for a run, "Run" goes back to choosing.
-		const project = key === '/measurements/run' && page.url.searchParams.get('project');
-		if (project) return [...base.slice(0, -1), { label: 'Run', href: key }, { label: project }];
-		const edited = key === '/procedures/edit' && page.url.searchParams.get('name');
-		if (edited) return [...base.slice(0, -1), { label: edited }];
-		return base;
+		// A page about one thing ends in that thing.
+		const named =
+			key === '/measurements/run'
+				? page.url.searchParams.get('project')
+				: key === '/procedures/edit'
+					? page.url.searchParams.get('name')
+					: null;
+		return named ? [...base.slice(0, 1), { label: named }] : base;
 	});
 	const wide = $derived(['/data', '/measurements/run'].includes(key));
 	// The Create list runs the height of the window, so it has no foot padding to spare.

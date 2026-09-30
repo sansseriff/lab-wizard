@@ -13,8 +13,9 @@
 	 */
 	import '$lib/procedures/composer.css';
 	import { onDestroy, untrack } from 'svelte';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { api, ApiError, errorMessage, unwrap } from '$lib/api';
+	import { ApiError, errorMessage } from '$lib/api';
 	import Callout from '$lib/components/Callout.svelte';
 	import Combobox from '$lib/components/Combobox.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
@@ -197,11 +198,8 @@
 		}
 	}
 
-	// ---- no project chosen: pick one ----
-	let projects = $state<{ name: string; measurement: string | null }[]>([]);
-
-	// Keyed on the project, not on mount: choosing one from the list below stays
-	// on this route, so SvelteKit keeps the component and only the query changes.
+	// Keyed on the project, not on mount: moving between projects stays on this
+	// route, so SvelteKit keeps the component and only the query changes.
 	$effect(() => {
 		const name = project;
 		untrack(() => open(name));
@@ -215,8 +213,9 @@
 		runError = '';
 		status = IDLE;
 		lastRunId = null;
+		// Projects are chosen on the Measurements page.
 		if (!name) {
-			projects = (await unwrap<{ projects: typeof projects }>(api.GET('/api/projects'))).projects;
+			goto('/measurements', { replaceState: true });
 			return;
 		}
 		await Promise.all([load(), findLastRun(), loadSuggestions()]);
@@ -237,28 +236,8 @@
 	const defs = $derived(schema?.$defs ?? {});
 </script>
 
-{#if !project}
-	<section class="space-y-4">
-		<PageHeader title="Run" lede="Choose a project to set up and run." />
-		{#if !projects.length}
-			<Callout tone="info">
-				No projects yet. <a class="underline" href="/measurements/new">Create a measurement</a> first.
-			</Callout>
-		{:else}
-			<ul class="divide-y divide-line rounded border border-line bg-surface">
-				{#each projects as p (p.name)}
-					<li>
-						<a class="flex items-center gap-3 px-3.5 py-2.5 no-underline hover:bg-surface-2" href={`/measurements/run?project=${encodeURIComponent(p.name)}`}>
-							<span class="mono font-medium">{p.name}</span>
-							<span class="text-xs text-muted">{p.measurement ?? ''}</span>
-						</a>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</section>
-{:else if loadError}
-	<Callout tone="crit">{loadError} <a class="underline" href="/measurements/run">Choose another project →</a></Callout>
+{#if loadError}
+	<Callout tone="crit">{loadError} <a class="underline" href="/measurements">Choose another project →</a></Callout>
 {:else if settings}
 	<section class="run-page flex h-[calc(100dvh-46px-2.5rem)] min-h-[560px] flex-col gap-3">
 		<PageHeader title={settings.name}>

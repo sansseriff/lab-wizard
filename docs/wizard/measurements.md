@@ -4,12 +4,13 @@ icon: lucide/flask-conical
 
 # Measurements
 
-The **Measurements** section is the core wizard workflow: pick something to run
-(`/measurements/new`), bind each role it needs to a configured instrument and
-choose what its runs produce (`/measurements/resources`), and generate a
-runnable project folder. `/measurements/projects` lists what has been
-generated, and `/measurements/run` sets a project up, runs it, and shows it
-live ([The Run page](#the-run-page)).
+The **Measurements** section is the core wizard workflow. It opens on the
+projects this workspace has generated (`/measurements`). **New measurement**
+picks something to run (`/measurements/new`), binds each role it needs to a
+configured instrument and chooses what its runs produce
+(`/measurements/resources`), and generates a runnable project folder. A
+project's name opens `/measurements/run`, which sets it up, runs it, and shows
+it live ([The Run page](#the-run-page)).
 
 What you pick from is a list of [procedures](procedures.md) — the ones built
 into lab_wizard (`iv_curve`, `pcr_curve`, `mcr_curve`) and this workspace's own
@@ -303,7 +304,7 @@ The script exits non-zero when the run does not succeed.
 
 ## The projects list
 
-`/measurements/projects` lists every project this workspace has generated,
+`/measurements`, the section's first page, lists every project this workspace has generated,
 newest first: what it measures, what it is bound to, what its runs produce, and
 when it was made.
 
