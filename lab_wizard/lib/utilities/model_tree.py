@@ -14,6 +14,9 @@ class ProjectInfo(BaseModel):
     measurement_type: str
     # What measurement_type names: a procedure, or a custom measurement file.
     kind: Literal["procedure", "custom"] = "procedure"
+    # ``embedded``: the setup file holds every setting and reads nothing from
+    # this YAML or the workspace (wizard/backend/embedded_generation.py).
+    style: Literal["production", "embedded"] = "production"
     created_by: str = "lab_wizard"
 
 
@@ -76,16 +79,58 @@ class ResourceConfig(BaseModel):
         return _construct_from_path(path, channel_index, self._built)
 
 
+class RoleBinding(BaseModel):
+    """The instrument that fills one role: its ``attribute_name``, and where it lives.
+
+    ``server`` is ``None`` for an instrument in this workspace's
+    config/instruments, or the name of a server in config/remote/servers.yaml.
+    In the YAML a local binding is written as just the name.
+    """
+
+    instrument: str
+    server: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_name(cls, data: Any) -> Any:
+        return {"instrument": data} if isinstance(data, str) else data
+
+    def as_yaml(self) -> Any:
+        return self.instrument if self.server is None else {"instrument": self.instrument, "server": self.server}
+
+
 class ProjectConfig(BaseModel):
     project: ProjectInfo
     run: RunConfig = Field(default_factory=RunConfig)
     measurement: MeasurementConfig = Field(default_factory=MeasurementConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
+    # Which instrument fills each of the measurement's roles; a list for a role
+    # that takes several. The setup file says what class each one is.
+    roles: dict[str, RoleBinding | list[RoleBinding]] = Field(default_factory=dict)
+    # A composed procedure's definition, as a procedure file has it: its roles,
+    # params (types, units, defaults), step tree, derived columns and plots.
+    # The one place a project's procedure is edited; <name>_measurement.py is
+    # built from it (lab_wizard.lib.project). None for a custom measurement.
+    procedure: dict[str, Any] | None = None
+    # A custom resource file names its instruments here instead of by role.
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
 
     @property
     def measurement_type(self) -> str:
         return self.project.measurement_type
+
+    def bindings(self) -> list[RoleBinding]:
+        """Every instrument the roles are bound to, in role order."""
+        out: list[RoleBinding] = []
+        for binding in self.roles.values():
+            out.extend(binding if isinstance(binding, list) else [binding])
+        return out
+
+    def sources(self) -> dict[str, str]:
+        """``{attribute_name: "local" | server}`` for every instrument this project uses."""
+        out = {b.instrument: b.server or "local" for b in self.bindings()}
+        out.update(self.resources.instrument_sources)
+        return out
 
 
 def _parse_instrument_tree(data: dict[str, Any]) -> Any:

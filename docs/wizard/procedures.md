@@ -134,11 +134,11 @@ past run. See [Plots and derived columns](../concepts/procedures.md#plots-and-de
   tells you that saving writes a workspace copy.
 - **YAML** is the file as it is stored, editable if hand-editing is quicker;
   *Apply* loads it back into the composer.
-- **Python** is the module a project would get. The step tree sits between
-  `# wizard:procedure:start` and `# wizard:procedure:end`, and the definition
-  it was generated from (recorded with every run) between
-  `# wizard:definition` markers; regenerating a project replaces only those
-  blocks, so edits you make around them survive.
+- **Python** is the module a project would get: the params and resources
+  types and the step tree. A project carries the procedure itself in the
+  `procedure:` block of its YAML and builds this module from it, again
+  whenever the block changes; see
+  [Generated code](../concepts/procedures.md#generated-code-and-editing-it).
 
 ![The Python tab, showing the generated module for a procedure](../assets/screenshots/procedures-python.webp)
 

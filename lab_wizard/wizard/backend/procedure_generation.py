@@ -1,46 +1,35 @@
-"""Generate and refresh projects from composed procedures.
+"""Generate projects from composed procedures, and update a project's procedure.
 
 A composed procedure (``config/procedures/<name>.yml``) reaches a project
-through the same generator as a custom measurement: this module supplies the
-pieces — a setup template, a measurement module, requirements, and params —
-derived from the definition. See ``plans/procedure_plan.md`` Phase 3.
+through the same generator as a custom measurement. The project carries a copy
+of the definition in the ``procedure:`` block of its YAML; its measurement
+module is built from that block (``lab_wizard.lib.project``).
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 from typing import Any
 
-from lab_wizard.lib.project_module import module_path
-from lab_wizard.lib.procedures.codegen import (
-    DEFINITION_BLOCK,
-    PROCEDURE_BLOCK,
-    definition_block,
-    measurement_module_source,
-    procedure_block,
-    setup_template_source,
-)
+from ruamel.yaml import YAML
+
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.storage import load_procedure
-from lab_wizard.lib.utilities.model_tree import load_project_config
+from lab_wizard.lib.project import build_measurement_module
 from lab_wizard.wizard.backend.models import FilledReq
 from lab_wizard.wizard.backend.project_generation import (
     GenerateProjectRequest,
     _params_for,
-    _replace_wizard_block,
     generate_project,
 )
-from lab_wizard.wizard.backend.python_formatting import format_python_code
-
 
 logger = logging.getLogger("lab_wizard.wizard.backend.procedure_generation")
 
 __all__ = [
     "generate_procedure_project",
     "procedure_requirements",
-    "refresh_procedure_source",
+    "update_project_procedure",
 ]
 
 
@@ -67,46 +56,27 @@ def generate_procedure_project(
         projects_dir=projects_dir,
         req=req,
         requirements=procedure_requirements(definition),
-        template_text=setup_template_source(definition),
-        measurement_source=format_python_code(measurement_module_source(definition)),
         params=params if params is not None else definition.param_defaults(),
         params_model=definition.params_model(),
+        measurement=definition,
     )
 
 
-_IMPORT_LINE = re.compile(r"^from (\S+) import (.+)$")
+def update_project_procedure(config_dir: Path, project_dir: Path) -> Path:
+    """Replace a project's ``procedure:`` block with its procedure as the workspace has it now.
 
-
-def refresh_procedure_source(config_dir: Path, project_dir: Path) -> Path:
-    """Regenerate a project's step tree from its procedure's current definition.
-
-    Only the ``wizard:procedure`` block, and the ``wizard:definition`` block
-    recording the definition it came from, are replaced, so anything edited
-    outside them — an extra helper, a changed ``run_measurement`` — survives. Any step
-    class the new tree needs and the file does not yet import is added.
+    A project keeps the procedure it was generated with until asked; this is
+    the asking. Everything else in its YAML, and the comments in it, stay; its
+    measurement module is built again from the new block.
     """
-    project = load_project_config(project_dir / f"{project_dir.name}.yaml")
-    definition = load_procedure(config_dir, project.measurement_type)
-    path = module_path(project_dir, definition.name)
-    text = path.read_text(encoding="utf-8")
-
-    block, needed = procedure_block(definition)
-    text = _replace_wizard_block(text, PROCEDURE_BLOCK, block)
-    text = _replace_wizard_block(text, DEFINITION_BLOCK, definition_block(definition))
-
-    present: set[tuple[str, str]] = set()
-    for line in text.splitlines():
-        match = _IMPORT_LINE.match(line.strip())
-        if match:
-            for name in match.group(2).strip("()").split(","):
-                if name.strip():
-                    present.add((match.group(1), name.strip()))
-    missing = sorted(needed - present)
-    if missing:
-        additions = "\n".join(f"from {module} import {name}" for module, name in missing)
-        anchor = "from __future__ import annotations\n"
-        text = text.replace(anchor, f"{anchor}\n{additions}\n", 1) if anchor in text else f"{additions}\n{text}"
-
-    path.write_text(format_python_code(text), encoding="utf-8")
-    logger.info("Refreshed the procedure block in %s", path)
-    return path
+    yaml_path = project_dir / f"{project_dir.name}.yaml"
+    rt = YAML(typ="rt")
+    rt.default_flow_style = False
+    document = rt.load(yaml_path.read_text(encoding="utf-8"))
+    definition = load_procedure(config_dir, document["project"]["measurement_type"])
+    document["procedure"] = definition.model_dump(mode="json", exclude_none=True)
+    with yaml_path.open("w", encoding="utf-8") as handle:
+        rt.dump(document, handle)
+    build_measurement_module(project_dir, force=True)
+    logger.info("Updated the procedure of %s from %s", project_dir.name, definition.name)
+    return yaml_path

@@ -1645,6 +1645,11 @@ export interface components {
             run: components["schemas"]["RunConfig"];
             /** Setup File */
             setup_file: string | null;
+            /**
+             * Style
+             * @enum {string}
+             */
+            style: "production" | "embedded";
             /** Yaml */
             yaml: string;
         };

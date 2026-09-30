@@ -174,22 +174,18 @@ def test_a_routed_instrument_is_recorded_as_a_source_not_copied(
     )
 
     data = _read_yaml(Path(result["yaml_file"]))
-    resources = data["resources"]
-
-    assert "instruments" not in resources
-
     sense_attr = _attribute_of(
         instruments, _PROLOGIX_KEY, _SIM900_KEY, _SIM970_KEY, channel=0
     )
-    assert dict(resources["instrument_sources"]) == {
-        "master_vsource": _REMOTE_SOURCE,
-        sense_attr: "local",
+    assert dict(data["roles"]) == {
+        "voltage_source": {"instrument": "master_vsource", "server": _REMOTE_SOURCE},
+        "voltage_sense": sense_attr,
     }
+    assert "resources" not in data
 
 
-def test_a_mixed_project_is_generated_in_from_attribute_style(workspace, fake_source):
-    """Other styles emit ``from_config(resources, key=<hash>)``, which addresses
-    a params tree this workspace does not have for a routed instrument."""
+def test_a_routed_role_is_typed_by_its_proxy(workspace, fake_source):
+    """The object a run gets for a server's instrument is a proxy, so that is its type."""
     config_dir, projects_dir, instruments = workspace
 
     result = generate_procedure_project(
@@ -204,8 +200,8 @@ def test_a_mixed_project_is_generated_in_from_attribute_style(workspace, fake_so
     )
 
     setup = Path(result["setup_file"]).read_text(encoding="utf-8")
-    assert "resources.from_attribute('master_vsource')" in setup
-    assert ".from_config(resources, key=" not in setup
+    assert f"    voltage_source: RemoteVSource  # through {_REMOTE_SOURCE}" in setup
+    assert "    voltage_sense: Sim970Channel\n" in setup
 
 
 def test_the_source_is_registered_so_the_project_can_resolve_it(
@@ -340,15 +336,14 @@ def test_a_purely_local_project_is_referenced_by_name_like_any_other(workspace):
     )
 
     data = _read_yaml(Path(result["yaml_file"]))
-    assert "instruments" not in data["resources"]
-    assert set(data["resources"]["instrument_sources"].values()) == {"local"}
+    # Local instruments are bound by name alone.
+    assert all(isinstance(binding, str) for binding in data["roles"].values())
     setup = Path(result["setup_file"]).read_text(encoding="utf-8")
-    assert ".from_config(resources, key=" not in setup
-    assert setup.count("resources.from_attribute(") == 2
+    assert "Remote" not in setup
 
 
-def test_the_embedded_style_still_carries_its_own_copy(workspace):
-    """The escape hatch: a project that runs outside any workspace."""
+def test_the_embedded_style_writes_everything_into_its_setup(workspace):
+    """The escape hatch: a project that reads nothing from any workspace."""
     config_dir, projects_dir, instruments = workspace
     result = generate_procedure_project(
         config_dir=config_dir,
@@ -373,8 +368,10 @@ def test_the_embedded_style_still_carries_its_own_copy(workspace):
         ),
     )
     data = _read_yaml(Path(result["yaml_file"]))
-    assert set(data["resources"]["instruments"]) == {_PROLOGIX_KEY}
-    assert "instrument_sources" not in data["resources"]
+    assert set(data) == {"project"} and data["project"]["style"] == "embedded"
+    setup = Path(result["setup_file"]).read_text(encoding="utf-8")
+    assert "PrologixGPIB.from_params(PROLOGIX_GPIB)" in setup
+    assert "instrument_sources" not in setup and "load_project_config" not in setup
 
 
 def test_the_embedded_style_refuses_an_instrument_through_a_server(

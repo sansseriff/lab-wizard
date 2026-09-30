@@ -48,7 +48,7 @@ A file declares:
 | Name | Is |
 |---|---|
 | `Params` | a pydantic model of its settings, every field with a default. They become the project's `measurement.params` |
-| `Resources` | a dataclass: one field per instrument role, typed by the behavior it needs, and a `params` field |
+| `Resources` | a `@dataclass(frozen=True)`: one field per instrument role, typed by the behavior it needs, and a `params` field. Frozen, because a project's setup narrows each role to its instrument's class, which type checkers allow only for a field that cannot be reassigned |
 | `measure(resources, run)` *or* `build_procedure(resources)` | what one run does: plain Python recording rows through `run`, or a step tree |
 | `PLOTS` (optional) | plot specs, as a procedure's `plots:` — what the Data page and the live views draw |
 
@@ -106,44 +106,65 @@ and the wizard offers every configured instrument that **is-a** that behavior.
 [`generate_measurement_project`](../../lab_wizard/wizard/backend/project_generation.py))
 does three things:
 
-1. **Writes a project YAML** containing only the *subset* of config you selected
-   — the chosen instruments — plus a `run:` block, the `outputs:` chosen, and
-   measurement defaults. This is a self-contained
-   snapshot, so the project keeps working even if the central config changes.
-2. **Fills in the setup template** by replacing the `# wizard:<block>:start/end`
-   regions:
-   - `imports` — concrete instrument imports (embedded style only),
-   - `resource_fields` — the dataclass field declarations,
-   - `instantiation` — the construction lines,
-   - `return_fields` — wiring the constructed objects into the `Resources`.
+1. **Writes a project YAML**: which instrument fills each role and where it
+   lives (`roles:`), a `run:` block, the `outputs:` chosen, and the
+   measurement's params. Instrument settings are not copied: a run reads them
+   from the workspace's config, so readdressing a rack there reaches every
+   project.
+2. **Writes the setup file**
+   ([`setup_generation.py`](../../lab_wizard/wizard/backend/setup_generation.py)):
+   the class behind each role, and the run lifecycle. The embedded style writes
+   a different setup file; see below.
 3. **Copies the measurement source** into the project, as
-   `_measurement/<name>.py`. The setup loads it by its path, so edits made
+   `<name>_measurement.py`. The setup loads it by its path, so edits made
    inside the project are the code that runs.
 
 The project folder is timestamped, e.g. `projects/iv_curve_20260528_143012/`,
-containing `<folder>.yaml`, `<name>_setup.py`, and `_measurement/<name>.py`.
-The module sits one folder down because a script's own folder comes first on
-Python's import path: a measurement named `queue.py` beside the setup would be
-what every `import queue` in the run found, the standard library's included.
+containing `<folder>.yaml`, `<name>_setup.py`, and `<name>_measurement.py`.
+The module carries the `_measurement` suffix because a script's own folder
+comes first on Python's import path: a measurement saved as plain `queue.py`
+beside the setup would be what every `import queue` in the run found, the
+standard library's included. No standard module ends in `_measurement`.
 See [`project_module.py`](../../lab_wizard/lib/project_module.py).
 
 ### What a project contains
 
 A project names its instruments and copies none of their settings. Its YAML
-records each instrument's `attribute_name` and where it lives:
+says which instrument fills each role, by `attribute_name`, and where it lives:
 
 ```yaml
-resources:
-  instrument_sources:
-    sim928-brave-otter: local          # this workspace's config/instruments
-    counter-quiet-lynx: cryo-rack      # a server in config/remote/servers.yaml
+roles:
+  voltage_source: sim928-brave-otter                              # this workspace's config/instruments
+  counter: {instrument: counter-quiet-lynx, server: cryo-rack}    # a server in config/remote/servers.yaml
 ```
 
-and the setup file resolves each one when the project runs:
+The setup file says what **class** each role is, by narrowing the measurement's
+`Resources` — so an editor follows every role to the code that will run, and a
+type checker knows exactly what the measurement is handed:
 
 ```python
-voltage_source_1 = resources.from_attribute("sim928-brave-otter")
+@dataclass(frozen=True)
+class Resources(measurement.IvCurveResources):
+    # wizard:roles:start
+    voltage_source: Sim928
+    counter: RemoteCounter  # through cryo-rack, where it is a Keysight53220AChannel
+    # wizard:roles:end
 ```
+
+An instrument on this workspace is typed by its driver; one reached through a
+server by the proxy the run is actually handed, with the server's own class
+noted beside it. Its `__main__` is the run lifecycle, one visible call per step
+([`project.py`](../../lab_wizard/lib/project.py)): claim the racks it opens,
+build each role's instrument, claim the ones on servers, baseline, run, make
+safe on failure, release. Every role is checked against its declared class
+before anything is built: if the YAML and the setup disagree (a role rebound
+by hand to a different kind of instrument), the run refuses to start and says
+which role.
+
+A composed procedure lives in the YAML too, in a `procedure:` block beside
+`measurement.params`: edit either, and `<name>_measurement.py` is built again
+from them before the next run, or with `wizard regenerate`. See
+[Generated code](../concepts/procedures.md#generated-code-and-editing-it).
 
 So a rack readdressed, or a bench setting changed, in Manage Instruments reaches
 every project that uses it without regenerating. The measurement's own params
@@ -161,15 +182,23 @@ rack the server holds, the warning offers that switch.
 | Style | What it writes | When to use |
 |---|---|---|
 | `production` (default) | instruments by name, as above | always, unless you need the escape hatch |
-| `pedagogical_embedded` | every instrument's params written into the Python, plus a full copy in the project YAML | running a project outside any workspace, or reading how instruments are built. Breaks when an instrument is readdressed; cannot use an instrument through a server |
+| `pedagogical_embedded` | a setup file that says everything and reads nothing | reading exactly how a run is put together, or running outside any workspace. Does not follow later changes to the workspace's config; cannot use an instrument through a server |
 
-The former YAML-expanded teaching style is retired. Projects generated before
-this change carry their own instrument copy and keep running exactly as they did.
+An **embedded** setup file is written to be read. Every instrument on the way to
+the ones a run uses is constructed on the page, parent before child
+(`PrologixGPIB.from_params(...)`, `Sim900.from_parent(...)`, …), from settings
+written out as constructor calls with each field's description as a comment.
+The roles are typed by the classes they are (`voltage_source: Sim928`), and the
+params (`PARAMS`), the run's details (`RUN`), the database (`DATABASE`) and what
+else the run produces (`SINKS`) are values in the file. Nothing is read from the
+workspace or the project's YAML when it runs — the YAML only says what the
+project is — so the Run page shows no settings for it: edit the file. See
+[`embedded_generation.py`](../../lab_wizard/wizard/backend/embedded_generation.py).
 
 **Custom resources** (Instruments → Custom resources) follow the same two
 styles, for the same reasons: a production file names its instruments and
-resolves them against the tree that owns them, and the embedded one carries its
-own copy.
+resolves them against the tree that owns them, and the embedded one constructs
+them itself.
 
 ### Outputs
 

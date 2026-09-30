@@ -20,6 +20,7 @@
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import Select from '$lib/components/Select.svelte';
+	import Splitter from '$lib/components/Splitter.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { dataApi } from '$lib/data/api';
 	import LiveRunView from '$lib/live/LiveRunView.svelte';
@@ -27,6 +28,10 @@
 	import SchemaField from '$lib/run/SchemaField.svelte';
 	import { runApi, type LaunchStatus, type Outputs, type ProjectSettings, type RunDetails } from '$lib/run/api';
 	import { pathKey } from '$lib/run/schema';
+
+	// Width of the settings column; the run takes the rest.
+	let setupWidth = $state(528);
+	let pageWidth = $state(0);
 
 	const project = $derived(page.url.searchParams.get('project') ?? '');
 
@@ -258,6 +263,7 @@
 		<PageHeader title={settings.name}>
 			<span class="mono" title={settings.path}>{settings.measurement}</span>
 			<span class="text-muted">· {settings.kind === 'custom' ? 'custom measurement' : 'procedure'}</span>
+			{#if settings.style === 'embedded'}<span class="text-muted">· embedded</span>{/if}
 			{#snippet actions()}
 				<Pill tone={stateTone[status.state]} dot={active}>{stateLabel}</Pill>
 				{#if active}
@@ -277,7 +283,21 @@
 
 		{#if runError}<Callout tone="crit">{runError}</Callout>{/if}
 
-		<div class="grid min-h-0 flex-1 grid-cols-[33rem_minmax(0,1fr)] gap-4">
+		<div
+			class="grid min-h-0 flex-1 grid-cols-[var(--setup)_1rem_minmax(0,1fr)]"
+			style:--setup="{setupWidth}px"
+			bind:clientWidth={pageWidth}
+		>
+			{#if settings.style === 'embedded'}
+			<!-- An embedded project reads nothing but its setup file; there is nothing here to edit. -->
+			<section class="rounded border border-line bg-surface p-3" aria-label="Setup">
+				<Callout tone="info" title="Its settings are in its setup file.">
+					This project is embedded: the instruments' settings, the params and the run's details are
+					all written in <span class="mono">{settings.setup_file}</span>, and nothing else is read when
+					it runs. Edit them there; Run starts that file.
+				</Callout>
+			</section>
+			{:else}
 			<!-- What the next run will be. Locked while one is going: it read these when it started. -->
 			<section class="flex min-h-0 flex-col rounded border border-line bg-surface" aria-label="Setup">
 				<Tabs
@@ -414,6 +434,16 @@
 					</div>
 				</Tabs>
 			</section>
+			{/if}
+
+			<Splitter
+				bind:size={setupWidth}
+				initial={528}
+				min={320}
+				max={pageWidth - 400}
+				storageKey="lw.run.setupWidth"
+				label="Resize the settings panel"
+			/>
 
 			<!-- The run: live while it goes, the last one otherwise. -->
 			<section class="flex min-h-0 flex-col gap-2" aria-label="Run">

@@ -79,7 +79,7 @@
 		<div class="flex flex-col gap-0.5 px-4 py-3">
 			<span class="text-2xs uppercase tracking-[0.09em] text-muted">Remote servers</span>
 			<span class="text-xl font-semibold tabular-nums">{data.remoteCount}</span>
-			<span class="text-fine text-muted">in our address book</span>
+			<span class="text-fine text-muted">in address book</span>
 		</div>
 	</div>
 

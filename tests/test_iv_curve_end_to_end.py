@@ -30,10 +30,9 @@ import polars as pl
 from lab_procedure import Status
 
 from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.lib.project import Project
 from lab_wizard.lib.data import find
 from lab_wizard.lib.utilities.config_io import load_instruments
-from lab_wizard.lib.utilities.model_tree import load_project_config
-from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
 
@@ -98,12 +97,10 @@ def _run_and_read_back(out: dict[str, Any]) -> pl.DataFrame:
     from the sensed voltage and the bias resistance the run was given.
     """
     setup = _load_module(Path(out["setup_file"]), "generated_iv_setup")
-    measurement = _load_module(Path(out["measurement_file"]), "generated_iv_curve")
-    project = load_project_config(Path(out["yaml_file"]))
-    resources = setup.create_instrument_resources(
-        project, resource_source_for(project, Path(out["project_dir"]))
-    )
-    assert measurement.IvCurveMeasurement(resources).run_measurement() is Status.SUCCESS
+    project = Project.load(Path(out["project_dir"]))
+    resources = project.resources(setup.Resources)
+    procedure = setup.measurement.build_iv_curve_procedure(resources)
+    assert project.run(procedure, resources, definition=setup.measurement.DEFINITION) is Status.SUCCESS
 
     runs = find(db=Path(out["project_dir"]) / "data" / "lab.db", procedure="iv_curve")
     assert len(runs) == 1
@@ -134,8 +131,9 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path, rig) -> None:
     ast.parse(setup_text)
     ast.parse(measurement_text)
 
-    assert "from _measurement.iv_curve import IvCurveMeasurement" in setup_text
-    assert "class IvCurveMeasurement" in measurement_text
+    assert "class Resources(measurement.IvCurveResources):" in setup_text
+    assert "    voltage_source: Sim928\n" in setup_text and "    voltage_sense: Sim970Channel\n" in setup_text
+    assert "def build_iv_curve_procedure(resources: IvCurveResources)" in measurement_text
 
     config = load_instruments(tmp_path / "config")
     mainframe_params = config[rig.gpib].children[rig.mainframe]
@@ -143,19 +141,14 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path, rig) -> None:
     meter_name = mainframe_params.children[rig.meter].channels[0].attribute_name
     assert source_name and meter_name
 
-    # Instruments are referenced by name, never by a hash of their address.
-    assert f"resources.from_attribute({source_name!r})" in setup_text
-    assert f"resources.from_attribute({meter_name!r})" in setup_text
-    assert ".from_config(resources, key=" not in setup_text
-
     payload = cast(
         dict[str, Any],
         YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8")),
     )
     # No copy of the rack: its params stay in the workspace config, and the
-    # project says which instruments it uses.
-    assert "instruments" not in payload["resources"]
-    assert payload["resources"]["instrument_sources"] == {source_name: "local", meter_name: "local"}
+    # project's YAML says which instrument fills each role, by name.
+    assert payload["roles"] == {"voltage_source": source_name, "voltage_sense": meter_name}
+    assert source_name not in setup_text
     assert payload["measurement"]["params"]["readout"]["bias_resistance_ohm"] == 100_000.0
 
 

@@ -179,9 +179,11 @@ def test_from_project_connects_only_referenced_servers():
     connected = []
 
     class Project:
-        class resources:  # noqa: N801 - stands in for ResourceConfig
-            instrument_sources = {"counter": "cryo", "bias": "local"}
+        @staticmethod
+        def sources():  # stands in for ProjectConfig.sources(): its roles
+            return {"counter": "cryo", "bias": "local"}
 
+        class resources:  # noqa: N801 - stands in for ResourceConfig
             @staticmethod
             def from_attribute(name):
                 return f"local:{name}"
@@ -201,8 +203,9 @@ def test_from_project_connects_only_referenced_servers():
 
 def test_from_project_rejects_an_unregistered_server_name():
     class Project:
-        class resources:  # noqa: N801
-            instrument_sources = {"counter": "ghost"}
+        @staticmethod
+        def sources():
+            return {"counter": "ghost"}
 
     with pytest.raises(ValueError, match="no such server is registered"):
         CompositeResources.from_project(Project(), server_urls={}, connect=lambda u: None)

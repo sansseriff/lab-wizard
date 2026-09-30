@@ -9,10 +9,12 @@ A custom measurement file declares four things:
 
 * ``Params``            its settings, with defaults. They become the project's
                         ``measurement.params``, editable before every run.
-* ``Resources``         one field per instrument it needs, typed by the
-                        *behavior* it needs (``VSource``, ``VSense``, ``Counter``,
-                        ...), not by a model. The wizard offers every configured
-                        instrument that has that behavior.
+* ``Resources``         a frozen dataclass: one field per instrument it needs,
+                        typed by the *behavior* it needs (``VSource``, ``VSense``,
+                        ``Counter``, ...), not by a model. The wizard offers every
+                        configured instrument that has that behavior, and a
+                        project's setup file narrows each field to the class of
+                        the one chosen.
 * ``build_procedure``   the step tree for one run.
 * ``PLOTS`` (optional)  how the Data page and the live plot draw a run.
 
@@ -44,7 +46,7 @@ class Params(BaseModel):
     settle_s: float = Field(default=0.05, description="wait after setting each bias before reading, in seconds")
 
 
-@dataclass
+@dataclass(frozen=True)
 class Resources:
     """The instruments this measurement needs, and its params."""
 

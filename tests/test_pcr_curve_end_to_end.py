@@ -33,6 +33,7 @@ from ruamel.yaml import YAML
 from lab_procedure import Point, ProcedureRunner, RunStarted, Status
 
 from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.lib.project import Project
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220A, Keysight53220AChannelParams
 from lab_wizard.lib.instruments.sim900.modules.sim928 import Sim928
@@ -41,8 +42,6 @@ from lab_wizard.lib.utilities.config_io import (
     assign_missing_leaf_attribute_names,
     save_instruments_to_config,
 )
-from lab_wizard.lib.utilities.model_tree import load_project_config
-from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
 
@@ -320,13 +319,6 @@ def _set_measurement_params(yaml_path: Path) -> None:
         io.dump(payload, handle)
 
 
-def _measurement_class(out: dict[str, Any]) -> Any:
-    """The generated project's own measurement class, loaded from its file."""
-    spec = importlib.util.spec_from_file_location("generated_pcr_curve", Path(out["measurement_file"]))
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.PcrCurveMeasurement
 
 
 def _load_setup_module(setup_path: Path) -> Any:
@@ -350,37 +342,31 @@ def test_generated_setup_wires_the_simulated_counter(tmp_path: Path, rig) -> Non
     ast.parse(setup_text)
     ast.parse(measurement_text)
 
-    assert "from _measurement.pcr_curve import PcrCurveMeasurement" in setup_text
-    assert "class PcrCurveMeasurement" in measurement_text
+    assert "class Resources(measurement.PcrCurveResources):" in setup_text
+    assert "    counter: Keysight53220AChannel\n" in setup_text and "    voltage_source: Sim928\n" in setup_text
+    assert "def build_pcr_curve_procedure(resources: PcrCurveResources)" in measurement_text
     config = load_instruments(tmp_path / "config")
     counter_name = config[rig.counter].channels[0].attribute_name
     source_name = config[rig.gpib].children[rig.mainframe].children[rig.source].attribute_name
-    assert f"resources.from_attribute({counter_name!r})" in setup_text
-    assert f"resources.from_attribute({source_name!r})" in setup_text
-    assert ".from_config(resources, key=" not in setup_text
 
     payload = cast(
         dict[str, Any],
         YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8")),
     )
-    assert "instruments" not in payload["resources"]
-    assert payload["resources"]["instrument_sources"] == {counter_name: "local", source_name: "local"}
+    assert payload["roles"] == {"voltage_source": source_name, "counter": counter_name}
 
 
 def test_generated_project_measures_the_simulated_pcr_curve(tmp_path: Path, rig) -> None:
     out = _generate_project(tmp_path, rig)
     module = _load_setup_module(Path(out["setup_file"]))
-    project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(
-        project, resource_source_for(project, Path(out["project_dir"]))
-    )
+    resources = Project.load(Path(out["project_dir"])).resources(module.Resources)
 
     runner = ProcedureRunner(instruments=resources)
     observations: list[Point] = []
     runner.context.data_bus.subscribe(Point, observations.append)
 
     status = runner.run(
-        _measurement_class(out)(resources).build_procedure(),
+        module.measurement.build_pcr_curve_procedure(resources),
         RunStarted(procedure="pcr_curve", params=resources.params.model_dump(mode="json")),
     )
     assert status is Status.SUCCESS
@@ -410,16 +396,13 @@ def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Pa
     """
     out = _generate_project(tmp_path, rig)
     module = _load_setup_module(Path(out["setup_file"]))
-    project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(
-        project, resource_source_for(project, Path(out["project_dir"]))
-    )
+    resources = Project.load(Path(out["project_dir"])).resources(module.Resources)
     resources.counter.set_threshold(DEVICE.pulse_amplitude_mV * 2)
 
     runner = ProcedureRunner(instruments=resources)
     observations: list[Point] = []
     runner.context.data_bus.subscribe(Point, observations.append)
-    assert runner.run(_measurement_class(out)(resources).build_procedure()) is Status.SUCCESS
+    assert runner.run(module.measurement.build_pcr_curve_procedure(resources)) is Status.SUCCESS
 
     assert resources.counter.get_threshold() == pytest.approx(THRESHOLD_MV)
     top = observations[-1].values
@@ -430,15 +413,12 @@ def test_a_threshold_left_behind_by_another_caller_does_not_leak_in(tmp_path: Pa
 def test_the_measured_curve_has_the_shape_of_a_pcr_curve(tmp_path: Path, rig) -> None:
     out = _generate_project(tmp_path, rig)
     module = _load_setup_module(Path(out["setup_file"]))
-    project = load_project_config(Path(out["yaml_file"]))
-    resources = module.create_instrument_resources(
-        project, resource_source_for(project, Path(out["project_dir"]))
-    )
+    resources = Project.load(Path(out["project_dir"])).resources(module.Resources)
 
     runner = ProcedureRunner(instruments=resources)
     observations: list[Point] = []
     runner.context.data_bus.subscribe(Point, observations.append)
-    runner.run(_measurement_class(out)(resources).build_procedure())
+    runner.run(module.measurement.build_pcr_curve_procedure(resources))
 
     counts = {o.values["bias_voltage"]: o.values["counts"] for o in observations}
     plateau = DEVICE.incident_photon_rate_hz * DEVICE.max_detection_efficiency * GATE_TIME_S

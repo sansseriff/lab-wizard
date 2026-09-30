@@ -14,7 +14,7 @@ import pytest
 from pydantic import BaseModel
 
 from lab_procedure import Status
-from lab_wizard.lib.custom_measurements import load_custom_measurement, measurement_procedure
+from lab_wizard.lib.custom_measurements import load_custom_measurement
 from lab_wizard.lib.data import find, load_plot
 from lab_wizard.lib.recording import MeasureStep, Recording, RunStopped, record_run
 from lab_wizard.lib.task_adapters.run import run_procedure
@@ -145,7 +145,7 @@ def test_a_measurement_file_may_define_measure_instead_of_build_procedure(tmp_pa
         "from lab_wizard.lib.instruments.general.vsource import VSource\n"
         "class Params(BaseModel):\n"
         "    n: int = 2\n"
-        "@dataclass\n"
+        "@dataclass(frozen=True)\n"
         "class Resources:\n"
         "    source: VSource\n"
         "    params: Params = field(default_factory=Params)\n"
@@ -156,14 +156,13 @@ def test_a_measurement_file_may_define_measure_instead_of_build_procedure(tmp_pa
     )
     found = load_custom_measurement(path)
     assert found.description == "Ramp a value." and set(found.roles) == {"source"}
+    assert found.entry == "measure"
 
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location("ramp_under_test", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert isinstance(measurement_procedure(module, object()), MeasureStep)
+    # Resources must be frozen: a project's setup narrows its fields in a subclass.
+    path.write_text(path.read_text().replace("@dataclass(frozen=True)", "@dataclass"), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"frozen=True"):
+        load_custom_measurement(path)
+    path.write_text(path.read_text().replace("@dataclass\n", "@dataclass(frozen=True)\n"), encoding="utf-8")
 
     path.write_text(path.read_text() + "def build_procedure(resources):\n    pass\n", encoding="utf-8")
     with pytest.raises(ValueError, match="both measure and build_procedure"):

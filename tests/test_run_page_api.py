@@ -29,15 +29,16 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rig):
     yield ws, TestClient(app)
 
 
-def _create(client: TestClient, rig, name: str = "bias_sweep") -> str:
+def _create(client: TestClient, rig, name: str = "bias_sweep", style: str = "production", kind: str = "custom") -> str:
     selections = [rig.select("voltage_source", "source"), rig.select("voltage_sense", "meter")]
     response = client.post(
         "/api/create-measurement-project",
         json={
             "measurement_name": name,
-            "kind": "custom",
+            "kind": kind,
             "selected_resources": [s.model_dump(mode="json") for s in selections],
             "outputs": {"files": False},
+            "generation_style": style,
         },
     )
     assert response.status_code == 200, response.text
@@ -66,7 +67,7 @@ def test_a_projects_settings_are_its_run_params_and_outputs(workspace, rig):
     assert settings["params"]["settle_s"] == 0.05
     assert settings["outputs"]["files"] is False
     assert settings["params_schema"]["properties"]["settle_s"]["type"] == "number"
-    assert "resources:" in settings["yaml"]
+    assert "roles:" in settings["yaml"]
     assert client.get("/api/projects/nothing/settings").status_code == 404
 
 
@@ -78,7 +79,7 @@ def test_saving_sections_keeps_the_rest_of_the_file(workspace, rig):
     client.put("/api/data/devices/A7", json={"properties": {}})
     saved = client.put(f"/api/projects/{project}/settings", json={"run": run}).json()
     assert saved["run"] == run
-    assert "instrument_sources" in saved["yaml"]  # the resources were not touched
+    assert "roles:" in saved["yaml"]  # the roles were not touched
 
 
 def test_a_bad_setting_is_refused_with_where_it_is(workspace, rig):
@@ -191,3 +192,48 @@ def test_a_pid_reused_after_the_run_is_not_mistaken_for_it(workspace, rig):
         assert stranger.poll() is None  # never signalled
     finally:
         stranger.kill()
+
+
+def test_an_embedded_project_is_run_from_its_file_alone(workspace, rig):
+    """Its settings are in its setup file: the page says so, refuses to save, and still follows the run."""
+    ws, client = workspace
+    project = _create(client, rig, style="pedagogical_embedded")
+    settings = client.get(f"/api/projects/{project}/settings").json()
+    assert settings["style"] == "embedded"
+    refused = client.put(f"/api/projects/{project}/settings", json={"run": {"notes": "x"}})
+    assert refused.status_code == 422 and "bias_sweep_setup.py" in refused.json()["detail"]
+
+    client.post(f"/api/projects/{project}/launch")
+    status = _wait_until_ended(client, project)
+    assert status["exit_code"] == 0, status["log"]
+    assert status["run_id"] == 1  # it reported its run, with sinks of its own
+    assert find(db=ws.data_dir / "lab.db").table()["status"].to_list() == ["success"]
+
+
+def test_editing_a_projects_procedure_in_its_yaml_rebuilds_its_module(workspace, rig):
+    """The YAML tab edits the procedure: block like any other; a broken one is refused where it breaks."""
+    from ruamel.yaml import YAML
+
+    from lab_wizard.lib.procedures.codegen import built_from, procedure_hash
+
+    ws, client = workspace
+    project = _create(client, rig, name="iv_curve", kind="procedure")
+    settings = client.get(f"/api/projects/{project}/settings").json()
+    document = YAML(typ="safe").load(settings["yaml"])
+    document["procedure"]["plots"] = [{"name": "Only this", "x": "bias_voltage", "y": ["sense_voltage"]}]
+
+    import io
+
+    buffer = io.StringIO()
+    YAML(typ="safe").dump(document, buffer)
+    saved = client.put(f"/api/projects/{project}/settings", json={"yaml": buffer.getvalue()})
+    assert saved.status_code == 200, saved.text
+    module = (ws.projects_dir / project / "iv_curve_measurement.py").read_text(encoding="utf-8")
+    assert built_from(module) == procedure_hash(document["procedure"])
+
+    document["procedure"]["body"]["type"] = "no_such_step"
+    buffer = io.StringIO()
+    YAML(typ="safe").dump(document, buffer)
+    refused = client.put(f"/api/projects/{project}/settings", json={"yaml": buffer.getvalue()})
+    assert refused.status_code == 422
+    assert refused.json()["problems"][0]["path"][0] == "procedure"

@@ -15,7 +15,6 @@ from typing import Any
 
 from lab_wizard.lib.custom_measurements import (
     CustomMeasurement,
-    custom_setup_template_source,
     list_custom_measurements,
 )
 from lab_wizard.wizard.backend.models import FilledReq
@@ -64,8 +63,7 @@ def generate_custom_measurement_project(
         projects_dir=projects_dir,
         req=req,
         requirements=custom_requirements(measurement),
-        template_text=custom_setup_template_source(measurement),
-        measurement_source=measurement.path.read_text(encoding="utf-8"),
         params=params if params is not None else measurement.params_model().model_dump(mode="json"),
         params_model=measurement.params_model,
+        measurement=measurement,
     )

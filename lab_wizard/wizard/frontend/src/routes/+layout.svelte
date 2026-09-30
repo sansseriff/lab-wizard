@@ -2,6 +2,9 @@
 	import '../app.css';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { afterNavigate } from '$app/navigation';
+	import CaretLeftIcon from 'phosphor-svelte/lib/CaretLeft';
+	import CaretRightIcon from 'phosphor-svelte/lib/CaretRight';
 	import favicon from '$lib/assets/favicon.svg';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import Pill from '$lib/components/Pill.svelte';
@@ -18,33 +21,67 @@
 
 	// Breadcrumbs come from a table rather than from the path, because the URL
 	// segment and the human name differ where it matters (`/servers` is "This
-	// workspace", not "Servers / Servers").
-	const crumbs: Record<string, [string] | [string, string]> = {
-		'/': ['Overview'],
-		'/measurements/new': ['Measurements', 'Create'],
-		'/measurements/resources': ['Measurements', 'Create'],
-		'/measurements/projects': ['Measurements', 'Projects'],
-		'/measurements/run': ['Measurements', 'Run'],
-		'/procedures': ['Procedures'],
-		'/procedures/edit': ['Procedures', 'Edit'],
-		'/instruments': ['Instruments', 'Configured'],
-		'/instruments/custom': ['Instruments', 'Custom resources'],
-		'/servers': ['Servers', 'This workspace'],
-		'/servers/permissions': ['Servers', 'Permissions'],
-		'/servers/hardware': ['Servers', 'Hardware ownership'],
-		'/servers/remote': ['Servers', 'Remote servers'],
-		'/data': ['Data'],
-		'/settings': ['Settings']
+	// workspace", not "Servers / Servers"). Every crumb but the last is a link:
+	// a section has no page of its own, so its crumb goes to the page that
+	// opens it in the sidebar.
+	type Crumb = { label: string; href?: string };
+	const MEASUREMENTS: Crumb = { label: 'Measurements', href: '/measurements/projects' };
+	const CREATE: Crumb = { label: 'Create', href: '/measurements/new' };
+	const PROCEDURES: Crumb = { label: 'Procedures', href: '/procedures' };
+	const INSTRUMENTS: Crumb = { label: 'Instruments', href: '/instruments' };
+	const SERVERS: Crumb = { label: 'Servers', href: '/servers' };
+	const crumbs: Record<string, Crumb[]> = {
+		'/': [{ label: 'Overview' }],
+		'/measurements/new': [MEASUREMENTS, { label: 'Create' }],
+		'/measurements/resources': [MEASUREMENTS, CREATE, { label: 'Instruments' }],
+		'/measurements/projects': [MEASUREMENTS, { label: 'Projects' }],
+		'/measurements/run': [MEASUREMENTS, { label: 'Run' }],
+		'/procedures': [{ label: 'Procedures' }],
+		'/procedures/edit': [PROCEDURES, { label: 'Edit' }],
+		'/instruments': [INSTRUMENTS, { label: 'Configured' }],
+		'/instruments/custom': [INSTRUMENTS, { label: 'Custom resources' }],
+		'/servers': [SERVERS, { label: 'This workspace' }],
+		'/servers/permissions': [SERVERS, { label: 'Permissions' }],
+		'/servers/hardware': [SERVERS, { label: 'Hardware ownership' }],
+		'/servers/remote': [SERVERS, { label: 'Remote servers' }],
+		'/data': [{ label: 'Data' }],
+		'/settings': [{ label: 'Settings' }]
 	};
 
 	// `trailingSlash: 'always'` means the router reports `/instruments/`; the
 	// table above is keyed without one.
-	const trail = $derived.by(() => {
+	const key = $derived.by(() => {
 		const p = page.url.pathname;
-		const key = p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p;
-		return crumbs[key] ?? ['Lab Wizard'];
+		return p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p;
 	});
-	const wide = $derived(['/data', '/measurements/run'].includes(page.url.pathname.replace(/\/$/, '')));
+	const trail = $derived.by(() => {
+		const base = crumbs[key] ?? [{ label: 'Lab Wizard' }];
+		// A run or an edit of one thing ends in that thing; for a run, "Run" goes back to choosing.
+		const project = key === '/measurements/run' && page.url.searchParams.get('project');
+		if (project) return [...base.slice(0, -1), { label: 'Run', href: key }, { label: project }];
+		const edited = key === '/procedures/edit' && page.url.searchParams.get('name');
+		if (edited) return [...base.slice(0, -1), { label: edited }];
+		return base;
+	});
+	const wide = $derived(['/data', '/measurements/run'].includes(key));
+	// The Create list runs the height of the window, so it has no foot padding to spare.
+	const fill = $derived(key === '/measurements/new');
+
+	// Back and forward are the browser's own history, which the pages keep
+	// meaningful: a page's tabs and filters replace their entry instead of
+	// pushing one, so Back leaves the page. The buttons are for windows with no
+	// browser chrome. `navigation` tells whether there is anywhere to go; where
+	// it does not exist (Firefox, Safari) they stay enabled.
+	let canBack = $state(true);
+	let canForward = $state(true);
+	function syncHistory() {
+		const nav = (window as unknown as { navigation?: { canGoBack: boolean; canGoForward: boolean } }).navigation;
+		if (!nav) return;
+		canBack = nav.canGoBack;
+		canForward = nav.canGoForward;
+	}
+	afterNavigate(syncHistory);
+	onMount(syncHistory);
 	// The live page a web plotter opens shows one run and nothing of the wizard.
 	const bare = $derived(page.url.pathname.startsWith('/live'));
 </script>
@@ -64,10 +101,33 @@
 		<header
 			class="sticky top-0 z-10 flex h-[46px] shrink-0 items-center gap-3 border-b border-line bg-surface px-6"
 		>
+			<div class="flex shrink-0 items-center">
+				<button
+					class="grid size-6 place-items-center rounded text-muted hover:bg-surface-2 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+					aria-label="Back"
+					title="Back"
+					disabled={!canBack}
+					onclick={() => history.back()}><CaretLeftIcon size={14} /></button
+				>
+				<button
+					class="grid size-6 place-items-center rounded text-muted hover:bg-surface-2 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+					aria-label="Forward"
+					title="Forward"
+					disabled={!canForward}
+					onclick={() => history.forward()}><CaretRightIcon size={14} /></button
+				>
+			</div>
+
 			<nav class="flex min-w-0 items-center gap-1.5 text-xs text-muted" aria-label="Breadcrumb">
 				{#each trail as part, i}
 					{#if i > 0}<span class="opacity-45">/</span>{/if}
-					<span class={i === trail.length - 1 ? 'font-semibold text-ink' : ''}>{part}</span>
+					{#if i === trail.length - 1}
+						<span class="font-semibold text-ink" aria-current="page">{part.label}</span>
+					{:else if part.href}
+						<a href={part.href} class="no-underline hover:text-ink hover:underline">{part.label}</a>
+					{:else}
+						<span>{part.label}</span>
+					{/if}
 				{/each}
 			</nav>
 
@@ -98,7 +158,13 @@
 
 		<!-- The Data page is a workbench of side-by-side panels and needs the
 		     whole window; everything else reads best at a comfortable width. -->
-		<div class={wide ? 'w-full px-4 pt-4' : 'w-full max-w-[1180px] px-6 pb-16 pt-6'}>
+		<div
+			class={wide
+				? 'w-full px-4 pt-4'
+				: fill
+					? 'w-full max-w-[1180px] px-6 pb-4 pt-6'
+					: 'w-full max-w-[1180px] px-6 pb-16 pt-6'}
+		>
 			{@render children?.()}
 		</div>
 	</main>

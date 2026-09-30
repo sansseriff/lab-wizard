@@ -515,6 +515,14 @@
       ],
       "title": "Setup File"
      },
+     "style": {
+      "enum": [
+       "production",
+       "embedded"
+      ],
+      "title": "Style",
+      "type": "string"
+     },
      "yaml": {
       "title": "Yaml",
       "type": "string"
@@ -525,6 +533,7 @@
      "path",
      "measurement",
      "kind",
+     "style",
      "setup_file",
      "yaml",
      "run",

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import ScrollArea from '$lib/components/ScrollArea.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import { goto, preloadData } from '$app/navigation';
@@ -29,26 +29,27 @@
 	}
 </script>
 
-<section class="space-y-4">
-	<h1 class="text-headline font-semibold">Choose a measurement</h1>
-	<p class="text-body text-ink-2">
+<!-- Fills the window, so the list is as long as the page allows and Next sits
+     with the title rather than under a list of unknown length. -->
+<section class="flex h-[calc(100dvh-46px-2.5rem)] min-h-[360px] flex-col gap-4">
+	<PageHeader title="Choose a measurement">
 		Pick what to run, then continue to bind instruments. Procedures are composed in the wizard —
 		built into lab_wizard, or saved in this workspace. Custom measurements are Python files in this
 		workspace's <code>measurements/</code> folder, for what a composed procedure cannot do; the
 		examples there show how to write one.
-	</p>
+		{#snippet actions()}
+			<button class="lw-btn lw-btn-primary" onclick={onNext} disabled={!selected}>Next</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if data?.error}
 		<Callout tone="crit">{data.error}</Callout>
 	{/if}
 
-	<ScrollArea
-		type="hover"
-		class="relative overflow-hidden rounded border border-line bg-surface p-3 shadow-sm"
-		orientation="vertical"
-		viewportClasses="h-full max-h-[420px] w-full"
-	>
-		<ul class="divide-y divide-line">
+	<!-- The list pads inside its own scroll area, so the selection ring has room
+	     to draw instead of being clipped at the edge. -->
+	<div class="min-h-0 flex-1 overflow-y-auto rounded border border-line bg-surface shadow-sm">
+		<ul class="divide-y divide-line p-2">
 			{#each choices as c (`${c.kind}:${c.name}`)}
 				<li>
 					<button
@@ -91,15 +92,5 @@
 				</li>
 			{/each}
 		</ul>
-	</ScrollArea>
-
-	<div class="flex justify-end">
-		<button
-			class="inline-flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:brightness-110 disabled:opacity-50"
-			onclick={onNext}
-			disabled={!selected}
-		>
-			Next
-		</button>
 	</div>
 </section>

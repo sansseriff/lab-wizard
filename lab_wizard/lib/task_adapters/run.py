@@ -40,6 +40,7 @@ from lab_wizard.lib.task_adapters.sinks import RunInfo, RunOutputs, RunSink
 from lab_wizard.lib.utilities.model_tree import (
     OutputsConfig,
     ProjectConfig,
+    RunConfig,
     load_project_config,
 )
 from lab_wizard.lib.workspace import find_workspace
@@ -111,10 +112,16 @@ def run_started(
     *,
     definition: dict[str, Any] | None = None,
     project_dir: Path | None = None,
+    run: RunConfig | None = None,
 ) -> RunStarted:
-    """Everything known about a run of ``procedure`` before it starts."""
-    project = _project(project_dir)
-    run = project.run if project is not None else None
+    """Everything known about a run of ``procedure`` before it starts.
+
+    ``run`` gives the run's device, operator, notes and metadata; without it
+    they are read from the project's ``run:`` block.
+    """
+    if run is None:
+        project = _project(project_dir)
+        run = project.run if project is not None else None
     params = getattr(resources, "params", None)
     return RunStarted(
         procedure=procedure,
@@ -151,22 +158,23 @@ def run_outputs(
 ) -> RunOutputs:
     """Everything that consumes a run: its lab database record, then its sinks.
 
-    A run in a project is recorded in the project's workspace database, and
-    ``sinks`` of ``None`` means the ones its ``outputs:`` asks for. A run
-    outside a project is recorded only if given a ``database``, and produces
-    only the ``sinks`` it is given.
+    The run is recorded in ``database`` if given, else in the workspace
+    database of the project at ``project_dir``; with neither it is not
+    recorded. ``sinks`` of ``None`` means the ones the project's ``outputs:``
+    asks for (none without a project). A run the wizard launched also reports
+    its id to the wizard, whatever its sinks.
     """
     recorder = None
-    wanted: list[RunSink] = []
-    if project_dir is not None:
-        recorder = DatabaseRecorder(database_path(project_dir))
-        wanted = project_outputs(project_dir)
-        launch_file = os.environ.get(LAUNCH_FILE_ENV)
-        if launch_file:
-            wanted.insert(0, LaunchReport(Path(launch_file)))
-    elif database is not None:
+    if database is not None:
         recorder = DatabaseRecorder(database)
-    return RunOutputs(recorder, wanted if sinks is None else sinks, project_dir=project_dir)
+    elif project_dir is not None:
+        recorder = DatabaseRecorder(database_path(project_dir))
+    if sinks is None:
+        sinks = project_outputs(project_dir) if project_dir is not None else []
+    launch_file = os.environ.get(LAUNCH_FILE_ENV)
+    if launch_file and recorder is not None:
+        sinks = [LaunchReport(Path(launch_file)), *sinks]
+    return RunOutputs(recorder, sinks, project_dir=project_dir)
 
 
 def run_procedure(
@@ -177,17 +185,22 @@ def run_procedure(
     definition: dict[str, Any] | None = None,
     project_dir: str | Path | None = None,
     sinks: list[RunSink] | None = None,
+    run: RunConfig | None = None,
+    database: str | Path | None = None,
 ) -> Status:
     """Run ``root`` against ``resources``, recording it if it belongs to a project.
 
-    ``sinks`` replace the ones the project's ``outputs:`` asks for.
+    What the project's YAML would say can be given instead: ``sinks`` replace
+    the ones its ``outputs:`` asks for, ``run`` its ``run:`` block, and
+    ``database`` where its workspace records runs. An embedded-style project
+    gives all three, so it reads nothing from its folder when it runs.
     """
     project_path = Path(project_dir).resolve() if project_dir is not None else None
     runner = ProcedureRunner(instruments=resources)
-    outputs = run_outputs(project_dir=project_path, sinks=sinks)
+    outputs = run_outputs(project_dir=project_path, database=database, sinks=sinks)
     outputs.attach(runner.context.data_bus, runner.context.status_bus)
     try:
-        started = run_started(procedure, resources, definition=definition, project_dir=project_path)
+        started = run_started(procedure, resources, definition=definition, project_dir=project_path, run=run)
         return runner.run(root, started)
     finally:
         outputs.close()

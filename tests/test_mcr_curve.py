@@ -26,6 +26,7 @@ import pytest
 from lab_procedure import Point, ProcedureRunner, Status
 
 from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.lib.project import Project
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.storage import (
     delete_procedure,
@@ -35,8 +36,6 @@ from lab_wizard.lib.procedures.storage import (
     save_preset,
     save_procedure,
 )
-from lab_wizard.lib.utilities.model_tree import load_project_config
-from lab_wizard.lib.client.project_resources import resource_source_for
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
 
@@ -125,17 +124,12 @@ def _generate(tmp_path: Path, rig, style: str = "production") -> dict[str, Any]:
 
 
 def _load(out: dict[str, Any]) -> tuple[Any, Any]:
-    setup_path = Path(out["setup_file"])
-    sys.path.insert(0, str(setup_path.parent))
-    try:
-        spec = importlib.util.spec_from_file_location("mcr_setup", setup_path)
-        assert spec is not None and spec.loader is not None
-        setup = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(setup)
-        return setup, importlib.import_module("mcr_curve")
-    finally:
-        sys.path.remove(str(setup_path.parent))
-        sys.modules.pop("mcr_curve", None)
+    """The generated setup module, and the measurement module it loaded beside it."""
+    spec = importlib.util.spec_from_file_location("mcr_setup", Path(out["setup_file"]))
+    assert spec is not None and spec.loader is not None
+    setup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(setup)
+    return setup, setup.measurement
 
 
 def _expected_rate(transmission: float) -> float:
@@ -149,15 +143,12 @@ def _expected_rate(transmission: float) -> float:
 def test_the_measured_mcr_curve_follows_the_attenuation(tmp_path: Path, rig):
     out = _generate(tmp_path, rig)
     setup, measurement = _load(out)
-    resources = setup.create_instrument_resources(
-        project := load_project_config(Path(out["yaml_file"])),
-        resource_source_for(project, Path(out["project_dir"])),
-    )
+    resources = Project.load(Path(out["project_dir"])).resources(setup.Resources)
 
     runner = ProcedureRunner(instruments=resources)
     rows: list[Point] = []
     runner.context.data_bus.subscribe(Point, rows.append)
-    assert runner.run(measurement.McrCurveMeasurement(resources).build_procedure()) is Status.SUCCESS
+    assert runner.run(measurement.build_mcr_curve_procedure(resources)) is Status.SUCCESS
 
     # One row for the background, then one per attenuation holding both the
     # count and the device voltage read at it.

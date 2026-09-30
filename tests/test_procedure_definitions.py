@@ -10,7 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from lab_wizard.lib.procedures.catalog import list_step_types, step_catalog, step_params_class
-from lab_wizard.lib.procedures.codegen import measurement_module_source, setup_template_source
+from lab_wizard.lib.procedures.codegen import measurement_module_source
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.spec import ProcedureError
 
@@ -187,7 +187,6 @@ def test_control_flow_renders_generically():
 def test_generated_sources_are_valid_python():
     definition = _definition(COUNT)
     ast.parse(measurement_module_source(definition))
-    ast.parse(setup_template_source(definition))
 
 
 def test_nested_sweeps_over_the_same_name_do_not_collide():

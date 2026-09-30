@@ -10,6 +10,7 @@ to this procedure.
 from __future__ import annotations
 
 import importlib
+import json
 import importlib.util
 import math
 import subprocess
@@ -18,6 +19,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+import pytest
 from ruamel.yaml import YAML
 
 from lab_procedure import Point, ProcedureRunner, Status
@@ -30,12 +32,15 @@ from lab_wizard.lib.utilities.config_io import (
     assign_missing_leaf_attribute_names,
     save_instruments_to_config,
 )
-from lab_wizard.lib.utilities.model_tree import load_project_config
-from lab_wizard.lib.client.project_resources import resource_source_for
+from lab_wizard.lib.project import Project
+from lab_wizard.lib.procedures.codegen import built_from, procedure_hash
+from lab_wizard.lib.data import find
+from lab_wizard.wizard.backend import data_api
 from lab_wizard.wizard.backend.procedure_generation import (
     generate_procedure_project,
-    refresh_procedure_source,
+    update_project_procedure,
 )
+from lab_wizard.wizard.backend.regenerate import RegenerateError, regenerate_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest, SelectedResource
 
 DEVICE = SnspdParams()
@@ -125,12 +130,17 @@ def _generate(tmp_path: Path, rig, preset: str | None = "bench_sweep") -> dict[s
 
 
 def _load_setup(out: dict[str, Any]) -> Any:
-    """The generated setup module, and the measurement module it loaded from _measurement/."""
+    """The generated setup module, and the measurement module it loaded beside it."""
     spec = importlib.util.spec_from_file_location("composed_setup", Path(out["setup_file"]))
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module, sys.modules[module.ComposedPcrMeasurement.__module__]
+    return module, module.measurement
+
+
+def _resources(setup: Any, out: dict[str, Any]) -> Any:
+    """Each role's instrument from the project YAML, as the setup's __main__ builds them."""
+    return Project.load(Path(out["project_dir"])).resources(setup.Resources)
 
 
 def _expected_counts(bias_v: float) -> float:
@@ -147,28 +157,24 @@ def test_the_generated_project_carries_the_preset_and_the_procedure(tmp_path: Pa
     assert payload["measurement"]["params"]["bias"]["sweep"] == {"mode": "explicit", "values": SWEEP_V}
 
     module_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
-    assert "def build_composed_pcr_procedure(" in module_text
-    assert "# wizard:procedure:start" in module_text and "# wizard:procedure:end" in module_text
+    assert "def build_composed_pcr_procedure(resources: ComposedPcrResources)" in module_text
+    # The params types sit with the step tree; their values only in the YAML.
+    assert "class ComposedPcrParams(BaseModel):" in module_text
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
-    assert "class ComposedPcrParams(BaseModel):" in setup_text
-    assert "resources.from_attribute(" in setup_text
-    assert ".from_config(resources, key=" not in setup_text
-    assert "instruments" not in payload["resources"]
-    assert set(payload["resources"]["instrument_sources"].values()) == {"local"}
+    assert "class Resources(measurement.ComposedPcrResources):" in setup_text
+    assert "BaseModel" not in setup_text and "from_attribute" not in setup_text
+    assert all(isinstance(binding, str) for binding in payload["roles"].values())  # all local
 
 
 def test_the_composed_procedure_measures_the_detectors_curve(tmp_path: Path, rig):
     out = _generate(tmp_path, rig)
     setup, measurement = _load_setup(out)
-    project = load_project_config(Path(out["yaml_file"]))
-    resources = setup.create_instrument_resources(
-        project, resource_source_for(project, Path(out["project_dir"]))
-    )
+    resources = _resources(setup, out)
 
     runner = ProcedureRunner(instruments=resources)
     rows: list[Point] = []
     runner.context.data_bus.subscribe(Point, rows.append)
-    status = runner.run(measurement.ComposedPcrMeasurement(resources).build_procedure())
+    status = runner.run(measurement.build_composed_pcr_procedure(resources))
 
     assert status is Status.SUCCESS
     assert [row.values["bias_voltage"] for row in rows] == SWEEP_V
@@ -197,44 +203,127 @@ def test_without_a_preset_the_definitions_defaults_are_used(tmp_path: Path, rig)
 
 
 def test_the_generated_params_model_matches_the_definitions(tmp_path: Path, rig):
-    """The setup file declares the params as source; storage validates with a model
-    built at run time. They must agree, or a preset could pass one and fail the other."""
+    """The measurement module declares the params as source; storage validates with a
+    model built at run time. They must agree, or a preset could pass one and fail the other."""
     out = _generate(tmp_path, rig)
-    setup, _measurement = _load_setup(out)
-    definition = ProcedureDefinition.model_validate(PCR_DEFINITION)
-    assert setup.ComposedPcrParams().model_dump(mode="json") == definition.param_defaults()
+    _setup, measurement = _load_setup(out)
+    defaults = ProcedureDefinition.model_validate(PCR_DEFINITION).param_defaults()
+    assert measurement.ComposedPcrParams.model_validate(defaults).model_dump(mode="json") == defaults
+    # No value comes from the classes: the YAML is the only place one lives.
+    with pytest.raises(ValueError):
+        measurement.ComposedPcrParams()
 
 
-def test_refreshing_replaces_the_tree_and_keeps_edits_outside_it(tmp_path: Path, rig):
-    out = _generate(tmp_path, rig)
-    project_dir = Path(out["project_dir"])
-    module_path = Path(out["measurement_file"])
-    module_path.write_text(
-        module_path.read_text(encoding="utf-8") + "\n\ndef my_analysis():\n    return 'kept'\n",
-        encoding="utf-8",
-    )
-
-    # Change the definition: retry each count up to three times.
-    changed = dict(PCR_DEFINITION)
-    changed["body"] = deepcopy(PCR_DEFINITION["body"])
+def _with_retry(definition: dict[str, Any]) -> dict[str, Any]:
+    """The same procedure, with each count retried up to three times."""
+    changed = deepcopy(definition)
     point = changed["body"]["children"][1]["body"]["body"]["children"]
     point[2] = {"type": "retry", "max_attempts": 3, "child": point[2]}
-    save_procedure(tmp_path / "config", ProcedureDefinition.model_validate(changed))
+    return changed
 
-    refresh_procedure_source(tmp_path / "config", project_dir)
-    text = module_path.read_text(encoding="utf-8")
-    assert "Retry(" in text
-    assert "from lab_procedure.steps import" in text and "Retry" in text
-    assert "def my_analysis():" in text
+
+def _edit_yaml(path: Path, edit: Any) -> None:
+    rt = YAML(typ="rt")
+    document = rt.load(path.read_text(encoding="utf-8"))
+    edit(document)
+    with path.open("w", encoding="utf-8") as handle:
+        rt.dump(document, handle)
+
+
+def test_the_project_yaml_carries_its_procedure_and_the_module_is_built_from_it(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
+    payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
+    expected = ProcedureDefinition.model_validate(PCR_DEFINITION).model_dump(mode="json", exclude_none=True)
+    assert payload["procedure"] == expected
+    assert list(payload) == ["project", "run", "roles", "procedure", "measurement", "outputs"]
+
+    module_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
+    assert "DEFINITION" not in module_text  # the YAML is the one copy
+    assert built_from(module_text) == procedure_hash(payload["procedure"])
+
+
+def test_editing_the_procedure_block_rebuilds_the_module_before_the_next_run(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
+    yaml_path, module_path = Path(out["yaml_file"]), Path(out["measurement_file"])
+
+    def edit(doc: Any) -> None:
+        procedure = _with_retry(doc["procedure"])
+        # A plot and a derived column added in the project's YAML alone.
+        procedure["derived"] = {"rate_hz": "counts / int_time"}
+        procedure["plots"] = [{"name": "Rate", "x": "bias_voltage", "y": ["rate_hz"]}]
+        doc["procedure"] = procedure
+
+    _edit_yaml(yaml_path, edit)
+
+    setup_path = Path(out["setup_file"])
+    result = subprocess.run(
+        [sys.executable, str(setup_path)], capture_output=True, text=True, timeout=300, cwd=str(setup_path.parent)
+    )
+    assert result.returncode == 0, result.stderr
+    assert "built composed_pcr_measurement.py again" in result.stdout
+    assert "Retry(" in module_path.read_text(encoding="utf-8")
+
+    # The run records the very block its code was built from.
+    runs = find(db=Path(out["project_dir"]) / "data" / "lab.db")
+    recorded = runs.info(runs.ids[0])["definition"]
+    assert recorded == YAML(typ="safe").load(yaml_path.read_text(encoding="utf-8"))["procedure"]
+    assert '"type": "retry"' in json.dumps(recorded)
+
+    # The Data page draws the run by what it recorded: the new plot, and its derived column.
+    db = Path(out["project_dir"]) / "data" / "lab.db"
+    detail = data_api.run_detail(db, tmp_path / "config", runs.ids[0])
+    assert [p["name"] for p in detail["plots"]] == ["Rate"]
+    drawn = data_api.plot(db, detail["plots"][0])
+    (series,) = drawn["series"]
+    assert series["x"] == SWEEP_V and len(series["y"]) == len(SWEEP_V)
+
+
+def test_a_procedure_block_that_does_not_check_stops_the_run_before_anything_opens(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
+    _edit_yaml(Path(out["yaml_file"]), lambda doc: doc["procedure"]["body"].update(type="no_such_step"))
+    setup_path = Path(out["setup_file"])
+    result = subprocess.run(
+        [sys.executable, str(setup_path)], capture_output=True, text=True, timeout=300, cwd=str(setup_path.parent)
+    )
+    assert result.returncode != 0
+    assert "procedure: block" in result.stderr and "no_such_step" in result.stderr
+
+
+def test_updating_from_the_procedure_replaces_only_the_procedure_block(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
+    yaml_path = Path(out["yaml_file"])
+    before = YAML(typ="safe").load(yaml_path.read_text(encoding="utf-8"))
+
+    save_procedure(tmp_path / "config", ProcedureDefinition.model_validate(_with_retry(PCR_DEFINITION)))
+    update_project_procedure(tmp_path / "config", Path(out["project_dir"]))
+
+    after = YAML(typ="safe").load(yaml_path.read_text(encoding="utf-8"))
+    assert '"type": "retry"' in json.dumps(after["procedure"])
+    assert {k: v for k, v in after.items() if k != "procedure"} == {k: v for k, v in before.items() if k != "procedure"}
+    assert "Retry(" in Path(out["measurement_file"]).read_text(encoding="utf-8")
 
     setup, measurement = _load_setup(out)
-    resources = setup.create_instrument_resources(
-        project := load_project_config(Path(out["yaml_file"])),
-        resource_source_for(project, Path(out["project_dir"])),
-    )
-    assert ProcedureRunner().run(measurement.ComposedPcrMeasurement(resources).build_procedure()) is Status.SUCCESS
-    # The definition every run records was regenerated with the tree.
-    assert ProcedureDefinition.model_validate(measurement.DEFINITION) == ProcedureDefinition.model_validate(changed)
+    resources = _resources(setup, out)
+    assert ProcedureRunner().run(measurement.build_composed_pcr_procedure(resources)) is Status.SUCCESS
+
+
+def test_wizard_regenerate_writes_the_setups_roles_from_the_yaml(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
+    setup_path = Path(out["setup_file"])
+    generated = setup_path.read_text(encoding="utf-8")
+    # A setup whose roles block has gone stale: emptied, as if the roles changed.
+    stale = generated.replace("    voltage_source: Sim928\n", "").replace("    counter: Keysight53220AChannel\n", "")
+    setup_path.write_text(stale, encoding="utf-8")
+
+    done = regenerate_project(Path(out["project_dir"]))
+    assert any("roles" in line for line in done)
+    text = setup_path.read_text(encoding="utf-8")
+    assert "    voltage_source: Sim928\n" in text and "    counter: Keysight53220AChannel\n" in text
+
+    # A role the procedure has but roles: does not bind is named.
+    _edit_yaml(Path(out["yaml_file"]), lambda doc: doc["roles"].pop("counter"))
+    with pytest.raises(RegenerateError, match="counter"):
+        regenerate_project(Path(out["project_dir"]))
 
 
 def test_the_built_in_pcr_curve_takes_a_preset(tmp_path: Path, rig):

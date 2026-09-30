@@ -35,7 +35,7 @@ from lab_wizard.lib.procedures.storage import (
     save_preset,
     save_procedure,
 )
-from lab_wizard.wizard.backend.python_formatting import format_python_code
+from lab_wizard.lib.utilities.python_formatting import format_python_code
 from lab_wizard.lib.server.registry import InstrumentRegistry
 
 

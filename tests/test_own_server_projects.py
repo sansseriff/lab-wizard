@@ -111,8 +111,12 @@ def test_a_procedure_run_through_the_workspaces_own_server(served):
     out = created.json()
 
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
-    assert "instruments" not in payload["resources"]
-    assert set(payload["resources"]["instrument_sources"].values()) == {own["name"]}
+    # Every role through the workspace's own server...
+    assert {b["server"] for b in payload["roles"].values()} == {own["name"]}
+    # ...so each is typed as the proxy the run is handed, with the server's class noted.
+    setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
+    assert "    voltage_source: RemoteVSource  # through" in setup_text
+    assert "    counter: RemoteCounter  # through" in setup_text
     assert payload["outputs"]["files"] is True  # the default
 
     # Name the device under test and where it sat, as a person does before a run.

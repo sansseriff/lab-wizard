@@ -8,6 +8,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import { errorMessage } from '$lib/api';
+	import Combobox from '$lib/components/Combobox.svelte';
 	import Panel from '$lib/components/Panel.svelte';
 	import {
 		settingsApi,
@@ -25,6 +26,8 @@
 	let error = $state('');
 	let saving = $state(false);
 	let saved = $state(false);
+	// The recorded-key picker only adds; it always goes back to showing its prompt.
+	let picked = $state<string | null>(null);
 
 	const errors = $derived(check?.problems.filter((p) => p.level === 'error') ?? []);
 	const warnings = $derived(check?.problems.filter((p) => p.level === 'warning') ?? []);
@@ -128,7 +131,7 @@
 				Click a key to add it; <code>/</code> starts a subfolder. The same keys the Data page filters
 				by. A run missing a value gets <code>none</code>; a name already taken gets <code>_2</code>.
 			</p>
-			<div class="mt-1.5 flex flex-wrap gap-1">
+			<div class="mt-1.5 flex flex-wrap items-center gap-1">
 				{#each fixedKeys as key (key)}
 					<button type="button" class="lw-btn lw-btn-sm mono" onclick={() => insertKey(key)}
 						>{key}</button
@@ -136,12 +139,18 @@
 				{/each}
 			</div>
 			{#if recordedKeys.length}
-				<div class="mt-1 flex flex-wrap gap-1" aria-label="Recorded by this lab">
-					{#each recordedKeys as key (key)}
-						<button type="button" class="lw-btn lw-btn-sm mono" onclick={() => insertKey(key)}
-							>{key}</button
-						>
-					{/each}
+				<div class="mt-2 max-w-sm">
+					<Combobox
+						mono
+						bind:value={picked}
+						options={recordedKeys.map((k) => ({ value: k, label: k }))}
+						placeholder="Add a recorded key… ({recordedKeys.length})"
+						aria-label="Add a key recorded by this lab"
+						onValueChange={(key) => {
+							if (key) insertKey(key);
+							picked = null;
+						}}
+					/>
 				</div>
 			{:else}
 				<p class="mt-1 text-fine text-muted">

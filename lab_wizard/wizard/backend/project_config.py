@@ -28,8 +28,10 @@ from pydantic import BaseModel, ValidationError
 from ruamel.yaml import YAML
 
 from lab_wizard.lib.custom_measurements import load_custom_measurement
+from lab_wizard.lib.procedures.definition import ProcedureDefinition
+from lab_wizard.lib.procedures.spec import ProcedureError
+from lab_wizard.lib.project import build_measurement_module
 from lab_wizard.lib.project_module import module_path
-from lab_wizard.lib.procedures.storage import load_procedure
 from lab_wizard.lib.utilities.model_tree import ProjectConfig
 from lab_wizard.wizard.backend.project_generation import commented_params
 
@@ -65,7 +67,10 @@ def _params_model(project_dir: Path, project: ProjectConfig, config_dir: Path) -
         if project.project.kind == "custom":
             # The project's own copy: it is what runs, and it may have been edited.
             return load_custom_measurement(module_path(project_dir, name)).params_model
-        return load_procedure(config_dir, name).params_model()
+        if project.procedure is not None:
+            # The project's own procedure, not the workspace's: it is what runs.
+            return ProcedureDefinition.model_validate(project.procedure).params_model()
+        return None
     except Exception:  # noqa: BLE001 - params then go unchecked here; the run still checks them
         return None
 
@@ -82,6 +87,13 @@ def _check(data: Any, project_dir: Path, config_dir: Path) -> ProjectConfig:
         project = ProjectConfig.model_validate(data)
     except ValidationError as e:
         raise ProjectConfigError(_problems(e, [])) from e
+    if project.procedure is not None:
+        try:
+            ProcedureDefinition.model_validate(project.procedure).check()
+        except ValidationError as e:
+            raise ProjectConfigError(_problems(e, ["procedure"])) from e
+        except ProcedureError as e:
+            raise ProjectConfigError([{"path": ["procedure"], "message": problem} for problem in e.problems]) from e
     model = _params_model(project_dir, project, config_dir)
     if model is not None:
         try:
@@ -104,6 +116,7 @@ def read_project(projects_dir: Path, config_dir: Path, name: str) -> dict[str, A
         "path": str(project_dir),
         "measurement": project.project.measurement_type,
         "kind": project.project.kind,
+        "style": project.project.style,
         "setup_file": setup[0].name if setup else None,
         "yaml": text,
         "run": project.run.model_dump(mode="json"),
@@ -144,6 +157,13 @@ def save_project(
     """
     project_dir = project_dir_for(projects_dir, name)
     path = _yaml_path(project_dir)
+    current = ProjectConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+    if current.project.style == "embedded":
+        setup = next(iter(sorted(project_dir.glob("*_setup.py"))), None)
+        raise ProjectConfigError([{
+            "path": [],
+            "message": f"an embedded project's settings are written in {setup.name if setup else 'its setup file'}; edit them there",
+        }])
     if "yaml" in body:
         text = str(body["yaml"])
         try:
@@ -170,4 +190,6 @@ def save_project(
         _check(data, project_dir, config_dir)
         _check_device(data, known_devices)
     path.write_text(text, encoding="utf-8")
+    # An edited procedure: block is built into <name>_measurement.py now, as a run would.
+    build_measurement_module(project_dir)
     return read_project(projects_dir, config_dir, name)

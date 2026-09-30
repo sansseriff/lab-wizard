@@ -21,7 +21,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wizard",
         description="Launch the Lab Wizard UI",
-        epilog="Workspace commands: wizard init [PATH], wizard clean [PATH]",
+        epilog="Workspace commands: wizard init [PATH], wizard clean [PATH]. Project commands: wizard regenerate [PROJECT]",
     )
     parser.add_argument(
         "--workspace",
@@ -52,6 +52,25 @@ def main(argv: list[str] | None = None) -> None:
         workspace, created = initialize_workspace(args.path)
         action = "Created" if created else "Initialized existing"
         print(f"{action} Lab Wizard workspace at {workspace.root}")
+        return
+
+    if argv and argv[0] == "regenerate":
+        parser = argparse.ArgumentParser(
+            prog="wizard regenerate",
+            description=(
+                "Bring a project's Python up to date with its YAML: build <name>_measurement.py from "
+                "its procedure: block, and write its setup's roles from its roles: block."
+            ),
+        )
+        parser.add_argument("project", nargs="?", default=".", help="the project folder (default: here)")
+        args = parser.parse_args(argv[1:])
+        from lab_wizard.wizard.backend.regenerate import RegenerateError, regenerate_project
+
+        try:
+            done = regenerate_project(args.project)
+        except (RegenerateError, ValueError) as exc:
+            parser.exit(1, f"wizard regenerate: {exc}\n")
+        print("\n".join(done) if done else "Already up to date.")
         return
 
     if argv and argv[0] == "clean":

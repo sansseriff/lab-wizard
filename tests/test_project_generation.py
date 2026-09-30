@@ -108,8 +108,13 @@ def test_generate_project_writes_sources_yaml_and_setup(tmp_path: Path) -> None:
     assert yaml_path.exists()
     assert setup_path.exists()
     assert measurement_path.exists()
-    assert measurement_path.name == "iv_curve.py"
-    assert "class IvCurveMeasurement" in measurement_path.read_text(encoding="utf-8")
+    assert measurement_path.name == "iv_curve_measurement.py"
+    assert measurement_path.parent == project_dir  # beside the setup, no folder of its own
+    module_text = measurement_path.read_text(encoding="utf-8")
+    # The params and resources types sit with the step tree; params have no defaults.
+    assert "class IvCurveResources:" in module_text and "@dataclass(frozen=True)" in module_text
+    types = module_text.split("def build_iv_curve_procedure")[0]
+    assert "settle_s: float = Field(" in types and "default" not in types
 
     y = YAML(typ="safe")
     loader: Any = y
@@ -120,16 +125,18 @@ def test_generate_project_writes_sources_yaml_and_setup(tmp_path: Path) -> None:
     sim900 = config[_PROLOGIX_KEY].children[_SIM900_KEY]
     source_name = sim900.children[_SIM928_KEY].attribute_name
     sense_name = sim900.children[_SIM970_KEY].channels[0].attribute_name
-    # The project names its instruments and copies none of their params.
-    assert "instruments" not in payload["resources"]
-    assert payload["resources"]["instrument_sources"] == {source_name: "local", sense_name: "local"}
+    # The YAML says which instrument fills each role, and copies none of their params.
+    assert payload["roles"] == {"voltage_source": source_name, "voltage_sense": sense_name}
+    assert "resources" not in payload
 
+    # The setup says what class each role is, and names no instrument itself.
     setup_text = setup_path.read_text(encoding="utf-8")
     ast.parse(setup_text)
-    assert "from _measurement.iv_curve import IvCurveMeasurement" in setup_text
-    assert f"voltage_source_1 = resources.from_attribute({source_name!r})" in setup_text
-    assert f"voltage_sense_1 = resources.from_attribute({sense_name!r})" in setup_text
-    assert ".from_config(resources, key=" not in setup_text
+    assert "class Resources(measurement.IvCurveResources):" in setup_text
+    assert "    voltage_source: Sim928\n" in setup_text
+    assert "    voltage_sense: Sim970Channel\n" in setup_text
+    assert source_name not in setup_text and "from_attribute" not in setup_text
+    assert "project.resources(Resources)" in setup_text
     assert "cast(" not in setup_text
     assert ".model_dump()" not in setup_text
 
@@ -170,19 +177,26 @@ def test_the_embedded_style_carries_the_selected_subset_with_comments(tmp_path: 
             ],
         ),
     )
-    yaml_path = Path(out["yaml_file"])
-    payload = cast(dict[str, Any], YAML(typ="safe").load(yaml_path.read_text(encoding="utf-8")))
-    root = cast(dict[str, Any], payload["resources"]["instruments"][_PROLOGIX_KEY])
-    assert root["type"] == "prologix_gpib"
-    sim900 = cast(dict[str, Any], root["children"][_SIM900_KEY])
-    assert set(sim900["children"]) == {_SIM928_KEY, _SIM970_KEY}
-    assert len(sim900["children"][_SIM970_KEY]["channels"]) == 1
-    assert "# (seconds)" in yaml_path.read_text(encoding="utf-8")
+    # The YAML only says what the project is; everything else is in the setup.
+    payload = cast(dict[str, Any], YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8")))
+    assert set(payload) == {"project"} and payload["project"]["style"] == "embedded"
 
     setup_text = Path(out["setup_file"]).read_text(encoding="utf-8")
     ast.parse(setup_text)
-    assert "from_attribute" not in setup_text
-    assert "model_validate(" in setup_text  # params embedded as Python
+    # Every instrument on the way to the ones used, constructed by its class.
+    assert "prologix_gpib = PrologixGPIB.from_params(PROLOGIX_GPIB)" in setup_text
+    assert "sim900 = Sim900.from_parent(prologix_gpib, SIM900)" in setup_text
+    assert "sim928 = Sim928.from_parent(sim900, SIM928)" in setup_text
+    assert "voltage_sense=sim970.channels[0]" in setup_text
+    # Roles typed by the classes they are, so an editor follows them to the driver.
+    assert "voltage_source: Sim928" in setup_text and "voltage_sense: Sim970Channel" in setup_text
+    # Settings as constructor calls, with their descriptions; only the selected channel.
+    assert "timeout=0.15,  # (seconds) pyserial read timeout" in setup_text
+    assert setup_text.count("Sim970ChannelParams(") == 1
+    # Nothing read at run time: no project YAML, no workspace tree, no routing.
+    for dynamic in ("load_project_config", "from_attribute", "resource_source_for", "model_validate(", "--remote"):
+        assert dynamic not in setup_text, dynamic
+    assert "PARAMS = IvCurveParams(" in setup_text and "RUN = RunConfig(" in setup_text
 
 
 def test_save_instruments_writes_field_description_comments(tmp_path: Path) -> None:
@@ -285,12 +299,9 @@ def test_generate_pcr_project_references_the_selected_channel_by_name(tmp_path: 
     channel_name = config[_KEYSIGHT_KEY].channels[1].attribute_name
     assert channel_name
     # Channel 1's own name, so the project binds that input and no other.
-    assert payload["resources"]["instrument_sources"][channel_name] == "local"
-    assert "instruments" not in payload["resources"]
+    assert payload["roles"]["counter"] == channel_name
     ast.parse(setup_text)
-    assert f"counter_1 = resources.from_attribute({channel_name!r})" in setup_text
-    assert ".from_config(resources, key=" not in setup_text
-    assert "cast(" not in setup_text
+    assert "    counter: Keysight53220AChannel\n" in setup_text
 
 
 def test_generate_custom_resource_pedagogical_embedded(tmp_path: Path) -> None:

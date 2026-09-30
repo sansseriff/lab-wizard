@@ -86,7 +86,7 @@ def test_custom_measurements_are_offered_beside_procedures(workspace):
     assert client.get("/api/get-resources/nothing?kind=custom").status_code == 404
 
 
-def _create(client: TestClient, rig, name: str) -> dict[str, Any]:
+def _create(client: TestClient, rig, name: str, style: str = "production") -> dict[str, Any]:
     selections = [rig.select("voltage_source", "source"), rig.select("voltage_sense", "meter")]
     response = client.post(
         "/api/create-measurement-project",
@@ -95,6 +95,7 @@ def _create(client: TestClient, rig, name: str) -> dict[str, Any]:
             "kind": "custom",
             "selected_resources": [s.model_dump(mode="json") for s in selections],
             "outputs": {"files": False},
+            "generation_style": style,
         },
     )
     assert response.status_code == 200, response.text
@@ -160,7 +161,7 @@ def test_a_measurement_named_like_a_standard_module_does_not_shadow_it(workspace
     (ws.measurements_dir / "queue.py").write_text(source, encoding="utf-8")
     out = _create(client, rig, "queue")
     setup = Path(out["setup_file"]).read_text(encoding="utf-8")
-    assert "load_module(" in setup and not (Path(out["project_dir"]) / "queue.py").exists()
+    assert "measurement_module(" in setup and not (Path(out["project_dir"]) / "queue.py").exists()
     _set_params(Path(out["yaml_file"]), {"bias": {"mode": "explicit", "values": [0.0, 0.01]}, "settle_s": 0.0})
     _run_script(out)  # the setup's own imports (logging, threading) use the real queue module
     runs = find(db=ws.data_dir / "lab.db", procedure="queue")
@@ -172,3 +173,17 @@ def test_a_file_name_that_is_not_a_python_name_is_listed_with_how_to_fix_it(tmp_
     (ws.measurements_dir / "bias-sweep.py").write_text("x = 1\n", encoding="utf-8")
     found = list_custom_measurements(ws.measurements_dir)
     assert "rename it, e.g. bias_sweep.py" in found["bias-sweep"]
+
+
+def test_an_embedded_custom_measurement_writes_its_params_and_runs(workspace, rig):
+    """Both kinds of custom measurement, embedded: the params are Python, and nothing is read at run time."""
+    ws, client = workspace
+    for name, entry in (("bias_sweep", "build_procedure(resources)"), ("find_switching_voltage", "MeasureStep(measure")):
+        out = _create(client, rig, name, style="pedagogical_embedded")
+        setup = Path(out["setup_file"]).read_text(encoding="utf-8")
+        assert entry in setup
+        assert "PARAMS = Params(" in setup and "load_project_config" not in setup
+        _run_script(out)
+    runs = find(db=ws.data_dir / "lab.db")
+    assert sorted(runs.table()["procedure"].to_list()) == ["bias_sweep", "find_switching_voltage"]
+    assert set(runs.table()["status"].to_list()) == {"success"}

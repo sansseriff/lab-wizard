@@ -38,7 +38,7 @@ class Params(BaseModel):
     settle_s: float = Field(default=0.02, ge=0, description="wait after each bias before reading, in seconds")
 
 
-@dataclass
+@dataclass(frozen=True)
 class Resources:
     voltage_source: VSource
     voltage_sense: VSense

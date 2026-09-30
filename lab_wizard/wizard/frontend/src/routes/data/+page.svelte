@@ -16,6 +16,7 @@
 	import BokehPlot from '$lib/components/BokehPlot.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import PlotSettings from '$lib/components/PlotSettings.svelte';
+	import Splitter from '$lib/components/Splitter.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { queryChoice } from '$lib/url';
 	import Select from '$lib/components/Select.svelte';
@@ -81,11 +82,19 @@
 	let spec = $state<PlotSpec | null>(null);
 	let drawn = $state<{ series: Series[]; units: Record<string, string | null>; shape: LineShape } | null>(null);
 	let plotError = $state('');
-	let tab = $state(queryChoice('tab', ['plot', 'timeline', 'details'] as const, 'plot'));
+	// The plot is always shown; these are the tabs of the panel under it.
+	let tab = $state(queryChoice('tab', ['timeline', 'details'] as const, 'timeline'));
 	let editing = $state(false);
 	let steps = $state<Step[]>([]);
 	let stepsRun = $state<number | null>(null);
 	let point = $state<(Point & { run: number }) | null>(null);
+
+	// ---- the panels' sizes, dragged by the user ----
+	let filtersWidth = $state(240);
+	let runsWidth = $state(304);
+	let bottomHeight = $state(260);
+	let viewerWidth = $state(0);
+	let detailHeight = $state(0);
 
 	// ---- dialogs ----
 	let notebookSource = $state<string | null>(null);
@@ -112,7 +121,7 @@
 		else url.searchParams.delete('filters');
 		if (selected.length) url.searchParams.set('runs', selected.join(','));
 		else url.searchParams.delete('runs');
-		if (tab !== 'plot') url.searchParams.set('tab', tab);
+		if (tab !== 'timeline') url.searchParams.set('tab', tab);
 		else url.searchParams.delete('tab');
 		try {
 			replaceState(url, page.state);
@@ -312,11 +321,23 @@
 	{/if}
 
 	<div
-		class="grid min-h-0 flex-1 grid-cols-[15rem_19rem_minmax(0,1fr)] overflow-hidden rounded border border-line bg-surface"
+		class="grid min-h-0 flex-1 grid-cols-[var(--filters)_0_var(--runs)_0_minmax(0,1fr)] overflow-hidden rounded border border-line bg-surface"
+		style:--filters="{filtersWidth}px"
+		style:--runs="{runsWidth}px"
+		bind:clientWidth={viewerWidth}
 	>
 		<aside class="min-h-0 border-r border-line" aria-label="Filters">
 			<FacetSidebar {facets} {filters} runs={matching} onchange={(next) => (filters = next)} />
 		</aside>
+
+		<Splitter
+			bind:size={filtersWidth}
+			initial={240}
+			min={160}
+			max={viewerWidth - runsWidth - 360}
+			storageKey="lw.data.filtersWidth"
+			label="Resize the filters"
+		/>
 
 		<section class="min-h-0 border-r border-line" aria-label="Runs">
 			<RunList
@@ -329,7 +350,16 @@
 			/>
 		</section>
 
-		<section class="flex min-h-0 min-w-0 flex-col" aria-label="The chosen run">
+		<Splitter
+			bind:size={runsWidth}
+			initial={304}
+			min={200}
+			max={viewerWidth - filtersWidth - 360}
+			storageKey="lw.data.runsWidth"
+			label="Resize the run list"
+		/>
+
+		<section class="flex min-h-0 min-w-0 flex-col" bind:clientHeight={detailHeight} aria-label="The chosen run">
 			{#if !detail}
 				<div class="grid flex-1 place-items-center p-8 text-center">
 					<div class="max-w-[46ch] text-body text-muted">
@@ -345,32 +375,20 @@
 					</div>
 				</div>
 			{:else}
-				<Tabs
-					value={tab}
-					onValueChange={(v) => showTab(v as typeof tab)}
-					tabs={[
-						{ value: 'plot', label: 'Plot' },
-						{ value: 'timeline', label: 'Timeline' },
-						{ value: 'details', label: 'Details' }
-					]}
-					label="View"
-					class="flex min-h-0 flex-1 flex-col"
-					panelClass="flex min-h-0 flex-1 flex-col"
-				>
-					{#snippet lead()}
-						<div class="px-3 py-1.5">
-							<p class="truncate text-body font-semibold">
-								{detail!.run.procedure} on {detail!.run.device ?? 'no device'}
-								<span class="font-normal text-muted">#{detail!.run.id}</span>
-								{#if selected.length > 1}<span class="font-normal text-muted"> and {selected.length - 1} more</span>{/if}
-							</p>
-							{#if running}<p class="text-fine text-accent">Recording: following it as it grows</p>{/if}
-						</div>
-					{/snippet}
-					{#snippet actions()}
-						<Tooltip text="This run as a folder of CSV and YAML files, zipped">{#snippet child({ props })}<a {...props} class="lw-btn lw-btn-sm mr-3" href={dataApi.exportUrl(detail!.run.id)} download>Export run</a>{/snippet}</Tooltip>
-					{/snippet}
-					{#if tab === 'plot'}
+				<div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
+					<div class="min-w-0 flex-1">
+						<p class="truncate text-body font-semibold">
+							{detail.run.procedure} on {detail.run.device ?? 'no device'}
+							<span class="font-normal text-muted">#{detail.run.id}</span>
+							{#if selected.length > 1}<span class="font-normal text-muted"> and {selected.length - 1} more</span>{/if}
+						</p>
+						{#if running}<p class="text-fine text-accent">Recording: following it as it grows</p>{/if}
+					</div>
+					<Tooltip text="This run as a folder of CSV and YAML files, zipped">{#snippet child({ props })}<a {...props} class="lw-btn lw-btn-sm" href={dataApi.exportUrl(detail!.run.id)} download>Export run</a>{/snippet}</Tooltip>
+				</div>
+
+				<!-- The plot is what the page is for, so it is never behind a tab. -->
+				<div class="flex min-h-0 flex-1 flex-col" aria-label="Plot">
 						<div class="flex flex-wrap items-center gap-1 border-b border-line px-3 py-1.5">
 							{#each detail.plots as plot, i (i)}
 								<button
@@ -461,8 +479,33 @@
 								</aside>
 							{/if}
 						</div>
-					{:else if tab === 'timeline'}
-						<div class="min-h-0 flex-1 overflow-y-auto">
+				</div>
+
+				<Splitter
+					bind:size={bottomHeight}
+					initial={260}
+					min={120}
+					max={detailHeight - 280}
+					orientation="horizontal"
+					reverse
+					storageKey="lw.data.bottomHeight"
+					label="Resize the timeline and details"
+				/>
+
+				<div class="flex shrink-0 flex-col border-t border-line" style:height="{bottomHeight}px">
+					<Tabs
+						value={tab}
+						onValueChange={(v) => showTab(v as typeof tab)}
+						tabs={[
+							{ value: 'timeline', label: 'Timeline' },
+							{ value: 'details', label: 'Details' }
+						]}
+						label="Run contents"
+						size="sm"
+						class="flex min-h-0 flex-1 flex-col"
+						panelClass="min-h-0 flex-1 overflow-y-auto"
+					>
+						{#if tab === 'timeline'}
 							{#if selected.length > 1}
 								<div class="flex items-center gap-2 border-b border-line px-3 py-1.5 text-xs text-muted">
 									Timeline of run
@@ -475,13 +518,11 @@
 								</div>
 							{/if}
 							<Timeline {steps} {highlight} />
-						</div>
-					{:else}
-						<div class="min-h-0 flex-1 overflow-y-auto">
+						{:else}
 							<RunDetails {detail} />
-						</div>
-					{/if}
-				</Tabs>
+						{/if}
+					</Tabs>
+				</div>
 			{/if}
 		</section>
 	</div>

@@ -9,17 +9,20 @@ from typing import Any, Literal, NamedTuple
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
 
+from lab_wizard.lib.client.proxies.registry import proxy_class_for
 from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     model_to_commented_map,
     to_commented_yaml_value,
 )
+from lab_wizard.lib.custom_measurements import CustomMeasurement
+from lab_wizard.lib.procedures.codegen import measurement_module_source
+from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.project_module import module_path
-from lab_wizard.lib.utilities.model_tree import OutputsConfig
+from lab_wizard.lib.task_adapters.run import database_path
+from lab_wizard.lib.utilities.model_tree import OutputsConfig, RoleBinding
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
-    _build_subset_instruments_from_selected_nodes,
-    _compose_pedagogical_embedded,
     _create_unique_project_dir,
     SelectedNodeRef,  # noqa: F401 - re-exported: selections name tree nodes by it
     _NodeRef,
@@ -33,8 +36,10 @@ from lab_wizard.wizard.backend.instrument_sources import (
     ensure_source_registered,
     resolve_source_url,
 )
+from lab_wizard.wizard.backend.embedded_generation import Binding, embedded_setup_source
+from lab_wizard.wizard.backend.setup_generation import RoleType, production_setup_source
 from lab_wizard.wizard.backend.models import FilledReq
-from lab_wizard.wizard.backend.python_formatting import format_python_code
+from lab_wizard.lib.utilities.python_formatting import format_python_code
 from lab_wizard.lib.procedures.storage import load_preset
 
 logger = logging.getLogger("lab_wizard.wizard.backend.project_generation")
@@ -83,27 +88,6 @@ def _format_measurement_slug(measurement_name: str) -> str:
     return _sanitize_identifier(measurement_name).lower()
 
 
-def _measurement_prefix(measurement_name: str) -> str:
-    parts = [p for p in measurement_name.split("_") if p]
-    acronyms = {"iv": "IV", "pcr": "PCR"}
-    return (
-        "".join(acronyms.get(p.lower(), p.capitalize()) for p in parts) or "Measurement"
-    )
-
-
-def _base_type_info(base_type: Any) -> tuple[str, str]:
-    if hasattr(base_type, "__module__") and hasattr(base_type, "__name__"):
-        return str(base_type.__module__), str(base_type.__name__)
-    text = str(base_type)
-    m = re.match(r"<class '([^']+)'>", text)
-    if m:
-        full = m.group(1)
-        module, _, name = full.rpartition(".")
-        if module and name:
-            return module, name
-    raise ValueError(f"Could not resolve base type import for {base_type!r}")
-
-
 def _replace_wizard_block(template_text: str, block_name: str, content: str) -> str:
     pattern = re.compile(
         rf"(?P<indent>[ \t]*)# wizard:{re.escape(block_name)}:start\n"
@@ -126,168 +110,36 @@ def _replace_wizard_block(template_text: str, block_name: str, content: str) -> 
     return template_text[: m.start()] + replacement + template_text[m.end() :]
 
 
-def _replace_optional_block(template_text: str, block_name: str, content: str) -> str:
-    """Fill ``block_name`` if the template has it.
+def _roles(requirements: list[FilledReq], resolved: "_Resolved") -> tuple[dict[str, Any], list[RoleType]]:
+    """The YAML's ``roles:``, and the class the setup declares for each role.
 
-    A custom measurement's setup imports the measurement's own ``Resources``
-    rather than declaring fields to fill, so it has no ``resource_fields``.
+    A local instrument is declared as its driver class (a channel's, for a
+    channel); one reached through a server as the proxy for what it does, since
+    that is the object the run is handed, with the server's own class noted.
     """
-    if f"# wizard:{block_name}:start" not in template_text:
-        return template_text
-    return _replace_wizard_block(template_text, block_name, content)
-
-
-def _existing_import_symbols(template_text: str) -> set[str]:
-    out: set[str] = set()
-    for line in template_text.splitlines():
-        m = re.match(r"^\s*from\s+\S+\s+import\s+(.+)$", line)
-        if not m:
-            continue
-        for name in [n.strip() for n in m.group(1).split(",")]:
-            if name:
-                out.add(name)
-    return out
-
-
-def _format_resource_field_line(req: FilledReq) -> str:
-    base_name = _base_type_info(req.base_type)[1]
-    if req.is_list:
-        return f"{req.variable_name}: list[{base_name}]"
-    return f"{req.variable_name}: {base_name}"
-
-
-def _format_return_field_line(req: FilledReq, vars_: list[str]) -> str:
-    if req.is_list:
-        items = ", ".join(vars_)
-        return f"{req.variable_name}=[{items}],"
-    if not vars_:
-        raise ValueError(f"No selection provided for {req.variable_name}")
-    return f"{req.variable_name}={vars_[0]},"
-
-
-def _compose_setup(
-    measurement_name: str,
-    inst_selected_map: dict[str, _NodeRef],
-    inst_selected_channels: dict[str, int | None],
-    instrument_reqs: list[FilledReq],
-    template_text: str,
-) -> str:
-    """Setup code for the embedded teaching style."""
-    if not instrument_reqs:
-        raise ValueError(f"No requirements found for measurement '{measurement_name}'")
-
-    missing = [
-        r.variable_name
-        for r in instrument_reqs
-        if r.variable_name not in inst_selected_map
-    ]
-    if missing:
-        raise ValueError(f"Missing required selections: {missing}")
-
-    # Resource fields + return fields, in template field order
-    resource_field_lines: list[str] = []
-    return_field_lines: list[str] = []
-    instrument_assignments: list[str] = []
-
-    # Every param is written into the Python itself (the escape hatch in
-    # plans/procedure_plan.md 5.10); production generation references
-    # instruments by attribute_name instead and never reaches here.
-    leaves = [inst_selected_map[req.variable_name] for req in instrument_reqs]
-    selections = [
-        SelectedResource(
-            variable_name=req.variable_name,
-            type=inst_selected_map[req.variable_name].type,
-            key=inst_selected_map[req.variable_name].key,
-            channel_index=inst_selected_channels.get(req.variable_name),
-        )
-        for req in instrument_reqs
-    ]
-    instrument_lines, imports, final_exprs = _compose_pedagogical_embedded(
-        selections=selections,
-        var_names=[req.variable_name for req in instrument_reqs],
-        leaves=leaves,
-    )
-    for req, expr in zip(instrument_reqs, final_exprs):
-        local_name = f"{req.variable_name}_1"
-        instrument_assignments.append(f"{local_name} = {expr}")
-        resource_field_lines.append(_format_resource_field_line(req))
-        return_field_lines.append(_format_return_field_line(req, [local_name]))
-
-    # Skip imports for symbols already in the template (e.g. base classes from
-    # the wizard:resource_fields annotations).
-    skip_names = _existing_import_symbols(template_text)
-    filtered_imports = sorted(
-        {f"from {mod} import {cls}" for mod, cls in imports if cls not in skip_names}
-    )
-
-    imports_block = "\n".join(filtered_imports)
-    instantiation_lines = (
-        instrument_lines
-        + (["", ""] if instrument_assignments else [])
-        + instrument_assignments
-    )
-    instantiation_block = "\n".join(instantiation_lines).rstrip()
-
-    rendered = template_text
-    rendered = _replace_wizard_block(rendered, "imports", imports_block)
-    rendered = _replace_optional_block(
-        rendered, "resource_fields", "\n".join(resource_field_lines)
-    )
-    rendered = _replace_wizard_block(rendered, "instantiation", instantiation_block)
-    rendered = _replace_wizard_block(
-        rendered, "return_fields", "\n".join(return_field_lines)
-    )
-    return rendered
-
-
-def _compose_setup_from_attribute(
-    measurement_name: str,
-    attribute_for: dict[str, str],
-    instrument_reqs: list[FilledReq],
-    template_text: str,
-) -> str:
-    """Generate setup using ``resources.from_attribute``.
-
-    ``attribute_for`` maps each instrument variable to the ``attribute_name`` it
-    resolves through, already computed by the caller — a routed instrument has no
-    params in this workspace to read one from, so deriving it here is not
-    possible. This is the only style that works for a multi-source project,
-    because an attribute name is the one handle meaningful on both sides of the
-    wire.
-    """
-    if not instrument_reqs:
-        raise ValueError(f"No requirements found for measurement '{measurement_name}'")
-    missing = [
-        r.variable_name for r in instrument_reqs if not attribute_for.get(r.variable_name)
-    ]
-    if missing:
-        raise ValueError(f"Missing required selections: {missing}")
-
-    resource_field_lines: list[str] = []
-    return_field_lines: list[str] = []
-    instrument_assignments: list[str] = []
-
-    for req in instrument_reqs:
-        attr_name = attribute_for[req.variable_name]
-        local_name = f"{req.variable_name}_1"
-        instrument_assignments.append(
-            f"{local_name} = resources.from_attribute({attr_name!r})"
-        )
-        resource_field_lines.append(_format_resource_field_line(req))
-        return_field_lines.append(_format_return_field_line(req, [local_name]))
-
-    rendered = template_text
-    rendered = _replace_wizard_block(rendered, "imports", "")
-    rendered = _replace_optional_block(
-        rendered, "resource_fields", "\n".join(resource_field_lines)
-    )
-    rendered = _replace_wizard_block(
-        rendered, "instantiation", "\n".join(instrument_assignments)
-    )
-    rendered = _replace_wizard_block(
-        rendered, "return_fields", "\n".join(return_field_lines)
-    )
-    return rendered
+    roles: dict[str, Any] = {}
+    types: list[RoleType] = []
+    for req in requirements:
+        var = req.variable_name
+        attribute = resolved.attribute_for.get(var)
+        if not attribute:
+            raise ValueError(f"Missing required selections: [{var!r}]")
+        note = ""
+        if var in resolved.remote:
+            server, offered = resolved.remote[var]
+            cls: type = proxy_class_for(offered.get("behavior_abc"))
+            hint = offered.get("type_hint")
+            note = f"through {server}, where it is a {hint}" if hint else f"through {server}"
+            binding = RoleBinding(instrument=attribute, server=server)
+        else:
+            leaf = resolved.local_nodes[var]
+            cls = type(leaf.params).resource_class()
+            if resolved.local_channels.get(var) is not None:
+                cls = cls.channel_class  # type: ignore[attr-defined]
+            binding = RoleBinding(instrument=attribute)
+        roles[var] = [binding.as_yaml()] if req.is_list else binding.as_yaml()
+        types.append(RoleType(role=var, module=cls.__module__, name=cls.__name__, is_list=req.is_list, note=note))
+    return roles, types
 
 
 def _local_attribute_name(leaf: _NodeRef, channel_index: int | None) -> str:
@@ -319,6 +171,9 @@ class _Resolved(NamedTuple):
     attribute_for: dict[str, str]
     instrument_sources: dict[str, str]
     routed: bool
+    # For each variable reached through a server: the source's name and what it
+    # reported about the instrument (behavior_abc, type_hint, ...).
+    remote: dict[str, tuple[str, dict[str, Any]]]
 
 
 def _resolve_instrument_selections(
@@ -341,6 +196,7 @@ def _resolve_instrument_selections(
 
     offered: dict[str, dict[str, Any]] = {}
     registered: dict[str, str] = {}
+    remote: dict[str, tuple[str, dict[str, Any]]] = {}
 
     for sel in selections:
         if sel.source == LOCAL:
@@ -378,6 +234,7 @@ def _resolve_instrument_selections(
             )
         attribute_for[sel.variable_name] = sel.attribute
         source_of_var[sel.variable_name] = registered[sel.source]
+        remote[sel.variable_name] = (registered[sel.source], offered[sel.source][sel.attribute])
 
     routed = any(source != LOCAL for source in source_of_var.values())
 
@@ -410,6 +267,7 @@ def _resolve_instrument_selections(
         owner[attr] = source
 
     return _Resolved(
+        remote=remote,
         local_nodes=local_nodes,
         local_channels=local_channels,
         attribute_for=attribute_for,
@@ -431,23 +289,28 @@ def commented_params(params: dict[str, Any], model: type[BaseModel] | None) -> A
         return params
 
 
+def _project_info(measurement_name: str, kind: str, *, style: str = "production") -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "measurement_type": measurement_name,
+        "kind": kind,
+        "style": style,
+        "created_by": "lab_wizard",
+    }
+
+
 def _default_project_yaml(
     measurement_name: str,
-    instruments: dict[str, Any],
-    instrument_sources: dict[str, str] | None,
+    roles: dict[str, Any],
     *,
     params: dict[str, Any],
     outputs: OutputsConfig | None = None,
     kind: str = "procedure",
     params_model: type[BaseModel] | None = None,
+    procedure: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
-        "project": {
-            "schema_version": 1,
-            "measurement_type": measurement_name,
-            "kind": kind,
-            "created_by": "lab_wizard",
-        },
+    payload = {
+        "project": _project_info(measurement_name, kind),
         # Who and what the run is about, recorded with every run. ``device`` names
         # the device under test in the lab database; it is filled in before a run.
         "run": {"device": None, "operator": None, "notes": None, "metadata": {}},
@@ -460,27 +323,17 @@ def _default_project_yaml(
         # starts: files (laid out by the workspace's data.yaml), and a live
         # plot for a run started from a terminal (none | window | web).
         "outputs": (outputs or OutputsConfig()).model_dump(mode="json"),
-        "resources": {
-            # Present only for the embedded style; otherwise instruments are
-            # resolved from the tree instrument_sources names.
-            **(
-                {
-                    "instruments": {
-                        key: model_to_commented_map(value, exclude_none=True)
-                        for key, value in instruments.items()
-                    }
-                }
-                if instruments
-                else {}
-            ),
-            # Every named instrument and where it lives: local, or a server.
-            **(
-                {"instrument_sources": dict(instrument_sources)}
-                if instrument_sources
-                else {}
-            ),
-        },
+        # Which instrument fills each role: its name in this workspace's
+        # config/instruments, or {instrument, server} for one on a server. The
+        # setup file says what class each is.
+        "roles": roles,
     }
+    if procedure is None:
+        return payload
+    # The procedure, in the file that holds its params' values: edit it here, and
+    # <name>_measurement.py is built again from it before the next run.
+    ordered = {key: payload[key] for key in ("project", "run", "roles")}
+    return {**ordered, "procedure": procedure, **{k: v for k, v in payload.items() if k not in ordered}}
 
 
 def _refuse_embedded_through_server(style: str, selections: list[Any]) -> None:
@@ -520,15 +373,16 @@ def generate_project(
     projects_dir: Path,
     req: GenerateProjectRequest,
     requirements: list[FilledReq],
-    template_text: str,
-    measurement_source: str,
     params: dict[str, Any],
-    params_model: type[BaseModel] | None = None,
+    params_model: type[BaseModel] | None,
+    measurement: ProcedureDefinition | CustomMeasurement,
 ) -> dict[str, Any]:
-    """Write a project from a setup template and a measurement module.
+    """Write a project: its YAML, its setup file, and its measurement module.
 
-    Shared by composed procedures and custom measurements, which differ only in
-    where these pieces come from.
+    Shared by composed procedures and custom measurements. A production setup
+    declares the class behind each role and reads the rest from the YAML
+    (``setup_generation``); an embedded one says everything itself
+    (``embedded_generation``).
     """
     style = req.generation_style
 
@@ -538,10 +392,6 @@ def generate_project(
     all_nodes = _walk_tree(instruments)
 
     resolved = _resolve_instrument_selections(config_dir, instrument_sels, all_nodes)
-    inst_selected_map = resolved.local_nodes
-    inst_selected_channels = resolved.local_channels
-
-    instrument_reqs = requirements
 
     if style == "production":
         unnamed = _unnamed_local(resolved.local_nodes, resolved.attribute_for)
@@ -552,34 +402,64 @@ def generate_project(
                 "instrument it saves, so this config was probably edited by hand: "
                 "set an attribute_name and try again."
             )
-        # No instrument params in the project: they are read from the tree each
-        # attribute's source names, when the project runs.
-        instruments_subset: dict[str, Any] = {}
-        instrument_sources = resolved.instrument_sources
-    else:
-        # The escape hatch keeps a full copy, so the project runs outside any
-        # workspace — the reason to choose it.
-        instruments_subset = _build_subset_instruments_from_selected_nodes(
-            [
-                (leaf, inst_selected_channels.get(variable_name))
-                for variable_name, leaf in inst_selected_map.items()
-            ]
-        )
-        instrument_sources = {}
 
     prefix = req.project_prefix or _format_measurement_slug(req.measurement_name)
     project_dir = _create_unique_project_dir(projects_dir, prefix)
     logger.info("Created project directory %s", project_dir)
 
-    yaml_payload = _default_project_yaml(
-        req.measurement_name,
-        instruments_subset,
-        instrument_sources,
-        params=params,
-        outputs=req.outputs,
-        kind=req.kind,
-        params_model=params_model,
+    # A procedure's definition, as the project's YAML carries it; the module is
+    # built from exactly this, so its recorded hash matches from the start.
+    procedure = (
+        measurement.model_dump(mode="json", exclude_none=True) if isinstance(measurement, ProcedureDefinition) else None
     )
+    if procedure is not None:
+        measurement_source = format_python_code(measurement_module_source(measurement, procedure))
+    else:
+        # A custom measurement's module is its own file, copied as it is.
+        measurement_source = measurement.path.read_text(encoding="utf-8")
+
+    if style == "production":
+        roles, role_types = _roles(requirements, resolved)
+        yaml_payload = _default_project_yaml(
+            req.measurement_name,
+            roles,
+            params=params,
+            outputs=req.outputs,
+            kind=req.kind,
+            params_model=params_model,
+            procedure=procedure,
+        )
+        custom = isinstance(measurement, CustomMeasurement)
+        setup_code = production_setup_source(
+            measurement_name=req.measurement_name,
+            kind="custom" if custom else "procedure",
+            roles=role_types,
+            entry=measurement.entry if custom else "build_procedure",
+            has_plots=bool(measurement.plots) if custom else False,
+        )
+    else:
+        # Everything is in the setup file; the YAML only says what the project is.
+        yaml_payload = {"project": _project_info(req.measurement_name, req.kind, style="embedded")}
+        is_list = {r.variable_name: r.is_list for r in requirements}
+        missing = [r.variable_name for r in requirements if r.variable_name not in resolved.local_nodes]
+        if missing:
+            raise ValueError(f"Missing required selections: {missing}")
+        setup_code = embedded_setup_source(
+            measurement=measurement,
+            bindings=[
+                Binding(
+                    role=r.variable_name,
+                    leaf=resolved.local_nodes[r.variable_name],
+                    channel_index=resolved.local_channels.get(r.variable_name),
+                    is_list=is_list.get(r.variable_name, False),
+                )
+                for r in requirements
+            ],
+            params=params,
+            outputs=req.outputs,
+            database=database_path(project_dir),
+        )
+
     yaml_path = project_dir / f"{project_dir.name}.yaml"
     y = YAML(typ="rt")
     y.default_flow_style = False
@@ -587,27 +467,10 @@ def generate_project(
     with yaml_path.open("w", encoding="utf-8") as f:
         y_writer.dump(to_commented_yaml_value(yaml_payload), f)
 
-    if style == "production":
-        setup_code = _compose_setup_from_attribute(
-            req.measurement_name,
-            resolved.attribute_for,
-            instrument_reqs,
-            template_text,
-        )
-    else:
-        setup_code = _compose_setup(
-            req.measurement_name,
-            inst_selected_map,
-            inst_selected_channels,
-            instrument_reqs,
-            template_text,
-        )
-
     setup_path = project_dir / f"{req.measurement_name}_setup.py"
     setup_code = format_python_code(setup_code)
     setup_path.write_text(setup_code, encoding="utf-8")
     measurement_path = module_path(project_dir, req.measurement_name)
-    measurement_path.parent.mkdir()
     measurement_path.write_text(measurement_source, encoding="utf-8")
     logger.info(
         "Generated project artifacts yaml=%s setup=%s measurement=%s",

@@ -39,6 +39,8 @@ class ProjectSettings(ResponseModel):
     path: str
     measurement: str
     kind: Literal["procedure", "custom"]
+    # ``embedded``: every setting is in the setup file, and this YAML is not read.
+    style: Literal["production", "embedded"]
     setup_file: str | None
     yaml: str
     run: RunConfig

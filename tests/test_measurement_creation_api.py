@@ -83,8 +83,7 @@ def test_a_project_is_created_from_a_procedure_with_a_preset(workspace, rig):
     assert response.status_code == 200, response.text
     payload = YAML(typ="safe").load(Path(response.json()["yaml_file"]).read_text(encoding="utf-8"))
     assert payload["measurement"]["params"]["bias"]["voltage"] == 0.02
-    assert "instruments" not in payload["resources"]
-    assert len(payload["resources"]["instrument_sources"]) == 4
+    assert len(payload["roles"]) == 4
     # Files are saved by default; no live plot unless asked for.
     assert payload["outputs"] == {"files": True, "live_plot": "none", "plot": ""}
 

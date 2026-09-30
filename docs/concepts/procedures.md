@@ -231,12 +231,32 @@ preset afterwards changes no existing project.
 
 ## Generated code, and editing it
 
-A project generated from a procedure contains `_measurement/<name>.py`, holding
-`build_<name>_procedure()` and a `<Name>Measurement` class, and a setup file with
-the params models and the usual run lifecycle. The step tree sits between
-`# wizard:procedure:start` and `# wizard:procedure:end`. Regenerating from a
-changed definition replaces only that block, so anything you add around it
-survives.
+A project carries its procedure in the **`procedure:` block of its YAML**, in
+the same form as a procedure file, beside `measurement.params`, the values of
+the params it declares. That block is the one copy the project edits.
+
+`<name>_measurement.py` is built from it: the params classes (typed fields,
+no defaults), `<Name>Resources`, and `build_<name>_procedure()` with the step
+tree. It records the hash of the block it was built from, and whenever the
+block changes it is **built again before the next run** — so you edit the YAML
+and press Run, and the Python an editor follows is always the Python that runs.
+Don't edit the module itself; what a procedure cannot say belongs in a
+[custom measurement](../wizard/measurements.md#custom-measurements).
+
+- **`wizard regenerate [PROJECT]`** builds the module without running, and
+  writes the setup file's roles from `roles:` — needed when a role is added,
+  or bound to a different kind of instrument, since that needs the servers to
+  answer.
+- **Every run records the `procedure:` block** its code was built from, so the
+  Data page draws a past run with exactly its plots and derived columns.
+- A project keeps the procedure it was generated with. Taking up a changed
+  `config/procedures/<name>.yml` is an explicit update
+  (`update_project_procedure`), which replaces the `procedure:` block and
+  nothing else.
+
+Its setup file narrows `<Name>Resources` to the class of each role's instrument
+and runs the lifecycle (see
+[Measurements](../wizard/measurements.md#what-a-project-contains)).
 
 Adding a step type is one small class in `lib/procedures/steps/`: a pydantic
 model whose field names match the runtime step's constructor. The generator

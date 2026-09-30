@@ -8,6 +8,7 @@ exercised in ``test_iv_curve_end_to_end.py`` and ``test_pcr_curve_end_to_end.py`
 
 from __future__ import annotations
 
+import sys
 import time
 import types
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from lab_wizard.lib.instruments.general.vsense import StandInVSense
 from lab_wizard.lib.instruments.general.vsource import StandInVSource
 from lab_wizard.lib.procedures.codegen import measurement_module_source
 from lab_wizard.lib.procedures.storage import load_procedure
+from lab_wizard.lib.task_adapters.run import run_procedure
 
 
 class StubCounter(Counter):
@@ -69,10 +71,18 @@ class Resources:
 def _module(name: str, project_dir: Path) -> types.ModuleType:
     """The procedure's generated module, as if it sat in ``project_dir``."""
     definition = load_procedure(project_dir / "no-config", name)
-    module = types.ModuleType(name)
-    module.__file__ = str(module_path(project_dir, name))  # where it records its runs
+    module = types.ModuleType(f"generated_{name}")
+    module.__file__ = str(module_path(project_dir, name))
+    sys.modules[module.__name__] = module  # its dataclasses look their module up here
     exec(compile(measurement_module_source(definition), module.__file__, "exec"), module.__dict__)
     return module
+
+
+def _run(module: types.ModuleType, name: str, resources: Any, project_dir: Path) -> Status:
+    """Run once and record it, as a project's setup does."""
+    build = getattr(module, f"build_{name}_procedure")
+    definition = load_procedure(Path("no-config"), name).model_dump(mode="json", exclude_none=True)
+    return run_procedure(build(resources), resources, procedure=name, definition=definition, project_dir=project_dir)
 
 
 def _params(name: str, values: dict[str, Any]) -> Any:
@@ -97,7 +107,7 @@ def test_iv_curve_records_one_row_per_point_and_shuts_down(tmp_path: Path) -> No
     resources = _iv_resources(points)
     module = _module("iv_curve", tmp_path)
 
-    status = module.IvCurveMeasurement(resources).run_measurement()
+    status = _run(module, "iv_curve", resources, tmp_path)
 
     assert status is Status.SUCCESS
     runs = find(db=tmp_path / "data" / "lab.db")
@@ -142,7 +152,7 @@ def test_pcr_curve_records_a_count_rate_per_point(tmp_path: Path) -> None:
         }),
     )
 
-    status = _module("pcr_curve", tmp_path).PcrCurveMeasurement(resources).run_measurement()
+    status = _run(_module("pcr_curve", tmp_path), "pcr_curve", resources, tmp_path)
 
     assert status is Status.SUCCESS
     assert resources.counter.threshold_mV == -40.0  # set by the run, not inherited

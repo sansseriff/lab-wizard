@@ -1,8 +1,8 @@
 """Where a generated project's instruments come from when it runs.
 
 A project carries no instrument params (``plans/procedure_plan.md`` 5.4). It
-records, in ``resources.instrument_sources``, the ``attribute_name`` of each
-instrument and where it lives — ``local``, or a server named in
+records, in ``roles:`` (a custom resource file: ``resources.instrument_sources``),
+the ``attribute_name`` of each instrument and where it lives — ``local``, or a server named in
 ``config/remote/servers.yaml`` — and resolves each one at run time against a
 tree it does not own:
 
@@ -13,10 +13,9 @@ tree it does not own:
 
 Procedure params stay in the project YAML, frozen with the project.
 
-The one exception is the embedded teaching style, whose setup file builds every
-instrument from params written into the Python itself, so it runs outside any
-workspace. Its YAML keeps a copy of those instruments, which is what its run
-claims.
+The embedded teaching style uses none of this: its setup file constructs every
+instrument, and claims their transports, itself
+(``wizard/backend/embedded_generation.py``).
 """
 
 from __future__ import annotations
@@ -33,16 +32,11 @@ from lab_wizard.lib.utilities.model_tree import ProjectConfig, ResourceConfig, _
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["WorkspaceNotFound", "is_embedded", "local_claims_for", "resource_source_for"]
+__all__ = ["WorkspaceNotFound", "local_claims_for", "resource_source_for"]
 
 
 class WorkspaceNotFound(RuntimeError):
     """A project that needs its workspace's instrument config was run outside one."""
-
-
-def is_embedded(project: ProjectConfig) -> bool:
-    """Whether this is an embedded-style project, carrying its own copy of its instruments."""
-    return bool(project.resources.instruments)
 
 
 def _workspace_instruments(project_dir: Path) -> dict[str, Any]:
@@ -64,7 +58,7 @@ def _local_resources(project: ProjectConfig, project_dir: Path) -> ResourceConfi
     """The workspace's instruments, with the project's routing."""
     return ResourceConfig(
         instruments=_workspace_instruments(project_dir),
-        instrument_sources=project.resources.instrument_sources,
+        instrument_sources=project.sources(),
     )
 
 
@@ -73,9 +67,6 @@ def resource_source_for(project: ProjectConfig, project_dir: Path, *, remote: Op
     if remote:
         # Explicit override: every instrument through one server.
         return CompositeResources.all_remote(project, remote)
-    if is_embedded(project):
-        # Its setup file builds each instrument from the params in the Python.
-        return project.resources
     return CompositeResources.from_project(
         project,
         server_urls=load_server_urls(project_dir),
@@ -94,10 +85,8 @@ def local_claims_for(
     """
     if remote:
         return []
-    if is_embedded(project):
-        return [LocalTransportClaim(project.resources.instruments, owner=owner)]
 
-    local = [attr for attr, source in project.resources.instrument_sources.items() if source == LOCAL]
+    local = [attr for attr, source in project.sources().items() if source == LOCAL]
     if not local:
         return []
     instruments = _workspace_instruments(project_dir)

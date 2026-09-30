@@ -1,8 +1,9 @@
 """How a generated project finds its instruments when it runs.
 
 Since instrument params left the project YAML (procedure plan 5.4), a project
-names each instrument and resolves it against its workspace's config — or, for
-an embedded-style project, builds it from the params in its own Python.
+names each instrument and resolves it against its workspace's config. (An
+embedded-style project builds every instrument in its own setup file and uses
+none of this.)
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from lab_wizard.lib.client.project_resources import (
     WorkspaceNotFound,
     local_claims_for,
     resource_source_for,
-    is_embedded,
 )
 from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams
 from lab_wizard.lib.utilities.config_io import load_instruments, save_instruments_to_config
@@ -65,7 +65,6 @@ def _names(config_dir: Path, rig) -> tuple[str, str]:
 def test_a_project_resolves_its_instruments_from_the_workspace(tmp_path: Path, rig):
     project_dir = _iv_project(tmp_path, rig)
     project = load_project_config(project_dir / f"{project_dir.name}.yaml")
-    assert not is_embedded(project)
 
     source = resource_source_for(project, project_dir)
     assert isinstance(source, CompositeResources)
@@ -143,16 +142,3 @@ def test_a_remote_override_claims_nothing_locally(tmp_path: Path, rig):
     project_dir = _iv_project(tmp_path, rig)
     project = load_project_config(project_dir / f"{project_dir.name}.yaml")
     assert local_claims_for(project, project_dir, owner="iv", remote="tcp://lab:12300") == []
-
-
-# --------------------------- embedded projects ---------------------------
-
-
-def test_an_embedded_project_claims_its_own_instrument_copy(tmp_path: Path, no_servers, rig):
-    project_dir = _iv_project(tmp_path, rig, style="pedagogical_embedded")
-    project = load_project_config(project_dir / f"{project_dir.name}.yaml")
-    assert is_embedded(project)
-
-    assert resource_source_for(project, project_dir) is project.resources
-    claims = local_claims_for(project, project_dir, owner="iv")
-    assert set(claims[0].instruments) == set(project.resources.instruments)

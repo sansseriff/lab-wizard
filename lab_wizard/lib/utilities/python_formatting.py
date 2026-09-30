@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-logger = logging.getLogger("lab_wizard.wizard.backend.python_formatting")
+logger = logging.getLogger(__name__)
 
 
 def format_python_code(code: str) -> str:

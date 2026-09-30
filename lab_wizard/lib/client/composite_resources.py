@@ -178,10 +178,8 @@ class CompositeResources:
 
 
 def _project_sources(project: Any) -> dict[str, str]:
-    """``{attribute_name: source}`` declared by a project, if any."""
-    resources = getattr(project, "resources", None)
-    raw = getattr(resources, "instrument_sources", None) or {}
-    return {str(k): str(v) for k, v in raw.items()}
+    """``{attribute_name: source}`` declared by a project: its roles, or a custom resource's sources."""
+    return {str(k): str(v) for k, v in project.sources().items()}
 
 
 def _default_connect(url: str) -> Any:

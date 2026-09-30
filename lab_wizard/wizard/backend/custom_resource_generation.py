@@ -18,7 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from ruamel.yaml import YAML
 
-from lab_wizard.wizard.backend.python_formatting import format_python_code
+from lab_wizard.lib.utilities.python_formatting import format_python_code
 from lab_wizard.lib.utilities.config_io import (
     load_instruments,
     model_to_commented_map,

@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 import yaml
 
-from lab_wizard.lib.utilities.model_tree import OutputsConfig
+from lab_wizard.lib.utilities.model_tree import OutputsConfig, ProjectConfig
 
 
 logger = logging.getLogger("lab_wizard.wizard.backend.projects")
@@ -54,17 +54,13 @@ def _read_project_yaml(project_dir: Path) -> Optional[dict[str, Any]]:
     return loaded if isinstance(loaded, dict) else None
 
 
-def _instrument_names(resources: Any) -> list[str]:
-    """The instruments the project is bound to, for a one-line summary."""
-    if not isinstance(resources, dict):
+def _instrument_names(data: Any, *, local_only: bool = False) -> list[str]:
+    """The instruments a project's ``roles:`` bind: all of them, or only this workspace's."""
+    try:
+        bindings = ProjectConfig.model_validate(data).bindings()
+    except ValueError:
         return []
-    # A current project copies no instrument params; it names its instruments
-    # in instrument_sources, and those names are what it is bound to.
-    for key in ("instruments", "instrument_sources"):
-        block = resources.get(key)
-        if isinstance(block, dict) and block:
-            return sorted(str(k) for k in block)
-    return []
+    return sorted({b.instrument for b in bindings if not (local_only and b.server)})
 
 
 def _outputs(data: Any) -> dict[str, Any]:
@@ -112,7 +108,7 @@ def list_projects(projects_dir: str | Path) -> list[dict[str, Any]]:
                 "measurement": project_block.get("measurement_type"),
                 "schema_version": project_block.get("schema_version"),
                 "created": created_iso,
-                "instruments": _instrument_names((data or {}).get("resources")),
+                "instruments": _instrument_names(data or {}),
                 "outputs": _outputs((data or {}).get("outputs")),
                 "setup_file": setup_files[0] if setup_files else None,
                 # A directory with no readable project YAML is still listed, but
@@ -133,8 +129,8 @@ def projects_referencing(projects_dir: str | Path, attributes: set[str]) -> list
 
     A project resolves each instrument by ``attribute_name`` when it runs, so
     removing or renaming a named instrument breaks every project that uses it.
-    This is what a confirm dialog lists before that happens. Projects that still
-    carry their own instrument copy address it by hash and are unaffected.
+    This is what a confirm dialog lists before that happens. An embedded project
+    carries its instruments' settings itself and is unaffected.
     """
     if not attributes:
         return []
@@ -145,12 +141,8 @@ def projects_referencing(projects_dir: str | Path, attributes: set[str]) -> list
     for entry in root.iterdir():
         if not entry.is_dir() or entry.name.startswith((".", "__")):
             continue
-        data = _read_project_yaml(entry) or {}
-        resources = data.get("resources")
-        sources = resources.get("instrument_sources") if isinstance(resources, dict) else None
-        if not isinstance(sources, dict):
-            continue
-        used = sorted(attributes & {str(k) for k in sources})
+        # Only this workspace's own instruments: a server's are its to remove.
+        used = sorted(attributes & set(_instrument_names(_read_project_yaml(entry) or {}, local_only=True)))
         if used:
             try:
                 mtime = entry.stat().st_mtime

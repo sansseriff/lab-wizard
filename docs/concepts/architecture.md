@@ -88,7 +88,7 @@ sequenceDiagram
     W->>C: write YAML (config_io)
     U->>W: Create measurement (pick resources)
     W->>C: load_instruments + load_resources
-    W->>P: write project.yaml + <m>_setup.py + _measurement/<m>.py
+    W->>P: write project.yaml + <m>_setup.py + <m>_measurement.py
     U->>R: uv run <m>_setup.py
     R->>P: read project.yaml (params + instrument names)
     R->>C: resolve those names against config/instruments
@@ -96,11 +96,17 @@ sequenceDiagram
 ```
 
 **A project names its instruments; it never copies their settings.** The YAML
-records each instrument's `attribute_name` and where it lives, and the generated
-setup file asks for it by that name:
+says which instrument fills each role, by `attribute_name`, and where it lives;
+the generated setup file says what class each role is:
+
+```yaml
+roles:
+  voltage_source: sim928-brave-otter
+```
 
 ```python
-voltage_source = resources.from_attribute("sim928-brave-otter")
+class Resources(measurement.IvCurveResources):
+    voltage_source: Sim928
 ```
 
 Which tree answers is the only difference between local and remote:
