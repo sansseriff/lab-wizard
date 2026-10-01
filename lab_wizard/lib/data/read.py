@@ -8,7 +8,8 @@ For a notebook::
 
 Filters name facet keys (``plans/semantic_data_plan.md`` §8) and match their
 values exactly: a value, a list of values (any of them), or
-``{"range": [lo, hi]}`` for a numeric facet. Different keys must all match.
+``{"range": [lo, hi]}`` for a numeric facet, or for ``date`` with two ISO dates
+(``{"range": ["2026-09-01", "2026-09-30"]}``). Different keys must all match.
 Nobody writes SQL; it all lives here.
 """
 
@@ -60,6 +61,9 @@ def _condition(key: str, wanted: Any) -> tuple[str, list[Any]]:
         if set(wanted) != {"range"}:
             raise ValueError(f"filter {key!r}: a mapping must be {{'range': [lo, hi]}}, not {dict(wanted)!r}")
         lo, hi = wanted["range"]
+        if isinstance(lo, str) and isinstance(hi, str):
+            # Text bounds compare as text, which is date order for ISO dates.
+            return f"{base} AND value BETWEEN ? AND ?", [key, lo, hi]
         return f"{base} AND num BETWEEN ? AND ?", [key, lo, hi]
     values = list(wanted) if isinstance(wanted, (list, tuple, set, frozenset)) else [wanted]
     texts = []

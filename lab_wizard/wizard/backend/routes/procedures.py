@@ -6,6 +6,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from lab_procedure import ProcedureError
+
 from lab_wizard.wizard.backend import data_api
 from lab_wizard.wizard.backend.deps import (
     get_env,
@@ -25,7 +27,6 @@ from lab_wizard.wizard.backend.procedures_api import (
     save_procedure_preset,
     delete_procedure_preset,
 )
-from lab_wizard.lib.procedures.spec import ProcedureError
 
 logger = logging.getLogger("lab_wizard.wizard.backend.routes.procedures")
 router = APIRouter()

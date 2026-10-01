@@ -38,6 +38,7 @@ __all__ = [
     "remote_tree",
     "remote_schema",
     "remote_events",
+    "server_calls",
     "remote_tree_edit",
     "remote_discover",
 ]
@@ -116,6 +117,12 @@ def remote_schema(config_dir: str) -> dict[str, Any]:
 def remote_events(config_dir: str, limit: int = 50) -> list[dict[str, Any]]:
     with _session(config_dir) as session:
         return session.call("events_recent", {"limit": limit})
+
+
+def server_calls(config_dir: str, limit: int = 50) -> dict[str, Any]:
+    """The instrument calls the server hosting ``config_dir`` is routing, and just routed."""
+    with _session(config_dir, timeout_ms=2_000) as session:
+        return session.call("calls_recent", {"limit": limit})
 
 
 def remote_discover(

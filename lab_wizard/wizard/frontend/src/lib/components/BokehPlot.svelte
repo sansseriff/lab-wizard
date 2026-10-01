@@ -7,10 +7,14 @@
 	 * plot's shape changes (axes, kind, which lines); new values for the same
 	 * lines replace the data in place, so a zoom survives a running run's
 	 * refresh. Clicking a point reports which run and point it is.
+	 *
+	 * ``xRange``/``yRange`` fix what part of an axis shows (a null end fits the
+	 * data); :func:`shownRanges` reads back what the user has zoomed to.
 	 */
 	import { onMount } from 'svelte';
 	import { loadBokeh, type BokehGlobal } from '$lib/data/bokeh';
 	import type { Series } from '$lib/data/model';
+	import type { AxisRange } from '$lib/procedures/model';
 
 	let {
 		series,
@@ -21,6 +25,8 @@
 		connect = 'seq',
 		logX = false,
 		logY = false,
+		xRange = null,
+		yRange = null,
 		onpoint
 	}: {
 		series: Series[];
@@ -31,6 +37,8 @@
 		connect?: 'seq' | 'x' | 'none';
 		logX?: boolean;
 		logY?: boolean;
+		xRange?: AxisRange | null;
+		yRange?: AxisRange | null;
 		onpoint?: (runId: number, seq: number) => void;
 	} = $props();
 
@@ -46,6 +54,7 @@
 	let theme = $state(0);
 
 	let view: { remove(): void } | null = null;
+	let figure: BokehGlobal = null;
 	let sources: BokehGlobal[] = [];
 	let shape = '';
 
@@ -69,7 +78,7 @@
 	$effect(() => {
 		if (!Bokeh || !host) return;
 		const next = JSON.stringify([
-			kind, connect, logX, logY, xLabel, yLabel, y2Label, theme,
+			kind, connect, logX, logY, xRange, yRange, xLabel, yLabel, y2Label, theme,
 			series.map((s) => [s.label, s.axis, s.y_name])
 		]);
 		if (next === shape && sources.length === series.length) {
@@ -80,9 +89,23 @@
 		build();
 	});
 
+	/** What part of each axis is on screen now, after any pan or zoom. */
+	export function shownRanges(): { x: AxisRange; y: AxisRange } | null {
+		if (!figure) return null;
+		const ends = (range: BokehGlobal): AxisRange => [range.start, range.end];
+		return { x: ends(figure.x_range), y: ends(figure.y_range) };
+	}
+
+	/** A range whose set ends stay put; a null end follows the data. */
+	function range(B: BokehGlobal, bounds: AxisRange | null) {
+		const [start, end] = bounds ?? [null, null];
+		return new B.DataRange1d({ ...(start !== null && { start }), ...(end !== null && { end }) });
+	}
+
 	function clear() {
 		view?.remove();
 		view = null;
+		figure = null;
 		sources = [];
 		if (host) host.innerHTML = '';
 	}
@@ -99,6 +122,8 @@
 			sizing_mode: 'stretch_both',
 			output_backend: 'webgl',
 			tools: 'pan,box_zoom,wheel_zoom,reset,save,tap',
+			x_range: range(B, xRange),
+			y_range: range(B, yRange),
 			x_axis_type: logX ? 'log' : 'linear',
 			y_axis_type: logY ? 'log' : 'linear',
 			x_axis_label: xLabel,
@@ -190,6 +215,7 @@
 			box.location = 'top_left';
 		}
 
+		figure = fig;
 		view = await B.Plotting.show(fig, host);
 	}
 </script>

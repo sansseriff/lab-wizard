@@ -49,7 +49,8 @@ The wizard guides the normal lab workflow:
 2. Edit instrument parameters so they match your local hardware setup.
 3. Create a new measurement by selecting a template and assigning compatible instrument resources.
 
-For development, `wizard clean` removes the initialized workspace state after
+For development, `wizard --build` rebuilds the GUI from the frontend sources
+before starting, so a change to the frontend shows up in the window. `wizard clean` removes the initialized workspace state after
 confirmation, returning the checkout to its fresh-clone layout. Use
 `wizard clean --yes` for non-interactive cleanup.
 

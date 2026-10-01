@@ -39,7 +39,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, TypeVar, get_args, get_origin
 
-from lab_procedure import Status, Step
+from lab_procedure import ProcedureError, Status, Step
 
 from lab_wizard.lib.client.claims import RoutedClaims
 from lab_wizard.lib.client.local_claims import LocalTransportClaim
@@ -47,7 +47,6 @@ from lab_wizard.lib.client.project_resources import _workspace_instruments, loca
 from lab_wizard.lib.client.proxies.registry import PROXY_BY_BEHAVIOR
 from lab_wizard.lib.procedures.codegen import built_from, measurement_module_source, procedure_hash
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.procedures.spec import ProcedureError
 from lab_wizard.lib.project_module import load_module, module_path
 from lab_wizard.lib.task_adapters.run import run_procedure
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, RoleBinding, _find_attribute_path, load_project_config

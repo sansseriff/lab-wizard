@@ -86,7 +86,12 @@ export type PlotDecl = {
 	kind?: 'line' | 'scatter' | 'histogram' | 'waterfall';
 	log_x?: boolean;
 	log_y?: boolean;
+	/** What part of the axis to show: [low, high], a null end fits the data. */
+	x_range?: AxisRange | null;
+	y_range?: AxisRange | null;
 };
+
+export type AxisRange = [number | null, number | null];
 
 export type Definition = {
 	schema_version?: number;

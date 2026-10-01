@@ -223,6 +223,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/data/runs/{run_id}/views/{plot}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Api Data Plot View
+         * @description Keep what part of one of the run's plots to show, wherever it is drawn.
+         */
+        put: operations["api_data_plot_view_api_data_runs__run_id__views__plot__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/get-resources/{name}": {
         parameters: {
             query?: never;
@@ -1114,6 +1134,30 @@ export interface paths {
          * @description Persist this workstation's server bind address.
          */
         put: operations["api_server_set_bind_api_server_bind_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/server/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Server Calls
+         * @description What this workspace's server is routing now, and just routed.
+         *
+         *     ``state`` says why there may be nothing to show: ``stopped`` (no server),
+         *     ``outdated`` (a server started before it kept a call log; restarting it
+         *     fixes that), or ``error``.
+         */
+        get: operations["api_server_calls_api_server_calls_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -2022,6 +2066,19 @@ export interface components {
             /** Path */
             path: components["schemas"]["_InstrumentPath"][];
         };
+        /** _ViewBody */
+        _ViewBody: {
+            /** X Range */
+            x_range?: [
+                number | null,
+                number | null
+            ] | null;
+            /** Y Range */
+            y_range?: [
+                number | null,
+                number | null
+            ] | null;
+        };
         /** _YamlBody */
         _YamlBody: {
             /** Yaml */
@@ -2391,6 +2448,42 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_data_plot_view_api_data_runs__run_id__views__plot__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+                plot: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ViewBody"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -3863,6 +3956,37 @@ export interface operations {
                 "application/json": components["schemas"]["_ServerBindRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_server_calls_api_server_calls_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

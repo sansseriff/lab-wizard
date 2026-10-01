@@ -1,6 +1,8 @@
 from lab_procedure.bus import MessageBus
+from lab_procedure.catalog import step_catalog
 from lab_procedure.context import RunContext
 from lab_procedure.core import Status, Step
+from lab_procedure.definition import ParamDecl, ParamTree, ProcedureDefinition, RoleDecl
 from lab_procedure.messages import (
     Point,
     RunEnded,
@@ -11,6 +13,18 @@ from lab_procedure.messages import (
     StepProgress,
 )
 from lab_procedure.runner import ProcedureRunner
+from lab_procedure.schema import (
+    AnyStep,
+    ParamRef,
+    ProcedureError,
+    Requires,
+    RoleRef,
+    StepParams,
+    SweptRef,
+    Value,
+    list_step_types,
+    step_params_class,
+)
 from lab_procedure.steps import (
     If,
     Invert,
@@ -24,15 +38,27 @@ from lab_procedure.steps import (
     Wait,
     WithParameter,
 )
+from lab_procedure.sweep import ExplicitSweepParams, LinearSweepParams, SweepParams, WaypointSweepParams
 
 __all__ = [
+    "AnyStep",
+    "ExplicitSweepParams",
     "If",
     "Invert",
+    "LinearSweepParams",
     "MessageBus",
+    "ParamDecl",
+    "ParamRef",
+    "ParamTree",
     "Point",
+    "ProcedureDefinition",
+    "ProcedureError",
     "ProcedureRunner",
     "Repeat",
+    "Requires",
     "Retry",
+    "RoleDecl",
+    "RoleRef",
     "RunContext",
     "RunEnded",
     "RunStarted",
@@ -43,10 +69,18 @@ __all__ = [
     "StepBegan",
     "StepEnded",
     "StepFailed",
+    "StepParams",
     "StepProgress",
     "Sweep",
+    "SweepParams",
+    "SweptRef",
+    "Value",
     "ValueAbove",
     "ValueBelow",
     "Wait",
+    "WaypointSweepParams",
     "WithParameter",
+    "list_step_types",
+    "step_catalog",
+    "step_params_class",
 ]

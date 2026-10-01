@@ -619,6 +619,12 @@ wheels = [
 name = "lab-procedure"
 version = "0.0.1"
 source = { editable = "procedure_framework" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.11" }]
 
 [[package]]
 name = "lab-sim"

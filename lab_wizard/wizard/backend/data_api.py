@@ -30,6 +30,9 @@ from typing import Any
 
 import polars as pl
 
+from lab_procedure import ProcedureError
+from lab_procedure.sweep import SWEEP_ADAPTER
+
 from lab_wizard.lib.data.facets import metadata_units, write_run_facets
 from lab_wizard.lib.data.plot import (
     PlotSpec,
@@ -39,7 +42,9 @@ from lab_wizard.lib.data.plot import (
     notebook_source,
     run_plots,
     runs_context,
+    saved_views,
     to_series,
+    with_views,
 )
 from lab_wizard.lib.data.read import Lab
 from lab_wizard.lib.data.run_folder import (
@@ -61,7 +66,6 @@ from lab_wizard.lib.procedures.storage import (
     save_procedure,
 )
 from lab_wizard.lib.data.expressions import ExpressionError
-from lab_wizard.lib.procedures.spec import ProcedureError
 
 __all__ = [
     "DataRequestError",
@@ -76,6 +80,7 @@ __all__ = [
     "point_detail",
     "run_detail",
     "run_list",
+    "run_loops",
     "run_steps",
     "save_device",
     "save_file_settings",
@@ -202,7 +207,7 @@ def run_detail(db: Path, config_dir: str | Path, run_id: int) -> dict[str, Any]:
 
     definition = info["definition"]
     columns = info["columns"] or {}
-    plots = run_plots(definition, list(columns))
+    plots = with_views(run_plots(definition, list(columns)), saved_views(lab, run_id))
     return {
         "run": {**summary, "metadata": info["metadata"] or {}},
         "params": info["params"] or {},
@@ -210,15 +215,101 @@ def run_detail(db: Path, config_dir: str | Path, run_id: int) -> dict[str, Any]:
         "columns": columns,
         "derived": (definition or {}).get("derived") or {},
         "plots": [p.model_copy(update={"runs": [run_id]}).model_dump(mode="json") for p in plots],
+        "loops": run_loops(definition, info["params"] or {}),
         # Whether a composed procedure of this name exists now, for a plot
         # built on the page to be saved into, for the runs it records next.
         "procedure_exists": procedure_origin(config_dir, info["procedure"]) is not None,
     }
 
 
-def run_steps(db: Path, run_id: int) -> list[dict[str, Any]]:
-    """Every step execution of a run, in the order they started: its timeline."""
-    return Lab(db).runs([run_id]).steps().drop("run_id").to_dicts()
+# The steps that run their body once per iteration, labelling each run of it
+# ``<body>#<n>`` rather than ``<body>[<position>]`` (lab_procedure/core.py).
+_LOOPS = ("sweep", "repeat", "retry")
+
+
+def run_loops(definition: Mapping[str, Any] | None, params: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Every loop of a run's procedure, and how many times it was to go round.
+
+    Keyed by the loop's step path with the iteration numbers left out, which is
+    every recorded path of that loop with each ``#<n>`` cut to ``#``:
+    ``source_guard/sweep[0]/sequence#/sweep[2]`` is the inner sweep of every
+    bias point. ``total`` is ``None`` where it is not known before the run
+    (a retry's attempts, or a sweep this cannot read); a run with no definition,
+    a custom measurement, has no loops here, and its timeline counts as it goes.
+    """
+    body = (definition or {}).get("body")
+    loops: dict[str, dict[str, Any]] = {}
+    if isinstance(body, Mapping) and isinstance(body.get("type"), str):
+        _walk_loops(body, _segment(body), params, loops)
+    return loops
+
+
+def _segment(node: Mapping[str, Any]) -> str:
+    return node.get("name") or node["type"]
+
+
+def _is_step(value: Any) -> bool:
+    return isinstance(value, Mapping) and isinstance(value.get("type"), str)
+
+
+def _walk_loops(node: Mapping[str, Any], path: str, params: Mapping[str, Any], loops: dict[str, dict[str, Any]]) -> None:
+    loop = node["type"] in _LOOPS
+    if loop:
+        loops[path] = {
+            "kind": node["type"],
+            "parameter": node.get("parameter"),
+            "total": _loop_total(node, params),
+        }
+    # A child's label as Step.execute writes it: an iteration of a loop's body
+    # is ``#<n>``; otherwise its position, counted over the step's fields in
+    # order (an ``if``'s condition, then, else) or its place in a list.
+    position = 0
+    for value in node.values():
+        if _is_step(value):
+            label = "#" if loop else f"[{position}]"
+            _walk_loops(value, f"{path}/{_segment(value)}{label}", params, loops)
+            position += 1
+        elif isinstance(value, list):
+            for index, child in enumerate(item for item in value if _is_step(item)):
+                _walk_loops(child, f"{path}/{_segment(child)}[{index}]", params, loops)
+
+
+def _param(params: Mapping[str, Any], dotted: str) -> Any:
+    value: Any = params
+    for key in dotted.split("."):
+        if not isinstance(value, Mapping) or key not in value:
+            return None
+        value = value[key]
+    return value
+
+
+def _loop_total(node: Mapping[str, Any], params: Mapping[str, Any]) -> int | None:
+    try:
+        if node["type"] == "sweep":
+            values = node.get("values")
+            if isinstance(values, list):
+                return len(values)
+            if isinstance(values, Mapping) and "param" in values:
+                return len(SWEEP_ADAPTER.validate_python(_param(params, values["param"])).values())
+        if node["type"] == "repeat":
+            count = node.get("count")
+            if isinstance(count, Mapping) and "param" in count:
+                count = _param(params, count["param"])
+            if isinstance(count, int) and not isinstance(count, bool):
+                return count
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
+def run_steps(db: Path, run_id: int) -> dict[str, Any]:
+    """A run's timeline: every step execution in the order they started, and its loops."""
+    runs = Lab(db).runs([run_id])
+    info = runs.info(run_id)
+    return {
+        "steps": runs.steps().drop("run_id").to_dicts(),
+        "loops": run_loops(info["definition"], info["params"] or {}),
+    }
 
 
 def point_detail(db: Path, run_id: int, seq: int) -> dict[str, Any]:
@@ -419,6 +510,32 @@ def device_list(db: Path) -> list[dict[str, Any]]:
         {"name": name, "properties": json.loads(properties or "{}"), "notes": notes, "runs": count}
         for name, properties, notes, count in rows
     ]
+
+
+def save_plot_view(
+    db: Path,
+    run_id: int,
+    plot: str,
+    x_range: tuple[float | None, float | None] | None,
+    y_range: tuple[float | None, float | None] | None,
+) -> dict[str, Any]:
+    """Keep what part of run ``run_id``'s plot ``plot`` to show; no range on either axis forgets it."""
+    Lab(db).runs([run_id])  # a KeyError for a run that is not there
+    ranges = [r if r and any(end is not None for end in r) else None for r in (x_range, y_range)]
+    connection = open_database(db)
+    try:
+        with connection:
+            if ranges == [None, None]:
+                connection.execute("DELETE FROM plot_views WHERE run_id = ? AND plot = ?", (run_id, plot))
+            else:
+                connection.execute(
+                    """INSERT INTO plot_views (run_id, plot, x_range, y_range) VALUES (?, ?, ?, ?)
+                       ON CONFLICT(run_id, plot) DO UPDATE SET x_range = excluded.x_range, y_range = excluded.y_range""",
+                    (run_id, plot, *(json.dumps(list(r)) if r else None for r in ranges)),
+                )
+    finally:
+        connection.close()
+    return {"plot": plot, "x_range": ranges[0], "y_range": ranges[1]}
 
 
 def save_device(db: Path, name: str, properties: Mapping[str, Any], notes: str | None = None) -> dict[str, Any]:

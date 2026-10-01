@@ -1441,6 +1441,82 @@
     "title": "_UpdateInstrumentBody",
     "type": "object"
    },
+   "_ViewBody": {
+    "properties": {
+     "x_range": {
+      "anyOf": [
+       {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+         {
+          "anyOf": [
+           {
+            "type": "number"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         {
+          "anyOf": [
+           {
+            "type": "number"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        ],
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "X Range"
+     },
+     "y_range": {
+      "anyOf": [
+       {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+         {
+          "anyOf": [
+           {
+            "type": "number"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         },
+         {
+          "anyOf": [
+           {
+            "type": "number"
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        ],
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Y Range"
+     }
+    },
+    "title": "_ViewBody",
+    "type": "object"
+   },
    "_YamlBody": {
     "properties": {
      "yaml": {
@@ -1937,6 +2013,63 @@
      }
     },
     "summary": "Api Data Run Steps"
+   }
+  },
+  "/api/data/runs/{run_id}/views/{plot}": {
+   "put": {
+    "description": "Keep what part of one of the run's plots to show, wherever it is drawn.",
+    "operationId": "api_data_plot_view_api_data_runs__run_id__views__plot__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "run_id",
+      "required": true,
+      "schema": {
+       "title": "Run Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "path",
+      "name": "plot",
+      "required": true,
+      "schema": {
+       "title": "Plot",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/_ViewBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Data Plot View"
    }
   },
   "/api/get-resources/{name}": {
@@ -3613,6 +3746,45 @@
      }
     },
     "summary": "Api Server Set Bind"
+   }
+  },
+  "/api/server/calls": {
+   "get": {
+    "description": "What this workspace's server is routing now, and just routed.\n\n``state`` says why there may be nothing to show: ``stopped`` (no server),\n``outdated`` (a server started before it kept a call log; restarting it\nfixes that), or ``error``.",
+    "operationId": "api_server_calls_api_server_calls_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 50,
+       "title": "Limit",
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Server Calls"
    }
   },
   "/api/server/disable-hosting": {

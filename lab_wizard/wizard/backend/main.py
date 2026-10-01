@@ -7,6 +7,7 @@ what every route needs to find its workspace is in ``deps.py``.
 import asyncio
 import logging
 import multiprocessing
+import multiprocessing.spawn
 import os
 import signal
 import sys
@@ -35,6 +36,7 @@ from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
 from lab_wizard.wizard.backend.errors import install_error_handlers
 from lab_wizard.wizard.backend.location import WEB_DIR
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
+from lab_wizard.wizard.backend.macos_app import window_executable
 from lab_wizard.wizard.backend.models import Env
 from lab_wizard.wizard.backend.server_control import (
     ensure_server,
@@ -454,7 +456,16 @@ if __name__ == "__main__":
                 args=(conn_send, url, args.debug),
             )
 
-            windowsp.start()
+            # On macOS the window runs from Lab Wizard.app so the Dock shows
+            # its icon. The executable is process-wide, so only for this start.
+            bundled = window_executable()
+            default_executable = multiprocessing.spawn.get_executable()
+            if bundled:
+                multiprocessing.set_executable(bundled)
+            try:
+                windowsp.start()
+            finally:
+                multiprocessing.set_executable(default_executable)
 
             window_status = ""
             while "closed" not in window_status:

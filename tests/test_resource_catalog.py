@@ -8,7 +8,7 @@ from lab_wizard.lib.utilities import resource_catalog
 
 
 def _reset_process_state() -> None:
-    for kind in ("instrument", "step"):
+    for kind in ("instrument",):
         resource_catalog._source_maps[kind] = None
         resource_catalog._source_signatures[kind] = None
         resource_catalog._source_fingerprints[kind] = None
@@ -50,23 +50,23 @@ class NewDriverParams(
 
 
 def test_source_index_notices_a_file_added_after_first_lookup(tmp_path, monkeypatch):
-    root = tmp_path / "steps"
+    root = tmp_path / "instruments"
     root.mkdir()
     monkeypatch.setenv("LAB_WIZARD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(resource_catalog, "_root_dir", lambda kind: root)
     _reset_process_state()
-    assert resource_catalog.get_source_map("step") == {}
+    assert resource_catalog.get_source_map("instrument") == {}
 
     (root / "later.py").write_text(
         'from typing import Literal\nclass LaterParams:\n    type: Literal["later"] = "later"\n',
         encoding="utf-8",
     )
 
-    assert "later" in resource_catalog.get_source_map("step")
+    assert "later" in resource_catalog.get_source_map("instrument")
 
 
 def test_source_index_reparses_only_changed_files(tmp_path, monkeypatch):
-    root = tmp_path / "steps"
+    root = tmp_path / "instruments"
     root.mkdir()
     for name in ("first", "second"):
         (root / f"{name}.py").write_text(
@@ -77,7 +77,7 @@ def test_source_index_reparses_only_changed_files(tmp_path, monkeypatch):
     monkeypatch.setenv("LAB_WIZARD_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setattr(resource_catalog, "_root_dir", lambda kind: root)
     _reset_process_state()
-    resource_catalog.get_source_map("step")
+    resource_catalog.get_source_map("instrument")
 
     original_scan = resource_catalog._scan_file
     scanned: list[str] = []
@@ -90,7 +90,7 @@ def test_source_index_reparses_only_changed_files(tmp_path, monkeypatch):
     second = root / "second.py"
     second.write_text(second.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
-    assert set(resource_catalog.get_source_map("step")) == {"first", "second"}
+    assert set(resource_catalog.get_source_map("instrument")) == {"first", "second"}
     assert scanned == ["second.py"]
 
 

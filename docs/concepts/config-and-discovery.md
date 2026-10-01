@@ -114,7 +114,7 @@ maintains an automatic source index and a runtime-validated catalog.
 
 A class is registered if it:
 
-- lives under `lib/instruments/` (or `lib/procedures/steps/`, for procedure steps),
+- lives under `lib/instruments/`,
 - declares a `type: Literal["..."]` discriminator field.
 
 The first stage parses source with Python's AST and records only candidate
@@ -134,11 +134,12 @@ edits. Deleting it causes a rebuild from Python source.
 `key_hint`, Python-derived parent chain, child types, behaviors, channel
 behaviors, and discovery-action specs.
 
-!!! note "Two kinds, one mechanism"
-    The same discovery machinery serves instruments and procedure steps via a
-    `Kind` parameter. Savers and plotters are not discovered or configured
-    this way: a project turns them on in its [`outputs:`](../wizard/measurements.md#outputs)
-    block.
+!!! note "Only instruments"
+    Procedure steps are not found this way: a step schema registers itself
+    with `lab_procedure` when its module is imported (see
+    [Procedures](procedures.md)). Savers and plotters are not discovered or
+    configured this way either: a project turns them on in its
+    [`outputs:`](../wizard/measurements.md#outputs) block.
 
 ## Hardware discovery (probing) { #hardware-discovery }
 

@@ -4,14 +4,15 @@
 	 * Nothing here is configured: a filter appears the first time a run records
 	 * the fact behind it (a new instrument type, a param, a device property).
 	 * A value's count ignores its own key's choice, so choosing one procedure
-	 * still shows how many runs the others have.
+	 * still shows how many runs the others have. The filters chosen are shown,
+	 * and removed, above the run list (RunList), so choosing one never moves
+	 * the checkbox just clicked.
 	 */
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
+	import DateFilter from './DateFilter.svelte';
 	import { SvelteSet } from 'svelte/reactivity';
-	import XIcon from 'phosphor-svelte/lib/X';
 	import CaretRightIcon from 'phosphor-svelte/lib/CaretRight';
 	import {
-		describeFilter,
 		facetLabel,
 		groupFacets,
 		isChosen,
@@ -24,9 +25,8 @@
 	let {
 		facets,
 		filters,
-		runs,
 		onchange
-	}: { facets: Facet[]; filters: Filters; runs: number; onchange: (next: Filters) => void } = $props();
+	}: { facets: Facet[]; filters: Filters; onchange: (next: Filters) => void } = $props();
 
 	const SHOWN = 6;
 	// Long lists of values are better searched or ranged than scrolled.
@@ -37,7 +37,6 @@
 	let search = $state('');
 
 	const groups = $derived(groupFacets(facets, search));
-	const active = $derived(Object.entries(filters));
 
 	function toggleGroup(group: string) {
 		if (collapsed.has(group)) collapsed.delete(group);
@@ -53,7 +52,7 @@
 
 	function rangeOf(facet: Facet): [number, number] {
 		const chosen = filters[facet.key];
-		return chosen && !Array.isArray(chosen) ? chosen.range : (facet.range ?? [0, 0]);
+		return chosen && !Array.isArray(chosen) ? (chosen.range as [number, number]) : (facet.range ?? [0, 0]);
 	}
 </script>
 
@@ -66,35 +65,12 @@
 			bind:value={search}
 			aria-label="Search filters and their values"
 		/>
-		<p class="mt-2 text-xs text-muted">
-			<span class="font-semibold text-ink tabular-nums">{runs}</span>
-			{runs === 1 ? 'run' : 'runs'}{active.length ? ' match' : ' recorded'}
-		</p>
-		{#if active.length}
-			<ul class="mt-2 flex flex-wrap gap-1" aria-label="Chosen filters">
-				{#each active as [key, filter] (key)}
-					<li>
-						<button
-							class="flex items-center gap-1 rounded border border-accent/30 bg-accent-wash px-1.5 py-0.5 text-left text-fine text-accent-strong"
-							onclick={() => {
-								const { [key]: _removed, ...rest } = filters;
-								onchange(rest);
-							}}
-							title="Remove this filter"
-						>
-							<span class="mono break-all">{describeFilter(key, filter)}</span><XIcon size={11} />
-						</button>
-					</li>
-				{/each}
-			</ul>
-			<button class="mt-1.5 text-xs text-accent hover:underline" onclick={() => onchange({})}>Clear all</button>
-		{/if}
 	</div>
 
 	<ScrollArea class="min-h-0 flex-1" viewportClasses="px-2.5 pb-4">
 		{#each groups as { group, facets: keys } (group)}
 			{@const open = !collapsed.has(group) || !!search}
-			<section class="border-b border-line py-2 last:border-b-0">
+			<section class="border-b border-line py-2 [contain-intrinsic-size:auto_160px] [content-visibility:auto] last:border-b-0">
 				<button
 					class="flex w-full items-center gap-1 text-left text-fine font-semibold tracking-wide text-muted uppercase"
 					onclick={() => toggleGroup(group)}
@@ -114,7 +90,13 @@
 									{label}{#if facet.unit}<span class="text-muted"> ({facet.unit})</span>{/if}
 								</p>
 							{/if}
-							{#if facet.numeric && facet.values.length >= RANGE_FROM}
+							{#if facet.key === 'date'}
+								<DateFilter
+									days={facet.values.map((v) => v.value)}
+									filter={filters.date}
+									onchange={(range) => onchange(setRange(filters, 'date', range))}
+								/>
+							{:else if facet.numeric && facet.values.length >= RANGE_FROM}
 								{@const [lo, hi] = rangeOf(facet)}
 								<form
 									class="mt-1 flex items-center gap-1"

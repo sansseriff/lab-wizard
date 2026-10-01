@@ -33,6 +33,7 @@ from lab_wizard.wizard.backend.remote_tree import (
     remote_events,
     remote_tree,
     remote_tree_edit,
+    server_calls,
 )
 from lab_wizard.wizard.backend.server_control import (
     disable_hosting,
@@ -323,6 +324,24 @@ class _ServerStartRequest(BaseModel):
 def api_server_status(env: Env = Depends(get_env)):
     """Return whether this workstation's instrument server is running."""
     return server_status(workspace_config_dir(env))
+
+
+@router.get("/api/server/calls")
+def api_server_calls(limit: int = 50, env: Env = Depends(get_env)):
+    """What this workspace's server is routing now, and just routed.
+
+    ``state`` says why there may be nothing to show: ``stopped`` (no server),
+    ``outdated`` (a server started before it kept a call log; restarting it
+    fixes that), or ``error``.
+    """
+    try:
+        return {"state": "ok", **server_calls(str(workspace_config_dir(env)), limit)}
+    except ValueError:
+        return {"state": "stopped"}
+    except Exception as e:  # noqa: BLE001 - shown in place of the list
+        if "calls_recent" in str(e) or "not found" in str(e).lower():
+            return {"state": "outdated"}
+        return {"state": "error", "error": str(e)}
 
 
 @router.post("/api/server/enable-hosting")

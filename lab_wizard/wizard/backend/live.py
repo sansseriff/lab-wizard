@@ -44,9 +44,9 @@ from lab_wizard.wizard.backend import data_api
 
 __all__ = ["LiveFeed"]
 
-PLOT_INTERVAL_S = 0.4
+PLOT_INTERVAL_S = 0.1
 # Plots are recomputed at most this fraction of the time: a run whose plots
-# take 0.2 s to compute is replotted every second, not every 0.4 s.
+# take 0.2 s to compute is replotted every second, not every 0.1 s.
 PLOT_DUTY = 0.2
 
 

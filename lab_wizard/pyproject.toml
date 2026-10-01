@@ -50,7 +50,6 @@ packages = [
     "lab_wizard.lib.instruments.yokogawaAQ2212.modules",
     "lab_wizard.lib.plotters",
     "lab_wizard.lib.procedures",
-    "lab_wizard.lib.procedures.steps",
     "lab_wizard.lib.savers",
     "lab_wizard.lib.server",
     "lab_wizard.lib.task_adapters",
@@ -64,6 +63,7 @@ packages = [
 lab_wizard = [
     "wizard/backend/static/*",
     "wizard/backend/static/**/*",
+    "wizard/backend/icon.icns",
     "lib/procedures/library/*.yml",
     "lib/examples/measurements/*.py",
 ]

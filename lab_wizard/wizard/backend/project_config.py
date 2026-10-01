@@ -27,9 +27,10 @@ import yaml
 from pydantic import BaseModel, ValidationError
 from ruamel.yaml import YAML
 
+from lab_procedure import ProcedureError
+
 from lab_wizard.lib.custom_measurements import load_custom_measurement
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.procedures.spec import ProcedureError
 from lab_wizard.lib.project import build_measurement_module
 from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.utilities.model_tree import ProjectConfig

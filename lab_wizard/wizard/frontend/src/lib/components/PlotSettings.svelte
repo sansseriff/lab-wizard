@@ -6,7 +6,7 @@
 	 * edits ``plot`` in place; the backend checks every name and expression.
 	 */
 	import { describePlot, sweptWithin, sweptWithinWarning, type LineShape } from '$lib/data/model';
-	import { PER_RUN, whereValue, type PlotDecl } from '$lib/procedures/model';
+	import { PER_RUN, whereValue, type AxisRange, type PlotDecl } from '$lib/procedures/model';
 	import Select from '$lib/components/Select.svelte';
 
 	let {
@@ -44,6 +44,15 @@
 			.filter(Boolean);
 		if (field === 'y2' && !names.length) delete plot.y2;
 		else update({ [field]: names });
+	}
+
+	/** One end of an axis's range; a blank end fits the data. */
+	function setEnd(field: 'x_range' | 'y_range', end: 0 | 1, text: string) {
+		const bounds: AxisRange = [...(plot[field] ?? [null, null])];
+		const value = text.trim() === '' ? null : Number(text);
+		bounds[end] = value !== null && Number.isFinite(value) ? value : null;
+		if (bounds[0] === null && bounds[1] === null) delete plot[field];
+		else plot[field] = bounds;
 	}
 
 	const whereRows = $derived(Object.entries(plot.where ?? {}));
@@ -235,4 +244,24 @@
 			]}
 		/></label
 	>
+</div>
+<div class="editor-field">
+	<span>Show <span class="text-muted">(blank fits the data)</span></span>
+	{#each [['x_range', 'x'], ['y_range', 'y']] as const as [field, axis] (field)}
+		<div class="mt-1 flex items-center gap-1 text-xs">
+			<span class="mono w-4">{axis}</span>
+			{#each [0, 1] as const as end (end)}
+				<input
+					class="lw-input mono w-28"
+					type="number"
+					step="any"
+					value={plot[field]?.[end] ?? ''}
+					onchange={(e) => setEnd(field, end, e.currentTarget.value)}
+					placeholder={end ? 'max' : 'min'}
+					aria-label="{axis} {end ? 'max' : 'min'}"
+				/>
+				{#if !end}<span class="text-muted">to</span>{/if}
+			{/each}
+		</div>
+	{/each}
 </div>

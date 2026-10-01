@@ -56,4 +56,8 @@ def draw_plot(ax: Any, spec: PlotSpec, rows: pl.DataFrame, columns: Mapping[str,
         ax.set_xscale("log")
     if spec.log_y:
         ax.set_yscale("log")
+    if spec.x_range:
+        ax.set_xlim(*spec.x_range)
+    if spec.y_range:
+        ax.set_ylim(*spec.y_range)
     ax.grid(True, alpha=0.3)

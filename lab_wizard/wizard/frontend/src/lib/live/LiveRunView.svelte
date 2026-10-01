@@ -1,16 +1,15 @@
 <script lang="ts">
-	/** A run as it happens: its status, every plot its procedure declares, and its timeline.
+	/** A run as it happens: its status, every plot its procedure declares, and where it is.
 	 *
 	 * The same view follows a run still going and shows one that has ended, so
 	 * the Run page shows the project's last run until a new one starts, and the
 	 * standalone live page (a web plotter's) is this view on its own.
 	 */
-	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import { onDestroy } from 'svelte';
 	import BokehPlot from '$lib/components/BokehPlot.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
-	import Timeline from '$lib/data/Timeline.svelte';
+	import RunTimeline from '$lib/data/RunTimeline.svelte';
 	import { axisLabel, describePlot, duration } from '$lib/data/model';
 	import { LiveRun } from './liveRun.svelte';
 
@@ -36,17 +35,6 @@
 		tab = String(named >= 0 ? named : 0);
 	});
 	const shown = $derived(plots[Number(tab)] ?? plots[0] ?? null);
-
-	// Where the run is now: every step still open, outermost first — the branch
-	// of the procedure it is in, which scrolling the timeline would lose.
-	const branch = $derived(
-		live?.running
-			? live.steps
-					.filter((s) => !s.ended_at)
-					.sort((a, b) => a.path.split('/').length - b.path.split('/').length)
-					.map((s) => s.path.split('/').at(-1) ?? s.path)
-			: []
-	);
 
 	const tone: Record<string, 'ok' | 'crit' | 'warn' | 'accent'> = {
 		success: 'ok',
@@ -88,8 +76,8 @@
 								<p class="p-2 text-xs text-crit">{shown.error}</p>
 							{:else}
 								<div class="h-[340px]">
-									<BokehPlot
-										series={shown.series}
+					<BokehPlot
+						series={shown.series}
 										xLabel={axisLabel([shown.spec.x], shown.units)}
 										yLabel={axisLabel(shown.spec.y, shown.units)}
 										y2Label={axisLabel(shown.spec.y2 ?? [], shown.units)}
@@ -97,6 +85,8 @@
 										connect={shown.spec.connect}
 										logX={!!shown.spec.log_x}
 										logY={!!shown.spec.log_y}
+										xRange={shown.spec.x_range}
+										yRange={shown.spec.y_range}
 									/>
 								</div>
 								<p class="px-1 pt-1 text-fine text-muted">{describePlot(shown.spec, shown.shape)}</p>
@@ -107,18 +97,11 @@
 			{/if}
 		</section>
 
-		<section class="flex min-h-[180px] flex-1 flex-col rounded border border-line bg-surface" aria-label="Timeline">
-			<div class="flex items-baseline gap-3 border-b border-line px-3 py-1.5">
-				<h3 class="text-xs font-semibold text-ink-2">Timeline</h3>
-				{#if branch.length}
-					<p class="mono min-w-0 truncate text-fine text-accent-strong" title={branch.join(' › ')}>
-						Now: {branch.join(' › ')}
-					</p>
-				{/if}
-			</div>
-			<ScrollArea class="min-h-0 flex-1">
-				<Timeline steps={live.steps} follow={live.running} now={live.now} />
-			</ScrollArea>
+		<section class="rounded border border-line bg-surface" aria-label="Timeline">
+			<h3 class="border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-2">
+				{live.running ? 'Now' : 'Timeline'}
+			</h3>
+			<RunTimeline steps={live.steps} loops={live.detail?.loops ?? {}} live={live.running} now={live.now} />
 		</section>
 	</div>
 {/if}

@@ -199,7 +199,7 @@ def test_a_procedure_can_drive_a_laser_and_guard_it():
     """
     from lab_procedure import ProcedureRunner, Status
 
-    from lab_wizard.lib.procedures.catalog import step_catalog
+    from lab_procedure import step_catalog
     from lab_wizard.lib.procedures.definition import ProcedureDefinition
 
     catalog = step_catalog()

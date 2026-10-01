@@ -6,15 +6,18 @@
 	 */
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import Pill from '$lib/components/Pill.svelte';
-	import { localTime, type RunRow } from './model';
+	import XIcon from 'phosphor-svelte/lib/X';
+	import { describeFilter, localTime, type Filters, type RunRow } from './model';
 
 	let {
 		runs,
 		total,
 		selected,
+		filters,
 		loading = false,
 		onselect,
-		onmore
+		onmore,
+		onfilters
 	}: {
 		runs: RunRow[];
 		total: number;
@@ -22,7 +25,12 @@
 		loading?: boolean;
 		onselect: (ids: number[]) => void;
 		onmore: () => void;
+		/** The filters that made this list, each removable here. */
+		filters: Filters;
+		onfilters: (next: Filters) => void;
 	} = $props();
+
+	const active = $derived(Object.entries(filters));
 
 	let anchor: number | null = null;
 
@@ -57,20 +65,43 @@
 
 <div class="flex h-full min-h-0 flex-col">
 	<div class="flex items-center gap-2 border-b border-line px-3 py-2 text-xs text-muted">
-		<span><span class="font-semibold text-ink tabular-nums">{total}</span> {total === 1 ? 'run' : 'runs'}</span>
+		<span>
+			<span class="font-semibold text-ink tabular-nums">{total}</span>
+			{total === 1 ? 'run' : 'runs'}{active.length ? ' match' : ''}
+		</span>
 		{#if selected.length > 1}
 			<span class="ml-auto">{selected.length} overlaid</span>
 			<button class="text-accent hover:underline" onclick={() => onselect(selected.slice(0, 1))}>Just one</button>
 		{/if}
 	</div>
+	{#if active.length}
+		<ul class="flex flex-wrap items-center gap-1 border-b border-line px-3 py-2" aria-label="Chosen filters">
+			{#each active as [key, filter] (key)}
+				<li>
+					<button
+						class="flex items-center gap-1 rounded border border-accent/30 bg-accent-wash px-1.5 py-0.5 text-left text-fine text-accent-strong"
+						onclick={() => {
+							const { [key]: _removed, ...rest } = filters;
+							onfilters(rest);
+						}}
+						title="Remove this filter"
+					>
+						<span class="mono break-all">{describeFilter(key, filter)}</span><XIcon size={11} />
+					</button>
+				</li>
+			{/each}
+			<li><button class="ml-1 text-fine text-accent hover:underline" onclick={() => onfilters({})}>Clear all</button></li>
+		</ul>
+	{/if}
 	<ScrollArea class="min-h-0 flex-1">
 	<ul aria-label="Runs" aria-multiselectable="true" role="listbox">
+		<!-- Off-screen runs skip layout, as in Timeline.svelte. -->
 		{#each runs as run (run.id)}
 			{@const chosen = selected.includes(run.id)}
 			<li
 				role="option"
 				aria-selected={chosen}
-				class="flex cursor-pointer items-start gap-2 border-b border-line px-3 py-2 text-body {chosen
+				class="flex cursor-pointer items-start gap-2 border-b border-line px-3 py-2 text-body [contain-intrinsic-size:auto_58px] [content-visibility:auto] {chosen
 					? 'bg-accent-wash'
 					: 'hover:bg-surface-2'}"
 				onclick={(e) => pick(e, run.id)}

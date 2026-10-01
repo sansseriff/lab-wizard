@@ -26,7 +26,8 @@ type Message =
 export class LiveRun {
 	detail = $state<RunDetail | null>(null);
 	run = $state<RunRow | null>(null);
-	steps = $state<Step[]>([]);
+	// Replaced, not changed in place, so thousands of steps are one signal rather than one each.
+	steps = $state.raw<Step[]>([]);
 	plots = $state<LivePlot[]>([]);
 	ended = $state(false);
 	error = $state('');
@@ -91,17 +92,20 @@ export class LiveRun {
 				this.run = message.run;
 				this.now = Date.now();
 				break;
-			case 'steps':
+			case 'steps': {
+				const steps = [...this.steps];
 				for (const step of message.steps) {
 					const at = this.#index.get(step.id);
 					if (at === undefined) {
-						this.#index.set(step.id, this.steps.length);
-						this.steps.push(step);
+						this.#index.set(step.id, steps.length);
+						steps.push(step);
 					} else {
-						this.steps[at] = step;
+						steps[at] = step;
 					}
 				}
+				this.steps = steps;
 				break;
+			}
 			case 'plots':
 				this.plots = message.plots;
 				break;

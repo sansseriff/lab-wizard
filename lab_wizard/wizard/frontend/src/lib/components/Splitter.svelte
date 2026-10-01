@@ -10,7 +10,7 @@
   Double-click goes back to that; the arrow keys nudge it.
 -->
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	let {
 		size = $bindable(),
@@ -40,11 +40,22 @@
 	// Set once the user has chosen a size, here or in an earlier session.
 	let chosen = $state(false);
 
+	// Follows `initial` alone; a change of room is the effect below's.
 	$effect(() => {
-		if (!chosen && initial > 0) size = clamp(initial);
+		if (!chosen && initial > 0) size = untrack(() => clamp(initial));
 	});
 
 	const clamp = (value: number) => Math.round(Math.min(Math.max(value, min), Math.max(min, max)));
+
+	// A size the room no longer allows (a smaller window, more above the panel)
+	// gives way to it. That is not saved: the next visit starts from the size chosen.
+	// The room is often measured by a ResizeObserver; giving way on the next frame,
+	// rather than inside its pass, keeps the browser from reporting a loop.
+	$effect(() => {
+		if (!(max >= min && size > max)) return;
+		const frame = requestAnimationFrame(() => (size = clamp(size)));
+		return () => cancelAnimationFrame(frame);
+	});
 
 	function save() {
 		chosen = true;
@@ -85,11 +96,13 @@
 			target.removeEventListener('pointermove', move);
 			target.removeEventListener('pointerup', end);
 			target.removeEventListener('pointercancel', end);
+			target.removeEventListener('lostpointercapture', end);
 			save();
 		};
 		target.addEventListener('pointermove', move);
 		target.addEventListener('pointerup', end);
 		target.addEventListener('pointercancel', end);
+		target.addEventListener('lostpointercapture', end);
 	}
 
 	function onkeydown(event: KeyboardEvent) {

@@ -11,12 +11,9 @@ import {
 	sameSpec,
 	setRange,
 	specForRuns,
-	stepsOfPoint,
-	timeline,
 	toggleValue,
 	type Facet,
 	type PlotSpec,
-	type Step
 } from '../src/lib/data/model';
 
 test('choosing and unchoosing filter values', () => {
@@ -77,31 +74,6 @@ test('an axis title carries the unit when its columns share one', () => {
 	expect(axisLabel(['a', 'b'], { a: 'Hz', b: 'Hz' })).toBe('a, b (Hz)');
 	expect(axisLabel(['a', 'b'], { a: 'Hz', b: 'V' })).toBe('a, b');
 	expect(axisLabel(['count_rate / 1000'], {})).toBe('count_rate / 1000');
-});
-
-test('the timeline lays steps out on the run time axis, indented by nesting', () => {
-	const step = (path: string, start: number, end: number | null, status = 'success'): Step => ({
-		path,
-		kind: path.split('/').at(-1)!,
-		started_at: new Date(start * 1000).toISOString(),
-		ended_at: end === null ? null : new Date(end * 1000).toISOString(),
-		status: end === null ? null : status,
-		error: null
-	});
-	const rows = timeline([step('sequence', 0, 10), step('sequence/sweep[0]', 2, 10), step('sequence/sweep[0]/count#1', 5, null)], 10_000);
-	expect(rows.map((r) => [r.name, r.depth, r.left])).toEqual([
-		['sequence', 0, 0],
-		['sweep[0]', 1, 0.2],
-		['count#1', 2, 0.5]
-	]);
-	expect(rows[0].width).toBe(1);
-	expect(rows[2].width).toBe(0.5); // still running: up to now
-});
-
-test('a point highlights its own steps and every step they ran inside', () => {
-	const lit = stepsOfPoint({ seq: 1, t: '', values: {}, steps: ['sequence/sweep[0]/count#1'] });
-	expect([...lit]).toEqual(['sequence', 'sequence/sweep[0]', 'sequence/sweep[0]/count#1']);
-	expect(stepsOfPoint(null).size).toBe(0);
 });
 
 test('nested params flatten to the paths filters use', () => {

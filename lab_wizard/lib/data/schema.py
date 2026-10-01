@@ -1,8 +1,12 @@
 """The lab database: one SQLite file per workspace.
 
-Five tables. Only what every run or row has is a typed column; everything a
+Six tables. Only what every run or row has is a typed column; everything a
 procedure records lives in one JSON ``values`` object per row, so no procedure
 ever changes the schema. See ``plans/semantic_data_plan.md`` §3.
+
+``plot_views`` is what part of a run's plot someone chose to look at (a
+zoom kept on the Data page), by the plot's name; every view of the run draws
+the plot that way.
 
 ``run_facets`` is derived from the other tables (the Data page's sidebar
 filters on it) and can be rebuilt at any time; nothing treats it as the record.
@@ -81,6 +85,18 @@ CREATE INDEX idx_facets_value ON run_facets(key, value);
 CREATE INDEX idx_facets_num ON run_facets(key, num);
 """
 
+# Added after version 1 without changing what it means: a database from before
+# gains it when opened.
+_PLOT_VIEWS = """
+CREATE TABLE IF NOT EXISTS plot_views (
+    run_id  INTEGER NOT NULL REFERENCES runs(id),
+    plot    TEXT NOT NULL,
+    x_range TEXT,
+    y_range TEXT,
+    PRIMARY KEY (run_id, plot)
+);
+"""
+
 
 class DatabaseVersionError(RuntimeError):
     """The file is not a lab database this version of lab_wizard can write."""
@@ -107,7 +123,7 @@ def open_database(path: str | Path) -> sqlite3.Connection:
     tables = {row["name"] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     if not tables:
         with connection:
-            connection.executescript(_TABLES)
+            connection.executescript(_TABLES + _PLOT_VIEWS)
             connection.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
         return connection
 
@@ -122,4 +138,9 @@ def open_database(path: str | Path) -> sqlite3.Connection:
             f"{path} has {found}; this lab_wizard writes version {SCHEMA_VERSION}. "
             "It was not changed. Move it aside to start a new database."
         )
+    if "plot_views" not in tables:
+        try:
+            connection.executescript(_PLOT_VIEWS)
+        except sqlite3.OperationalError:
+            pass  # read-only: it reads as having no views
     return connection

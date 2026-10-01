@@ -6,6 +6,7 @@
 	 * more than one page shows them as tabs across the top (SectionTabs).
 	 */
 	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import logo from '$lib/assets/logo.svg';
 	import { workstation } from '$lib/stores/workstation.svelte';
 
@@ -16,6 +17,23 @@
 	import HardDrivesIcon from 'phosphor-svelte/lib/HardDrives';
 	import DatabaseIcon from 'phosphor-svelte/lib/Database';
 	import GearSixIcon from 'phosphor-svelte/lib/GearSix';
+	import CaretDoubleLeftIcon from 'phosphor-svelte/lib/CaretDoubleLeft';
+
+	const storageKey = 'lab-wizard-sidebar-collapsed';
+	let collapsed = $state(false);
+	let motionReady = $state(false);
+
+	onMount(() => {
+		collapsed = localStorage.getItem(storageKey) === 'true';
+		requestAnimationFrame(() => {
+			motionReady = true;
+		});
+	});
+
+	function toggleCollapsed() {
+		collapsed = !collapsed;
+		localStorage.setItem(storageKey, String(collapsed));
+	}
 
 	type Section = { href: string; label: string; icon: any };
 
@@ -41,41 +59,198 @@
 </script>
 
 <aside
-	class="sticky top-0 flex h-screen w-[246px] shrink-0 flex-col overflow-y-auto border-r border-line bg-surface"
+	class:collapsed
+	class:motion-ready={motionReady}
+	class="sidebar sticky top-0 flex h-screen shrink-0 flex-col overflow-y-auto border-r border-line bg-surface"
 >
-	<div class="flex flex-col gap-2.5 border-b border-line px-4 pb-3 pt-4">
-		<a href="/" class="flex items-center gap-2.5 no-underline">
-			<img src={logo} alt="" class="h-6 w-6" />
-			<span class="text-xs font-semibold uppercase tracking-[0.13em] text-ink">Lab Wizard</span>
+	<div class="sidebar-header border-b border-line pb-3 pt-4">
+		<a href="/" aria-label="Lab Wizard home" class="brand-link no-underline">
+			<img src={logo} alt="" class="size-6 shrink-0" />
+			<span class="brand-label text-xs font-semibold uppercase tracking-[0.13em] text-ink"
+				>Lab Wizard</span
+			>
 		</a>
-
-		<div class="flex flex-col gap-0.5 rounded border border-line bg-surface-2 px-2.5 py-1.5">
-			<span class="text-2xs uppercase tracking-[0.09em] text-muted">Workspace</span>
-			<span class="mono truncate text-xs font-semibold" title={workstation.workspaceDir}>
-				{workstation.workspaceName}
-			</span>
-		</div>
 	</div>
 
-	<nav class="flex flex-1 flex-col gap-px p-2">
+	<div class="sidebar-actions border-b border-line px-2 py-1">
+		<button
+			type="button"
+			aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+			title={collapsed ? 'Expand sidebar' : undefined}
+			aria-expanded={!collapsed}
+			onclick={toggleCollapsed}
+			class="nav-link flex w-full cursor-pointer items-center rounded text-body text-muted transition-colors hover:bg-surface-2 hover:text-ink-2"
+		>
+			<span class="nav-icon"><span class="toggle-icon"><CaretDoubleLeftIcon size={18} /></span></span>
+			<span class="nav-label">Collapse sidebar</span>
+		</button>
+	</div>
+
+	<nav class="flex flex-1 flex-col gap-px p-2" aria-label="Main navigation">
 		{#each sections as section (section.href)}
 			{@const active = isActive(section)}
 			{@const Icon = section.icon}
 			<a
 				href={section.href}
+				aria-label={section.label}
 				aria-current={active ? 'page' : undefined}
-				class="flex items-center gap-2.5 rounded px-2.5 py-1.5 text-body no-underline transition-colors
+				title={collapsed ? section.label : undefined}
+				class="nav-link flex items-center rounded text-body no-underline transition-colors
 					{active
-					? 'bg-accent-wash font-semibold text-accent-strong'
-					: 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
+						? 'bg-accent-wash font-semibold text-accent-strong'
+						: 'text-ink-2 hover:bg-surface-2 hover:text-ink'}"
 			>
-				<Icon size={15} weight={active ? 'fill' : 'regular'} />
-				{section.label}
+				<span class="nav-icon"><Icon size={18} weight={active ? 'fill' : 'regular'} /></span>
+				<span class="nav-label">{section.label}</span>
 			</a>
 		{/each}
 	</nav>
 
 	{#if workstation.error}
-		<p class="border-t border-line px-4 py-3 text-fine text-crit">Wizard backend unreachable.</p>
+		<p class="sidebar-error border-t border-line px-4 py-3 text-fine text-crit">
+			Wizard backend unreachable.
+		</p>
 	{/if}
+
+	<div class="workspace-footer border-t border-line text-fine text-muted">
+		<span class="workspace-footer-label mono block truncate" title={workstation.workspaceDir}
+			>W: {workstation.workspaceName}</span
+		>
+	</div>
 </aside>
+
+<style>
+	.sidebar:not(.motion-ready),
+	.sidebar:not(.motion-ready) * {
+		transition-duration: 0ms !important;
+	}
+
+	.sidebar {
+		width: 246px;
+		transition: width 240ms ease;
+	}
+
+	.sidebar.collapsed {
+		width: 60px;
+	}
+
+	.sidebar-header {
+		padding-inline: 16px;
+		transition: padding-inline 240ms ease;
+	}
+
+	.collapsed .sidebar-header {
+		padding-inline: 8px;
+	}
+
+	.brand-link {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		height: 24px;
+		overflow: hidden;
+		white-space: nowrap;
+		transition: gap 240ms ease;
+	}
+
+	.collapsed .brand-link {
+		gap: 0;
+	}
+
+	.brand-label {
+		max-width: 120px;
+		overflow: hidden;
+		transition: max-width 240ms ease, opacity 180ms ease, transform 240ms ease;
+	}
+
+	.collapsed .brand-label {
+		max-width: 0;
+		opacity: 0;
+		transform: translateX(-12px);
+	}
+
+	.toggle-icon {
+		display: grid;
+		place-items: center;
+		transition: transform 240ms ease;
+	}
+
+	.collapsed .toggle-icon {
+		transform: rotate(180deg);
+	}
+
+	.nav-link {
+		height: 36px;
+		min-width: 0;
+		overflow: hidden;
+		white-space: nowrap;
+	}
+
+	.nav-icon {
+		display: grid;
+		width: 44px;
+		height: 36px;
+		flex: 0 0 44px;
+		place-items: center;
+	}
+
+	.nav-label {
+		transition: opacity 180ms ease, transform 240ms ease;
+	}
+
+	.collapsed .nav-label {
+		opacity: 0;
+		transform: translateX(-12px);
+	}
+
+	.sidebar-error {
+		max-height: 52px;
+		overflow: hidden;
+		white-space: nowrap;
+		transition: max-height 240ms ease, opacity 180ms ease, padding 240ms ease;
+	}
+
+	.collapsed .sidebar-error {
+		max-height: 0;
+		opacity: 0;
+		padding-block: 0;
+	}
+
+	.workspace-footer {
+		max-height: 40px;
+		padding: 10px 16px;
+		overflow: hidden;
+		white-space: nowrap;
+		transition: max-height 240ms ease, opacity 180ms ease, padding 240ms ease;
+	}
+
+	.collapsed .workspace-footer {
+		max-height: 0;
+		opacity: 0;
+		padding-block: 0;
+	}
+
+	.workspace-footer-label {
+		transition: opacity 180ms ease, transform 240ms ease;
+	}
+
+	.collapsed .workspace-footer-label {
+		opacity: 0;
+		transform: translateX(-12px);
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.sidebar,
+		.sidebar-header,
+		.brand-link,
+		.brand-label,
+		.toggle-icon,
+		.nav-label,
+		.sidebar-error,
+		.workspace-footer,
+		.workspace-footer-label {
+			transition-duration: 0ms;
+		}
+	}
+</style>

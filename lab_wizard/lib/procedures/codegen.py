@@ -25,8 +25,11 @@ import pprint
 import re
 from typing import Any
 
-from lab_wizard.lib.procedures.definition import ParamDecl, ParamTree, ProcedureDefinition, _SWEEP_ADAPTER
-from lab_wizard.lib.procedures.spec import RenderContext, python_identifier
+from lab_procedure import ParamDecl, ParamTree
+from lab_procedure.schema import RenderContext, python_identifier
+from lab_procedure.sweep import SWEEP_ADAPTER
+
+from lab_wizard.lib.procedures.definition import ProcedureDefinition
 
 
 __all__ = [
@@ -39,7 +42,7 @@ __all__ = [
     "procedure_hash",
     "types_block",
 ]
-_SWEEP_MODULE = "lab_wizard.lib.procedures.sweep_params"
+_SWEEP_MODULE = "lab_procedure"
 
 
 def class_prefix(name: str) -> str:

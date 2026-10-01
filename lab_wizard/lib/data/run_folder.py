@@ -181,8 +181,10 @@ class RunFolder:
         self._steps_csv.writerow([_cell(step[f]) for f in STEP_FIELDS])
         self._steps_file.flush()
 
-    def finish(self, run: Mapping[str, Any], *, plot_png: bool = False) -> None:
-        """Write every file in its final form."""
+    def finish(
+        self, run: Mapping[str, Any], *, plot_png: bool = False, views: Mapping[str, Mapping[str, Any]] | None = None
+    ) -> None:
+        """Write every file in its final form; ``views`` are the zooms kept for its plots."""
         self.run = dict(run)
         # As the database records it: the declared columns, then any recorded
         # column nobody declared, in the order they arrived.
@@ -209,7 +211,7 @@ class RunFolder:
         for name in arrays:
             self._write_array(name)
         if plot_png:
-            self._write_plot()
+            self._write_plot(views or {})
 
     # ------------------------------------------------------------ helpers
 
@@ -257,18 +259,19 @@ class RunFolder:
             writer.writerow(["seq", *[_cell(start + i * step) for i in range(width)]])
             writer.writerows([_cell(seq), *[_cell(v) for v in values]] for seq, values in rows)
 
-    def _write_plot(self) -> None:
+    def _write_plot(self, views: Mapping[str, Mapping[str, Any]]) -> None:
         """The run's default plot, drawn without a display, as the plot window draws it."""
         import polars as pl
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         from matplotlib.figure import Figure
 
-        from lab_wizard.lib.data.plot import default_plot, derive_per_run, evaluate_plot
+        from lab_wizard.lib.data.plot import default_plot, derive_per_run, evaluate_plot, with_views
         from lab_wizard.lib.plotters.draw import draw_plot
 
         spec = default_plot(self.definition, self._columns())
         if spec is None or not self.points:
             return
+        (spec,) = with_views([spec], views)
         frame = pl.DataFrame(
             [{"run_id": 0, "seq": p["seq"], **p["values"]} for p in self.points],
             infer_schema_length=None,
@@ -342,5 +345,7 @@ def export_run(
         'SELECT seq, t, steps, "values" FROM points WHERE run_id = ? ORDER BY seq', (run_id,)
     ):
         folder.add_point(seq, t, json.loads(steps), json.loads(values))
-    folder.finish(run, plot_png=plot_png)
+    from lab_wizard.lib.data.plot import saved_views
+
+    folder.finish(run, plot_png=plot_png, views=saved_views(lab, run_id))
     return folder.path

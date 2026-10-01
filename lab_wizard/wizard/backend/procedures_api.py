@@ -19,10 +19,11 @@ from typing import Any
 from pydantic import ValidationError
 from ruamel.yaml import YAML
 
-from lab_wizard.lib.procedures.catalog import behavior_catalog, step_catalog
+from lab_procedure import ProcedureError, step_catalog
+
+from lab_wizard.lib.procedures.catalog import behavior_catalog
 from lab_wizard.lib.procedures.codegen import measurement_module_source
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.procedures.spec import ProcedureError
 from lab_wizard.lib.procedures.storage import (
     BUILTIN_DIR,
     delete_procedure,

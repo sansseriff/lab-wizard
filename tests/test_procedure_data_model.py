@@ -13,10 +13,10 @@ from typing import Any
 import polars as pl
 import pytest
 
-from lab_procedure import Point, ProcedureRunner, Status, Sweep
+from lab_procedure import Point, ProcedureRunner, Status, Sweep, step_catalog
+
 from lab_wizard.lib.data import ExpressionError, compile_expression, derive
 from lab_wizard.lib.instruments.general.attenuator import StandInAttenuator
-from lab_wizard.lib.procedures.catalog import step_catalog
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.task_adapters.instrument_steps import SetAttenuation
 from lab_wizard.wizard.backend.procedures_api import check_definition

@@ -21,7 +21,7 @@ from lab_wizard.wizard.backend.models import Env
 logger = logging.getLogger("lab_wizard.wizard.backend.routes.live")
 router = APIRouter()
 
-POLL_S = 0.25
+POLL_S = 0.05
 
 
 def _env(websocket: WebSocket) -> Env:

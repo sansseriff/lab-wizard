@@ -3,8 +3,12 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence as Seq
 from contextlib import ExitStack
+from typing import Literal
+
+from pydantic import Field
 
 from lab_procedure.core import Status, Step
+from lab_procedure.schema import AnyStep, BuildContext, ParamRef, RenderContext, StepClass, StepParams, Value
 
 
 class Sequence(Step):
@@ -31,6 +35,17 @@ class Sequence(Step):
                 return status
         self.report_progress(1.0)
         return Status.SUCCESS
+
+
+class SequenceStepParams(StepParams):
+    """Run steps in order; stop at the first that does not succeed."""
+
+    type: Literal["sequence"] = "sequence"
+    children: list[AnyStep] = Field(default_factory=list)
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return Sequence
 
 
 class Repeat(Step):
@@ -95,6 +110,37 @@ class Repeat(Step):
         return Status.SUCCESS
 
 
+class RepeatStepParams(StepParams):
+    """Run ``body`` ``count`` times; its rows carry ``parameter`` = 0, 1, 2 ...
+
+    The index keeps repetitions apart in the data, the way a sweep's value
+    keeps its points apart.
+    """
+
+    type: Literal["repeat"] = "repeat"
+    count: Value
+    parameter: str = Field(default="repeat", json_schema_extra={"column": "records"})
+    body: AnyStep
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return Repeat
+
+    def swept_parameters(self) -> tuple[str, ...]:
+        return (self.parameter,)
+
+    # Repeat's constructor calls its child argument ``child_factory``, and a
+    # step instance is accepted there; a definition says ``body``.
+
+    def build(self, ctx: BuildContext) -> Step:
+        return Repeat(ctx.value(self.count), ctx.step(self.body), name=self.name, parameter=self.parameter)
+
+    def render(self, ctx: RenderContext) -> str:
+        count = ctx.value(self.count, f"{self.label()}.count")
+        name = f", name={self.name!r}" if self.name else ""
+        return f"{ctx.use(Repeat)}({count}, {ctx.step(self.body)}{name}, parameter={self.parameter!r})"
+
+
 class Sweep(Step):
     """Run a child once per value, with ``parameter`` bound to the value.
 
@@ -157,6 +203,64 @@ class Sweep(Step):
         return Status.SUCCESS
 
 
+class SweepStepParams(StepParams):
+    """Run ``body`` once per value, with ``parameter`` bound to that value.
+
+    ``values`` is a sweep param (``{param: bias.sweep}``) or a literal list.
+    Inside ``body``, ``{swept: <parameter>}`` is the current value, and every
+    observation records it — and whatever the sweep's mode records beside it
+    (a waypoints sweep's ``<parameter>_leg``).
+    """
+
+    type: Literal["sweep"] = "sweep"
+    parameter: str = Field(json_schema_extra={"column": "records"})
+    values: ParamRef | list[float]
+    body: AnyStep
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return Sweep
+
+    def swept_parameters(self) -> tuple[str, ...]:
+        return (self.parameter,)
+
+    # The one step the generic builder cannot do: its constructor takes a
+    # closure, which builds the body afresh at each value.
+
+    def build(self, ctx: BuildContext) -> Step:
+        if isinstance(self.values, ParamRef):
+            sweep = ctx.param(self.values.param)
+            values, also = sweep.values(), sweep.also(self.parameter)
+        else:
+            values, also = list(self.values), None
+        return Sweep(
+            self.parameter,
+            values,
+            lambda value: ctx.scoped(self.parameter, value).step(self.body),
+            name=self.name,
+            also=also,
+        )
+
+    def render(self, ctx: RenderContext) -> str:
+        where = f"{self.label()}.values"
+        if isinstance(self.values, ParamRef):
+            decl = ctx.params.find(self.values.param) if ctx.params is not None else None
+            if ctx.params is not None and decl is None:
+                ctx.problem(f"{where} reads param {self.values.param!r}, which is not declared")
+            elif decl is not None and decl.type != "sweep":
+                ctx.problem(f"{where} reads {self.values.param!r}, which is not a sweep param")
+            sweep = f"{ctx.params_var}.{self.values.param}"
+            values = f"{sweep}.values()"
+            also = f", also={sweep}.also({self.parameter!r})"
+        else:
+            values = repr(list(self.values))
+            also = ""
+        inner, ident = ctx.scoped(self.parameter)
+        body = inner.step(self.body)
+        name = f", name={self.name!r}" if self.name else ""
+        return f"{ctx.use(Sweep)}({self.parameter!r}, {values}, lambda {ident}: {body}{name}{also})"
+
+
 class Wait(Step):
     determinate = True
 
@@ -196,6 +300,17 @@ class Wait(Step):
                 return Status.ABORTED
 
 
+class WaitStepParams(StepParams):
+    """Wait, abortably."""
+
+    type: Literal["wait"] = "wait"
+    seconds: Value
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return Wait
+
+
 class WithParameter(Step):
     """Run ``body`` with ``parameter`` set to ``value``, as a sweep would.
 
@@ -216,6 +331,26 @@ class WithParameter(Step):
         assert self.node_id is not None
         with self.context.bound_parameter(self.parameter, self.value):
             return self.body.execute(self.context, self.node_id, position=0)
+
+
+class WithParameterStepParams(StepParams):
+    """Run ``body`` with ``parameter`` set to ``value``; its rows carry it.
+
+    Labels part of a run — ``phase: background`` — the way a sweep labels each
+    point with its value.
+    """
+
+    type: Literal["with_parameter"] = "with_parameter"
+    parameter: str = Field(json_schema_extra={"column": "records"})
+    value: Value
+    body: AnyStep
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return WithParameter
+
+    def swept_parameters(self) -> tuple[str, ...]:
+        return (self.parameter,)
 
 
 # --------------------------------------------------------------------------
@@ -271,6 +406,26 @@ class Retry(Step):
         return Status.FAILED
 
 
+class RetryStepParams(StepParams):
+    """Run ``child`` until it succeeds, up to ``max_attempts`` times; errors are retried too.
+
+    Each attempt's rows carry ``parameter`` = 0, 1, 2 ..., so what a failed
+    attempt recorded stays in the data, apart from the attempt that succeeded.
+    """
+
+    type: Literal["retry"] = "retry"
+    max_attempts: Value = 3
+    parameter: str = Field(default="attempt", json_schema_extra={"column": "records"})
+    child: AnyStep
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return Retry
+
+    def swept_parameters(self) -> tuple[str, ...]:
+        return (self.parameter,)
+
+
 class If(Step):
     """Run ``condition``; on SUCCESS run ``then``, on FAILED run ``otherwise``.
 
@@ -307,6 +462,19 @@ class If(Step):
         return self.otherwise.execute(self.context, self.node_id, position=2)
 
 
+class IfStepParams(StepParams):
+    """Run ``then`` if ``condition`` succeeds, else ``otherwise`` (or skip)."""
+
+    type: Literal["if"] = "if"
+    condition: AnyStep
+    then: AnyStep
+    otherwise: AnyStep | None = None
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return If
+
+
 class Selector(Step):
     """Try each child in order; succeed with the first that succeeds.
 
@@ -331,6 +499,17 @@ class Selector(Step):
         return Status.FAILED
 
 
+class SelectorStepParams(StepParams):
+    """Try each child in order until one succeeds."""
+
+    type: Literal["selector"] = "selector"
+    children: list[AnyStep] = Field(default_factory=list)
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return Selector
+
+
 class Invert(Step):
     """Succeed when ``child`` fails, fail when it succeeds. ABORTED passes through.
 
@@ -351,6 +530,17 @@ class Invert(Step):
         if status is Status.FAILED:
             return Status.SUCCESS
         return status
+
+
+class InvertStepParams(StepParams):
+    """Succeed when ``child`` fails, and fail when it succeeds."""
+
+    type: Literal["invert"] = "invert"
+    child: AnyStep
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return Invert
 
 
 class _Comparison(Step):
@@ -381,8 +571,32 @@ class ValueAbove(_Comparison):
         return Status.SUCCESS if self._latest() > self.threshold else Status.FAILED
 
 
+class ValueAboveStepParams(StepParams):
+    """Succeed if the latest recorded ``field`` is above ``threshold``."""
+
+    type: Literal["value_above"] = "value_above"
+    field: str = Field(json_schema_extra={"column": "reads"})
+    threshold: Value
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return ValueAbove
+
+
 class ValueBelow(_Comparison):
     """SUCCESS if the latest ``field`` is below ``threshold``, else FAILED."""
 
     def run(self) -> Status:
         return Status.SUCCESS if self._latest() < self.threshold else Status.FAILED
+
+
+class ValueBelowStepParams(StepParams):
+    """Succeed if the latest recorded ``field`` is below ``threshold``."""
+
+    type: Literal["value_below"] = "value_below"
+    field: str = Field(json_schema_extra={"column": "reads"})
+    threshold: Value
+
+    @classmethod
+    def step_class(cls) -> StepClass:
+        return ValueBelow

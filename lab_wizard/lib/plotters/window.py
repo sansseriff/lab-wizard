@@ -16,7 +16,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
-from lab_wizard.lib.data.plot import PlotSpec, load_plot, run_plots
+from lab_wizard.lib.data.plot import PlotSpec, load_plot, run_plots, saved_views, with_views
 from lab_wizard.lib.data.read import Lab
 from lab_wizard.lib.plotters.draw import draw_plot
 
@@ -27,11 +27,12 @@ POLL_S = 0.5
 
 def run_state(db: Path, run_id: int, plot_name: str = "") -> tuple[dict[str, Any], PlotSpec | None, dict[str, Any]]:
     """The run's row, the plot to draw (named, else its first), and its columns."""
-    runs = Lab(db).runs([run_id])
+    lab = Lab(db)
+    runs = lab.runs([run_id])
     (summary,) = runs.table().to_dicts()
     info = runs.info(run_id)
     columns = runs.columns()
-    plots = run_plots(info["definition"], list(columns))
+    plots = with_views(run_plots(info["definition"], list(columns)), saved_views(lab, run_id))
     spec = next((p for p in plots if p.name == plot_name), plots[0] if plots else None)
     if spec is not None:
         spec = spec.model_copy(update={"runs": [run_id]})

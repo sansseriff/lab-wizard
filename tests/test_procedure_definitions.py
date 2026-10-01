@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from lab_wizard.lib.procedures.catalog import list_step_types, step_catalog, step_params_class
+from lab_procedure import ProcedureError, list_step_types, step_catalog, step_params_class
+
 from lab_wizard.lib.procedures.codegen import measurement_module_source
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.procedures.spec import ProcedureError
 
 
 def _definition(body: dict[str, Any], **overrides: Any) -> ProcedureDefinition:

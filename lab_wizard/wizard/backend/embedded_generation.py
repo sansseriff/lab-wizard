@@ -35,10 +35,13 @@ from typing import Any, Literal, get_origin
 
 from pydantic import BaseModel
 
+from lab_procedure import ParamDecl, ParamTree
+from lab_procedure.schema import python_identifier
+from lab_procedure.sweep import SWEEP_ADAPTER
+
 from lab_wizard.lib.custom_measurements import CustomMeasurement
 from lab_wizard.lib.procedures.codegen import class_prefix, definition_block
-from lab_wizard.lib.procedures.definition import ParamDecl, ParamTree, ProcedureDefinition, _SWEEP_ADAPTER
-from lab_wizard.lib.procedures.spec import python_identifier
+from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.utilities.model_tree import OutputsConfig
 from lab_wizard.wizard.backend._generation_common import (
     _NodeRef,
@@ -133,7 +136,7 @@ def _tree_literal(tree: ParamTree, values: dict[str, Any], class_name: str, impo
         else:
             assert isinstance(entry, ParamDecl)
             raw = values.get(name, entry.default)
-            value = _SWEEP_ADAPTER.validate_python(raw) if entry.type == "sweep" else raw
+            value = SWEEP_ADAPTER.validate_python(raw) if entry.type == "sweep" else raw
             args.append(f"{name}={_literal(value, imports, local)}")
     return f"{class_name}({', '.join(args)})"
 

@@ -73,7 +73,7 @@ export const load: PageLoad = async () => {
 		projectCount: (projects.projects ?? []).length,
 		remoteCount: (remotes.servers ?? []).length,
 		otherServers: (locals.servers ?? []).filter((s) => !s.is_this_workspace),
-		projects: (projects.projects ?? []).slice(0, 3),
+		projects: (projects.projects ?? []).slice(0, 12),
 		failed: false
 	} satisfies OverviewData;
 };

@@ -258,6 +258,15 @@ Its setup file narrows `<Name>Resources` to the class of each role's instrument
 and runs the lifecycle (see
 [Measurements](../wizard/measurements.md#what-a-project-contains)).
 
-Adding a step type is one small class in `lib/procedures/steps/`: a pydantic
-model whose field names match the runtime step's constructor. The generator
-needs no change.
+Adding a step type is one small class: a `*StepParams` pydantic model whose
+field names match the runtime step's constructor, written right after that
+step. Defining it registers it, so the generator and the composer need no
+change. The step schemas, definitions and palette catalog are `lab_procedure`'s
+(`lab_procedure/schema.py`, `definition.py`, `catalog.py`), and the flow steps'
+schemas sit beside them in `lab_procedure/steps.py`. lab_wizard's instrument
+steps and theirs are in `lib/task_adapters/instrument_steps.py`.
+
+A definition can also be run without generating code:
+`definition.build(instruments, params)` returns the step tree, ready for a
+`ProcedureRunner`. That is for a program other than lab_wizard that builds
+procedures in a GUI. lab_wizard projects keep their generated Python.

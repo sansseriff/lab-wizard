@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Resize lab</title>
+<style>
+	:root { --ground: #f4f4f7; --surface: #fff; --line: #dcdce4; --ink: #1b1b24; --muted: #6b6b7b; --accent: #4f41ef; }
+	@media (prefers-color-scheme: dark) { :root { --ground: #121218; --surface: #1b1b23; --line: #33333f; --ink: #e8e8ef; --muted: #9a9aab; --accent: #8f86ff; } }
+	body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.5 -apple-system, system-ui, sans-serif; }
+	main { max-width: 900px; margin: 0 auto; padding: 24px 16px 48px; }
+	h1 { margin: 0 0 4px; } h2 { margin: 28px 0 6px; font-size: 16px; }
+	p, li { color: var(--muted); } b, code { color: var(--ink); }
+	code { font: 12px ui-monospace, Menlo, monospace; }
+	table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+	td { padding: 5px 10px; border-top: 1px solid var(--line); vertical-align: top; }
+	td:first-child { width: 40%; }
+	a { color: var(--accent); }
+	button { font: inherit; padding: 4px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink); cursor: pointer; }
+	button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+	.runner { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 16px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+	.runner label { color: var(--muted); }
+	#results { margin-top: 10px; }
+	#results th { text-align: left; font-weight: 500; color: var(--muted); padding: 5px 10px; }
+	#results td { width: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+	#results td:first-child { white-space: normal; }
+	#frame { position: fixed; inset: 0; width: 100vw; height: 100vh; border: 0; z-index: 1; background: var(--ground); }
+	#progress { position: fixed; top: 8px; right: 12px; z-index: 2; padding: 4px 10px; border-radius: 5px; background: rgba(20,20,28,.85); color: #e8e8ef; font: 12px ui-monospace, Menlo, monospace; }
+	pre { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+	<h1>Resize lab</h1>
+	<p>
+		The Data page's layout (filters | runs | plot over a bottom panel) with each suspect behind a switch.
+		Open a scenario, drag a divider or press <b>Auto sweep</b>, and read the HUD at the bottom right.
+		<b>Copy results</b> gives a table with the browser in it. Run the same links in Safari, Chrome and the
+		pywebview window (<code>serve.py --window</code>), then compare.
+	</p>
+	<p>
+		HUD columns: <b>fps</b> and <b>frame_p95</b> are what you feel. <b>layout</b> is the page's style + layout per
+		frame, <b>observers</b> is time in ResizeObserver callbacks (where Bokeh resizes and repaints its canvases), and
+		<b>render</b> is all main-thread work from the frame's start to the next task.
+	</p>
+
+	<div class="runner">
+		<button class="primary" id="run-all">Run all</button>
+		<label>each scenario <select id="repeats"><option value="1">once</option><option value="3">3 times</option></select></label>
+		<span style="color:var(--muted)">Opens every scenario below in turn, sweeps it, and puts the results here. Esc stops.</span>
+	</div>
+	<div id="results"></div>
+
+	<h2>1. Is the page layout slow on its own?</h2>
+	<table id="t1"></table>
+	<h2>2. Is it Bokeh, or any canvas that resizes?</h2>
+	<table id="t2"></table>
+	<h2>3. Which part of Bokeh: pixels, points, or count?</h2>
+	<table id="t3"></table>
+	<h2>4. Ways of dragging</h2>
+	<table id="t4"></table>
+
+	<h2>Measuring the real wizard</h2>
+	<p>
+		With this server running, load the HUD into the wizard and drag its dividers. Its ResizeObserver timing only
+		counts observers made after it loads, so choose a run (or switch runs) after loading it. The Data page with no
+		run chosen has no Bokeh at all, which makes for a direct comparison.
+	</p>
+	<p>In a browser's console (or Web Inspector in the window from <code>main.py --debug</code>):</p>
+	<pre id="snippet"></pre>
+	<p>Or drag this to the bookmarks bar: <a id="bookmarklet">Resize HUD</a></p>
+</main>
+<script>
+	const base = { plot: 'bokeh-webgl', points: '2000', plots: '1', hidpi: '1', sides: 'light', mode: 'live', cv: '0', write: 'var' };
+	const groups = {
+		t1: [
+			['No plot, light panels', { plot: 'none' }],
+			['No plot, heavy panels (1500 runs, 40 facets)', { plot: 'none', sides: 'heavy' }]
+		],
+		t2: [
+			['Bokeh webgl, as the app', {}],
+			['Bokeh canvas backend', { plot: 'bokeh-canvas' }],
+			['Plain canvas that redraws on resize', { plot: 'canvas2d' }],
+			['Bokeh webgl, heavy panels', { sides: 'heavy' }],
+			['Bokeh webgl, 2000-row timeline (as the Data page)', { sides: 'timeline' }],
+			['No plot, 2000-row timeline', { plot: 'none', sides: 'timeline' }],
+			['Bokeh webgl, 2000-row timeline, off-screen rows skipped', { sides: 'timeline', cv: '1' }],
+			['Bokeh webgl, heavy panels, off-screen rows skipped', { sides: 'heavy', cv: '1' }],
+			['Bokeh webgl, 2000-row timeline, sizes written directly', { sides: 'timeline', write: 'direct' }],
+			['Bokeh webgl, heavy panels, sizes written directly', { sides: 'heavy', write: 'direct' }],
+			['No plot, 2000-row timeline, sizes written directly', { plot: 'none', sides: 'timeline', write: 'direct' }]
+		],
+		t3: [
+			['hidpi off (¼ the pixels on Retina)', { hidpi: '0' }],
+			['100 points', { points: '100' }],
+			['200,000 points', { points: '200000' }],
+			['Two plots', { plots: '2' }]
+		],
+		t4: [
+			['Live, one write per frame', { mode: 'raf' }],
+			['Live panels, plot frozen until release', { mode: 'freeze' }],
+			['Guide, apply on release', { mode: 'release' }]
+		]
+	};
+	for (const [id, rows] of Object.entries(groups)) {
+		document.getElementById(id).innerHTML = rows
+			.map(([name, over]) => {
+				const q = new URLSearchParams({ ...base, ...over });
+				return `<tr><td>${name}</td><td><a href="lab.html?${q}">open</a> · <a href="lab.html?${q}&sweep=1">open and sweep</a> <code>${Object.entries(over).map(([k, v]) => `${k}=${v}`).join(' ') || 'defaults'}</code></td></tr>`;
+			})
+			.join('');
+	}
+
+	// ---- Run all: each scenario in a full-window frame, swept, results collected ----
+	const scenarios = Object.values(groups).flat();
+	const COLS = ['fps', 'frame_p50', 'frame_p95', 'frame_max', 'layout', 'observers', 'render'];
+	let collected = [];
+	let stopped = false;
+
+	const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+	async function sweepOne(over) {
+		const frame = document.createElement('iframe');
+		frame.id = 'frame';
+		frame.src = `lab.html?${new URLSearchParams({ ...base, ...over, sweep: '1' })}`;
+		// Esc pressed while the frame has focus.
+		frame.onload = () => frame.contentWindow.addEventListener('keydown', (e) => e.key === 'Escape' && (stopped = true));
+		document.body.appendChild(frame);
+		try {
+			for (const started = Date.now(); Date.now() - started < 90000; ) {
+				if (stopped) return null;
+				await wait(250);
+				const results = frame.contentWindow?.resizeHud?.results;
+				if (results?.length) return results[0];
+			}
+			return { error: 'timed out' };
+		} finally {
+			frame.remove();
+		}
+	}
+
+	async function runAll() {
+		stopped = false;
+		collected = [];
+		const repeats = +document.getElementById('repeats').value;
+		const progress = document.createElement('div');
+		progress.id = 'progress';
+		document.body.appendChild(progress);
+		const total = scenarios.length * repeats;
+		let done = 0;
+		for (let r = 0; r < repeats && !stopped; r++) {
+			for (const [name, over] of scenarios) {
+				if (stopped) break;
+				progress.textContent = `${++done}/${total}  ${name}  (Esc stops)`;
+				const result = await sweepOne(over);
+				if (result) collected.push({ name, over, ...result });
+				showResults();
+			}
+		}
+		progress.remove();
+		showResults();
+		document.getElementById('results').scrollIntoView({ block: 'start' });
+	}
+
+	// With repeats, the median of each column per scenario.
+	function summary() {
+		const byName = new Map();
+		for (const row of collected) byName.set(row.name, [...(byName.get(row.name) ?? []), row]);
+		return [...byName].map(([name, rows]) => {
+			const out = { name, over: rows[0].over, runs: rows.length, error: rows.find((r) => r.error)?.error };
+			for (const c of COLS) {
+				const vals = rows.map((r) => r[c]).filter((v) => typeof v === 'number').sort((a, b) => a - b);
+				out[c] = vals.length ? vals[Math.floor(vals.length / 2)] : '';
+			}
+			return out;
+		});
+	}
+
+	const fpsColor = (fps) => (fps === '' ? '' : `color:${fps >= 50 ? '#2e9e5b' : fps >= 30 ? '#c08a00' : '#d0453a'};font-weight:600`);
+
+	function showResults() {
+		const rows = summary();
+		if (!rows.length) return (document.getElementById('results').innerHTML = '');
+		document.getElementById('results').innerHTML = `
+			<table>
+				<tr><th>scenario</th>${COLS.map((c) => `<th>${c}</th>`).join('')}</tr>
+				${rows
+					.map(
+						(r) =>
+							`<tr><td>${r.name}${r.error ? ` <b style="color:#d0453a">${r.error}</b>` : ''}</td>${COLS.map(
+								(c) => `<td style="${c === 'fps' ? fpsColor(r[c]) : ''}">${r[c]}</td>`
+							).join('')}</tr>`
+					)
+					.join('')}
+			</table>
+			<p><button id="copy">Copy results</button> <span style="color:var(--muted)">${navigator.userAgent}</span></p>`;
+		document.getElementById('copy').onclick = copy;
+	}
+
+	function copy() {
+		const rows = summary();
+		const text = [
+			`${navigator.userAgent}  dpr=${devicePixelRatio}  window=${innerWidth}x${innerHeight}  runs per scenario=${rows[0]?.runs ?? 0}`,
+			'',
+			`| scenario | ${COLS.join(' | ')} |`,
+			`|---|${COLS.map(() => '---').join('|')}|`,
+			...rows.map((r) => `| ${r.name}${r.error ? ` (${r.error})` : ''} | ${COLS.map((c) => r[c]).join(' | ')} |`)
+		].join('\n');
+		const button = document.getElementById('copy');
+		const fallback = () => {
+			// The pywebview window may refuse the clipboard API; a selected textarea works everywhere.
+			const area = document.createElement('textarea');
+			area.value = text;
+			area.style.cssText = 'width:100%;height:220px;margin-top:8px;font:12px ui-monospace,Menlo,monospace';
+			button.parentElement.after(area);
+			area.select();
+			document.execCommand('copy');
+		};
+		if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(() => (button.textContent = 'Copied'), fallback);
+		else fallback();
+	}
+
+	document.getElementById('run-all').onclick = runAll;
+	addEventListener('keydown', (e) => e.key === 'Escape' && (stopped = true));
+	const src = `${location.origin}/hud.js`;
+	const loader = `(()=>{const s=document.createElement('script');s.src='${src}?'+Date.now();document.head.appendChild(s)})()`;
+	document.getElementById('snippet').textContent = loader;
+	document.getElementById('bookmarklet').href = `javascript:${loader}`;
+</script>
+</body>
+</html>

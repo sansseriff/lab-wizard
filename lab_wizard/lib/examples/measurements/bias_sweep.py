@@ -26,13 +26,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from pydantic import BaseModel, Field
+
 from lab_procedure import Step
 from lab_procedure.steps import Sequence, Sweep, Wait
-from pydantic import BaseModel, Field
+from lab_procedure.sweep import LinearSweepParams, SweepParams
 
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
-from lab_wizard.lib.procedures.sweep_params import LinearSweepParams, SweepParams
 from lab_wizard.lib.task_adapters.instrument_steps import ReadVoltage, SetVoltage, SourceGuard
 
 

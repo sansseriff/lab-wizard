@@ -24,6 +24,7 @@ from lab_procedure import Sequence, Status, Step, Sweep, WithParameter
 from lab_wizard.lib.procedures.storage import load_procedure, save_procedure
 from lab_wizard.lib.task_adapters.run import run_procedure
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
+from lab_wizard.wizard.backend import data_api
 from lab_wizard.wizard.backend.main import app
 
 ATTENUATIONS = [10.0, 0.0]
@@ -231,6 +232,46 @@ def test_a_runs_timeline_and_a_points_steps(client):
     assert client.get(f"/api/data/runs/{run_id}/points/99").status_code == 404
 
 
+def test_a_runs_loops_are_counted_from_the_definition_it_recorded():
+    """Keyed as the steps' paths with each iteration number cut to ``#``."""
+    definition = {
+        "body": {
+            "type": "source_guard",
+            "body": {
+                "type": "sweep",
+                "parameter": "bias_voltage",
+                "values": {"param": "bias.sweep"},
+                "body": {
+                    "type": "sequence",
+                    "children": [
+                        {"type": "wait", "seconds": 0.1},
+                        {"type": "sweep", "parameter": "trigger_mV", "values": [-25.0, -30.0], "body": {"type": "count"}},
+                        {"type": "repeat", "name": "again", "count": {"param": "n"}, "body": {"type": "count"}},
+                        {"type": "retry", "child": {"type": "count"}},
+                    ],
+                },
+            },
+        }
+    }
+    params = {"bias": {"sweep": {"mode": "linear", "start": 0.0, "stop": 0.385, "step": 0.001}}, "n": 3}
+    loops = data_api.run_loops(definition, params)
+    assert {path: loop["total"] for path, loop in loops.items()} == {
+        "source_guard/sweep[0]": 386,
+        "source_guard/sweep[0]/sequence#/sweep[1]": 2,
+        "source_guard/sweep[0]/sequence#/again[2]": 3,
+        "source_guard/sweep[0]/sequence#/retry[3]": None,
+    }
+    assert loops["source_guard/sweep[0]"]["parameter"] == "bias_voltage"
+    # A custom measurement records no definition, so nothing is known ahead.
+    assert data_api.run_loops(None, {}) == {}
+
+
+def test_a_runs_loops_come_with_its_details_and_its_steps(client):
+    run_id = _ids(client)["mcr_a"]
+    assert "loops" in client.get(f"/api/data/runs/{run_id}").json()
+    assert "loops" in client.get(f"/api/data/runs/{run_id}/steps").json()
+
+
 # --------------------------- plots ---------------------------
 
 
@@ -269,6 +310,30 @@ def test_the_notebook_draws_what_the_page_draws(client):
     compile(source, "notebook", "exec")
     assert "rate_above_dark" in source  # the y it plots
     assert "load_plot(spec" in source
+
+
+def test_a_kept_zoom_is_the_runs_plot_everywhere_it_is_drawn(client, workspace):
+    from lab_wizard.lib.plotters.window import run_state
+
+    ids = _ids(client)
+    kept = client.put(
+        f"/api/data/runs/{ids['mcr_a']}/views/MCR", json={"x_range": [2, 8], "y_range": [None, 500]}
+    ).json()
+    assert kept == {"plot": "MCR", "x_range": [2, 8], "y_range": [None, 500]}
+
+    plots = {p["name"]: p for p in client.get(f"/api/data/runs/{ids['mcr_a']}").json()["plots"]}
+    assert (plots["MCR"]["x_range"], plots["MCR"]["y_range"]) == ([2, 8], [None, 500])
+    assert plots["Device voltage"]["x_range"] is None  # only the plot it was kept for
+    other = client.get(f"/api/data/runs/{ids['mcr_b']}").json()["plots"][0]
+    assert other["x_range"] is None  # and only that run
+
+    # The matplotlib window draws it the same way.
+    _summary, spec, _columns = run_state(workspace.data_dir / "lab.db", ids["mcr_a"], "MCR")
+    assert spec is not None and spec.x_range == (2, 8)
+
+    # No range on either axis forgets it.
+    client.put(f"/api/data/runs/{ids['mcr_a']}/views/MCR", json={"x_range": None, "y_range": [None, None]})
+    assert client.get(f"/api/data/runs/{ids['mcr_a']}").json()["plots"][0]["x_range"] is None
 
 
 def test_a_plot_built_on_the_page_is_saved_into_its_procedure(client, workspace):

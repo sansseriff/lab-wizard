@@ -19,8 +19,8 @@ export type Facet = {
 	unit?: string | null;
 };
 
-/** Chosen values per facet key: any of a list, or a numeric range. */
-export type Filter = string[] | { range: [number, number] };
+/** Chosen values per facet key: any of a list, or a range — numbers, or ISO dates for `date`. */
+export type Filter = string[] | { range: [number, number] | [string, string] };
 export type Filters = Record<string, Filter>;
 
 export type RunRow = {
@@ -47,7 +47,13 @@ export type RunDetail = {
 	plots: PlotSpec[];
 	/** Whether a composed procedure of this name exists now, to save a plot into. */
 	procedure_exists: boolean;
+	/** Each loop of its procedure, by step path with iteration numbers cut (``run_loops``). */
+	loops: Loops;
 };
+
+/** One loop of a run's procedure and how many times it was to go round, if that is known. */
+export type Loop = { kind: string; parameter: string | null; total: number | null };
+export type Loops = Record<string, Loop>;
 
 /** One drawable line: the values, and the point (run, seq) each came from. */
 export type Series = {
@@ -92,8 +98,12 @@ export function toggleValue(filters: Filters, key: string, value: string): Filte
 	return next.length ? { ...rest, [key]: next } : rest;
 }
 
-/** Choose a numeric range for a key, or clear it with ``null``. */
-export function setRange(filters: Filters, key: string, range: [number, number] | null): Filters {
+/** Choose a range for a key, or clear it with ``null``. */
+export function setRange(
+	filters: Filters,
+	key: string,
+	range: [number, number] | [string, string] | null
+): Filters {
 	const { [key]: _dropped, ...rest } = filters;
 	return range ? { ...rest, [key]: { range } } : rest;
 }
@@ -106,6 +116,7 @@ export function isChosen(filters: Filters, key: string, value: string): boolean 
 /** What a chosen filter reads as in the list of active ones. */
 export function describeFilter(key: string, filter: Filter): string {
 	if (Array.isArray(filter)) return `${key} = ${filter.join(' or ')}`;
+	if (filter.range[0] === filter.range[1]) return `${key} = ${filter.range[0]}`;
 	return `${filter.range[0]} ≤ ${key} ≤ ${filter.range[1]}`;
 }
 
@@ -149,46 +160,6 @@ export function axisLabel(names: string[], units: Record<string, string | null |
 	const found = [...new Set(names.map((n) => units[n] ?? null))];
 	const unit = found.length === 1 ? found[0] : null;
 	return unit ? `${names.join(', ')} (${unit})` : names.join(', ');
-}
-
-// --------------------------- the timeline ---------------------------
-
-export type TimelineRow = Step & {
-	depth: number;
-	name: string;
-	/** Where the bar starts and how wide it is, as fractions of the run's span. */
-	left: number;
-	width: number;
-};
-
-/** Steps laid out as bars on the run's time axis, indented by nesting. */
-export function timeline(steps: Step[], now: number = Date.now()): TimelineRow[] {
-	if (!steps.length) return [];
-	const start = (s: Step) => Date.parse(s.started_at);
-	const end = (s: Step) => (s.ended_at ? Date.parse(s.ended_at) : now);
-	const t0 = Math.min(...steps.map(start));
-	const t1 = Math.max(...steps.map(end));
-	const span = Math.max(t1 - t0, 1);
-	return steps.map((step) => {
-		const segments = step.path.split('/');
-		return {
-			...step,
-			depth: segments.length - 1,
-			name: segments.at(-1) ?? step.path,
-			left: (start(step) - t0) / span,
-			width: Math.max((end(step) - start(step)) / span, 0.002)
-		};
-	});
-}
-
-/** The steps a point came from and every step they ran inside. */
-export function stepsOfPoint(point: Point | null): Set<string> {
-	const out = new Set<string>();
-	for (const path of point?.steps ?? []) {
-		const segments = path.split('/');
-		for (let i = 1; i <= segments.length; i++) out.add(segments.slice(0, i).join('/'));
-	}
-	return out;
 }
 
 // --------------------------- formatting ---------------------------
@@ -246,8 +217,15 @@ const SPEC_DEFAULTS: Record<string, unknown> = {
 	connect: 'seq',
 	kind: 'line',
 	log_x: false,
-	log_y: false
+	log_y: false,
+	x_range: null,
+	y_range: null
 };
+
+/** What a run's plot is known by, where its zoom is kept: ``plot_key`` in lib/data/plot.py. */
+export function plotKey(plot: PlotSpec | PlotDecl): string {
+	return plot.name ?? `${plot.y.join(', ')} against ${plot.x}`;
+}
 
 /** Whether two specs draw the same plot: a field left out is its default. */
 export function sameSpec(a: PlotSpec | PlotDecl | null, b: PlotSpec | PlotDecl | null): boolean {

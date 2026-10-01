@@ -35,6 +35,7 @@ from pyleco.json_utils.json_objects import JsonRpcError
 from pyleco.json_utils.rpc_server import RPCServer
 
 from lab_wizard.lib.instruments.general.state_effects import collect_query_methods
+from lab_wizard.lib.server.calls import CallLog
 from lab_wizard.lib.server.claims import Claim, ClaimConflict, ClaimTable
 from lab_wizard.lib.server.events import EventLog
 from lab_wizard.lib.server.peer import (
@@ -116,6 +117,8 @@ class WireServer:
         )
 
         self._claims = claims or ClaimTable()
+        # Every instrument call, for "what is going through the server now".
+        self._calls = CallLog()
         # Serializes check -> dispatch -> record for calls a permission rule
         # involves (see PermissionGate.involves). Always taken *inside* a
         # transport lock and never held while taking one, so it cannot deadlock.
@@ -143,6 +146,7 @@ class WireServer:
         self._rpc.method()(self.tree_update)
         self._rpc.method()(self.tree_apply_children)
         self._rpc.method()(self.events_recent)
+        self._rpc.method()(self.calls_recent)
         self._rpc.method()(self.list_attributes)
         self._rpc.method()(self.describe_path)
         self._rpc.method()(self.params_get)
@@ -179,53 +183,63 @@ class WireServer:
         pos = args or []
         kw = kwargs or {}
 
-        # Held for the whole transaction — resolve (which may open the
-        # transport), the call itself, and the state record. A driver method is
-        # often several writes against connection-global state, so releasing
-        # between them would let another caller interleave mid-query. Calls on
-        # different roots take different locks and still run in parallel.
-        with self._hold_transport(path) as registry:
-            # Checked inside the lock, so a claim granted while this call waited
-            # is honoured. A write already past this point when a claim lands
-            # started before the claim existed; the new holder's baseline call
-            # queues behind it on the same lock.
-            self._check_claim(registry, path, method, token)
-            # A rack claimed by another process must not be opened here, or the
-            # claim would mean nothing. Checked before resolve, since resolve is
-            # what actually opens the transport.
-            self._refuse_if_leased(path)
-            target = registry.resolve(path)
+        peer = current_peer()
+        claim = self._claims.live(token) if token else None
+        with self._calls.record(
+            path=path,
+            method=method,
+            args=pos,
+            kwargs=kw,
+            caller=peer.describe() if peer else None,
+            holder=claim.holder if claim else None,
+        ):
+            # Held for the whole transaction — resolve (which may open the
+            # transport), the call itself, and the state record. A driver method is
+            # often several writes against connection-global state, so releasing
+            # between them would let another caller interleave mid-query. Calls on
+            # different roots take different locks and still run in parallel.
+            with self._hold_transport(path) as registry:
+                # Checked inside the lock, so a claim granted while this call waited
+                # is honoured. A write already past this point when a claim lands
+                # started before the claim existed; the new holder's baseline call
+                # queues behind it on the same lock.
+                self._check_claim(registry, path, method, token)
+                # A rack claimed by another process must not be opened here, or the
+                # claim would mean nothing. Checked before resolve, since resolve is
+                # what actually opens the transport.
+                self._refuse_if_leased(path)
+                target = registry.resolve(path)
 
-            gated = self._gate is not None and self._gate.involves(
-                path, method, registry.instrument_class(path) or type(target)
-            )
-            with self._gate_lock if gated else _no_lock():
-                if self._gate is not None:
-                    denial = self._gate.check(path, method, pos, kw)
-                    if denial is not None:
-                        raise JSONRPCError(
-                            JsonRpcError(
-                                code=PERMISSION_DENIED_CODE,
-                                message=denial.message,
-                                data={
-                                    "rule_id": denial.rule_id,
-                                    "blocking_state": denial.blocking_state,
-                                },
+                gated = self._gate is not None and self._gate.involves(
+                    path, method, registry.instrument_class(path) or type(target)
+                )
+                with self._gate_lock if gated else _no_lock():
+                    if self._gate is not None:
+                        denial = self._gate.check(path, method, pos, kw)
+                        if denial is not None:
+                            raise JSONRPCError(
+                                JsonRpcError(
+                                    code=PERMISSION_DENIED_CODE,
+                                    message=denial.message,
+                                    data={
+                                        "rule_id": denial.rule_id,
+                                        "blocking_state": denial.blocking_state,
+                                    },
+                                )
                             )
+
+                    if not hasattr(target, method):
+                        raise AttributeError(
+                            f"{type(target).__name__} at {path!r} has no method {method!r}"
                         )
+                    fn = getattr(target, method)
+                    if not callable(fn):
+                        raise TypeError(f"{type(target).__name__}.{method} is not callable")
+                    result = fn(*pos, **kw)
 
-                if not hasattr(target, method):
-                    raise AttributeError(
-                        f"{type(target).__name__} at {path!r} has no method {method!r}"
-                    )
-                fn = getattr(target, method)
-                if not callable(fn):
-                    raise TypeError(f"{type(target).__name__}.{method} is not callable")
-                result = fn(*pos, **kw)
-
-                if self._gate is not None:
-                    self._gate.record(path, target, method, pos, kw, result)
-                return result
+                    if self._gate is not None:
+                        self._gate.record(path, target, method, pos, kw, result)
+                    return result
 
     def list_paths(self) -> list[str]:
         return self._registry.list_paths()
@@ -565,6 +579,10 @@ class WireServer:
             path=path,
         )
         return result
+
+    def calls_recent(self, limit: int = 50) -> dict[str, Any]:
+        """Instrument calls in flight and the most recent finished ones (see :mod:`calls`)."""
+        return self._calls.snapshot(limit)
 
     def events_recent(self, limit: int = 50) -> list[dict[str, Any]]:
         """Recent notable events on this server, newest first."""

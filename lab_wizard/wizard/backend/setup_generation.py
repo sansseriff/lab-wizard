@@ -17,8 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from lab_procedure.schema import python_identifier
+
 from lab_wizard.lib.procedures.codegen import class_prefix
-from lab_wizard.lib.procedures.spec import python_identifier
 
 __all__ = ["ROLES_BLOCK", "RoleType", "production_setup_source", "roles_block"]
 

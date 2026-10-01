@@ -1,4 +1,4 @@
-"""Shared, typed sweep parameters for measurements and procedures.
+"""Typed sweep parameters: the values a ``Sweep`` steps through.
 
 A sweep is a 1-D sequence of set-points. Three shapes are supported and
 discriminated on a ``mode`` field so they round-trip cleanly through YAML:
@@ -37,9 +37,9 @@ are unaffected; they are written under the new names.
 from __future__ import annotations
 
 import math
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, TypeAdapter
 
 
 def _line(start: float, stop: float, step: float) -> list[float]:
@@ -146,3 +146,6 @@ SweepParams = Annotated[
     Field(discriminator="mode"),
 ]
 """A sweep that is linear, explicit, or waypoints, discriminated on ``mode``."""
+
+SWEEP_ADAPTER: TypeAdapter[Any] = TypeAdapter(SweepParams)
+"""Validates a sweep from its data: ``SWEEP_ADAPTER.validate_python({"mode": "linear", ...})``."""

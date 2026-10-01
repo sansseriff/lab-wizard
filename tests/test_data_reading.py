@@ -113,6 +113,13 @@ def test_find_filters_by_any_facet_and_lists_newest_first(db: Path):
         assert lab.find({"run.cryostat": "nowhere"}).ids == []
 
 
+def test_a_date_range_is_compared_as_iso_dates(db: Path):
+    with Lab(db) as lab:
+        day = lab.facets().filter(key="date")["value"][0]
+        assert lab.find({"date": {"range": [day, day]}}).ids == [3, 2, 1]
+        assert lab.find({"date": {"range": ["2000-01-01", "2000-12-31"]}}).ids == []
+
+
 def test_facet_counts_are_the_choices_a_sidebar_offers(db: Path):
     with Lab(db) as lab:
         everything = {(r["key"], r["value"]): r["runs"] for r in lab.facets().iter_rows(named=True)}
@@ -348,6 +355,21 @@ def test_the_notebook_export_runs_and_draws_the_same_data(db: Path, monkeypatch)
     lines = [line for ax in namespace["fig"].axes for line in ax.get_lines()]
     assert len(lines) == 4  # two runs, two axes
     assert namespace["ax"].get_yscale() == "log"
+    plt.close("all")
+
+
+def test_the_notebook_export_keeps_the_zoom(db: Path, monkeypatch):
+    """A kept zoom shows the same part of the plot; a null end still fits the data."""
+    import matplotlib.pyplot as plt
+
+    monkeypatch.setattr(plt, "show", lambda: None)
+    spec = {"runs": [1], "x": "bias_voltage", "y": ["count_rate"], "x_range": [0.02, 0.025], "y_range": [0, None]}
+    namespace: dict[str, Any] = {}
+    exec(compile(notebook_source(spec, db), "<notebook>", "exec"), namespace)
+
+    ax = namespace["ax"]
+    assert ax.get_xlim() == (0.02, 0.025)
+    assert ax.get_ylim()[0] == 0 and ax.get_ylim()[1] > 0
     plt.close("all")
 
 

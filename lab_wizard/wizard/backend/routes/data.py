@@ -27,6 +27,11 @@ class _SpecBody(BaseModel):
     spec: dict[str, Any]
 
 
+class _ViewBody(BaseModel):
+    x_range: tuple[float | None, float | None] | None = None
+    y_range: tuple[float | None, float | None] | None = None
+
+
 class _DeviceBody(BaseModel):
     properties: dict[str, Any] = Field(default_factory=dict)
     notes: str | None = None
@@ -52,7 +57,7 @@ def api_data_run(run_id: int, env: Env = Depends(get_env)):
 
 @router.get("/api/data/runs/{run_id}/steps")
 def api_data_run_steps(run_id: int, env: Env = Depends(get_env)):
-    return {"steps": call_data_api(data_api.run_steps, workspace_database(env), run_id)}
+    return call_data_api(data_api.run_steps, workspace_database(env), run_id)
 
 
 @router.get("/api/data/runs/{run_id}/points/{seq}")
@@ -70,6 +75,12 @@ def api_data_export(run_id: int, env: Env = Depends(get_env)):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.put("/api/data/runs/{run_id}/views/{plot}")
+def api_data_plot_view(run_id: int, plot: str, body: _ViewBody, env: Env = Depends(get_env)):
+    """Keep what part of one of the run's plots to show, wherever it is drawn."""
+    return call_data_api(data_api.save_plot_view, workspace_database(env), run_id, plot, body.x_range, body.y_range)
 
 
 @router.post("/api/data/plot")

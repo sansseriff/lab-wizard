@@ -82,8 +82,19 @@ def test_a_new_database_is_stamped_with_its_schema_version(tmp_path: Path):
     db = _connect(tmp_path / "lab.db")
     assert db.execute("select value from meta where key = 'schema_version'").fetchone() == ("1",)
     assert {r[0] for r in db.execute("select name from sqlite_master where type = 'table'")} == {
-        "meta", "devices", "runs", "steps", "points", "run_facets",
+        "meta", "devices", "runs", "steps", "points", "run_facets", "plot_views",
     }
+
+
+def test_a_database_from_before_plot_views_gains_it_when_opened(tmp_path: Path):
+    open_database(tmp_path / "lab.db").close()
+    db = _connect(tmp_path / "lab.db")
+    db.execute("drop table plot_views")
+    db.commit()
+    db.close()
+    open_database(tmp_path / "lab.db").close()
+    db = _connect(tmp_path / "lab.db")
+    assert db.execute("select name from sqlite_master where name = 'plot_views'").fetchone() == ("plot_views",)
 
 
 def test_a_database_from_another_schema_version_is_refused_and_left_alone(tmp_path: Path):

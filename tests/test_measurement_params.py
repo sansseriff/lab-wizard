@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from lab_wizard.lib.procedures.sweep_params import (
+from lab_procedure.sweep import (
     ExplicitSweepParams,
     LinearSweepParams,
     WaypointSweepParams,
@@ -129,7 +129,7 @@ def test_sweeps_are_unit_free_and_still_read_the_volt_named_fields():
     Projects and presets written with the old names must keep loading."""
     from pydantic import TypeAdapter
 
-    from lab_wizard.lib.procedures.sweep_params import SweepParams
+    from lab_procedure.sweep import SweepParams
 
     adapter = TypeAdapter(SweepParams)
     old = adapter.validate_python({"mode": "linear", "start_V": 0.0, "stop_V": 20.0, "step_V": 10.0})
@@ -143,7 +143,7 @@ def test_sweeps_are_unit_free_and_still_read_the_volt_named_fields():
 
 
 def test_an_explicit_sweep_is_written_to_yaml_under_values():
-    from lab_wizard.lib.procedures.sweep_params import ExplicitSweepParams
+    from lab_procedure.sweep import ExplicitSweepParams
     from lab_wizard.lib.utilities.config_io import model_to_commented_map
 
     assert dict(model_to_commented_map(ExplicitSweepParams(values=[1.0]))) == {"mode": "explicit", "values": [1.0]}

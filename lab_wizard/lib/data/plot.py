@@ -22,10 +22,12 @@ and ``z`` for waterfalls. Every expression may be a derived one (see
 
 from __future__ import annotations
 
+import json
 import pprint
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,9 +49,12 @@ __all__ = [
     "line_shape",
     "load_plot",
     "notebook_source",
+    "plot_key",
     "run_plots",
     "runs_context",
+    "saved_views",
     "to_series",
+    "with_views",
 ]
 
 _PER_RUN = {"min", "max", "first", "last"}
@@ -77,6 +82,10 @@ class PlotSpec(BaseModel):
     kind: Literal["line", "scatter", "histogram", "waterfall"] = "line"
     log_x: bool = False
     log_y: bool = False
+    # What part of each axis to show: [low, high], either end None to fit the
+    # data there. None fits both ends. The data drawn is the same either way.
+    x_range: tuple[float | None, float | None] | None = None
+    y_range: tuple[float | None, float | None] | None = None
 
 
 def _where(spec: PlotSpec, columns: list[str], params: Params | None) -> pl.Expr:
@@ -179,6 +188,28 @@ def run_plots(definition: dict[str, Any] | None, columns: list[str]) -> list[Plo
         return plots
     fallback = default_plot(definition, columns)
     return [fallback] if fallback is not None else []
+
+
+def plot_key(spec: PlotSpec) -> str:
+    """What a run's plot is known by: its name, or what it draws (the Data page's tab)."""
+    return spec.name or f"{', '.join(spec.y)} against {spec.x}"
+
+
+def saved_views(lab: Any, run_id: int) -> dict[str, dict[str, Any]]:
+    """The zoom kept for each of a run's plots, by :func:`plot_key`."""
+    try:
+        rows = lab.query("SELECT plot, x_range, y_range FROM plot_views WHERE run_id = ?", (run_id,))
+    except sqlite3.OperationalError:
+        return {}  # a read-only database from before plot_views
+    return {
+        row["plot"]: {axis: json.loads(row[axis]) if row[axis] else None for axis in ("x_range", "y_range")}
+        for row in rows
+    }
+
+
+def with_views(plots: list[PlotSpec], views: Mapping[str, Mapping[str, Any]]) -> list[PlotSpec]:
+    """``plots``, each drawn over the part someone kept for it."""
+    return [PlotSpec.model_validate({**p.model_dump(), **views[plot_key(p)]}) if plot_key(p) in views else p for p in plots]
 
 
 def _labels(spec: PlotSpec, run_labels: dict[int, str] | None) -> pl.Expr:
@@ -400,6 +431,12 @@ def notebook_source(spec: PlotSpec | dict[str, Any], db: str | Path) -> str:
             + f"    axes[axis].plot(part[\"x\"], part[\"y\"], {style}, label=series or y_name)\n"
         )
     scales = "".join(f"ax.set_{axis}scale(\"log\")\n" for axis, on in (("x", spec.log_x), ("y", spec.log_y)) if on)
+    scales += "".join(
+        f"ax.set_{axis}lim({lo!r}, {hi!r})\n"
+        for axis, bounds in (("x", spec.x_range), ("y", spec.y_range))
+        if bounds
+        for lo, hi in [bounds]
+    )
     return (
         "from lab_wizard.lib.data import load_plot\n"
         "import matplotlib.pyplot as plt\n\n"

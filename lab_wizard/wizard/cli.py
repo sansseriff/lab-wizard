@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import signal
 import subprocess
 import sys
+from pathlib import Path
 
 from lab_wizard.lib.workspace import (
     WORKSPACE_ENV,
@@ -39,7 +41,26 @@ def _run_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--no-ui", action="store_true")
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument(
+        "--build",
+        action="store_true",
+        help="Rebuild the UI from the frontend sources first (needs bun; for working on the wizard)",
+    )
     return parser
+
+
+FRONTEND = Path(__file__).resolve().parent / "frontend"
+
+
+def _build_ui(parser: argparse.ArgumentParser) -> None:
+    """Build the frontend into backend/static, which the wizard serves."""
+    if not (FRONTEND / "package.json").exists():
+        parser.error(f"--build needs the frontend sources, which are not at {FRONTEND}")
+    bun = shutil.which("bun")
+    if bun is None:
+        parser.error("--build needs bun: https://bun.sh")
+    if subprocess.call([bun, "run", "buildall"], cwd=FRONTEND) != 0:
+        parser.exit(1, "wizard --build: the UI build failed; not starting.\n")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -121,6 +142,8 @@ def main(argv: list[str] | None = None) -> None:
         )
     except (FileNotFoundError, ValueError) as exc:
         parser.error(str(exc))
+    if args.build:
+        _build_ui(parser)
 
     environment = os.environ.copy()
     environment[WORKSPACE_ENV] = str(workspace.root)

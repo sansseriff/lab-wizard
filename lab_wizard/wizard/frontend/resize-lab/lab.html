@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Resize lab</title>
+<script src="hud.js"></script>
+<style>
+	:root {
+		--ground: #f4f4f7; --surface: #fff; --surface-2: #f0f0f4; --line: #dcdce4; --ink: #1b1b24; --muted: #6b6b7b; --accent: #4f41ef;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root { --ground: #121218; --surface: #1b1b23; --surface-2: #24242e; --line: #33333f; --ink: #e8e8ef; --muted: #9a9aab; }
+	}
+	* { box-sizing: border-box; }
+	html, body { margin: 0; height: 100%; background: var(--ground); color: var(--ink); font: 13px/1.4 -apple-system, system-ui, sans-serif; }
+	body { display: flex; flex-direction: column; padding: 8px; gap: 8px; }
+
+	.controls { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 6px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; }
+	.controls label { display: flex; gap: 4px; align-items: center; color: var(--muted); }
+	.controls select, .controls input { font: inherit; }
+	.controls .scenario { font-family: ui-monospace, Menlo, monospace; color: var(--accent); }
+
+	/* The Data page: filters | runs | the chosen run (plot over a bottom panel). */
+	.viewer {
+		flex: 1; min-height: 0; display: grid; overflow: hidden;
+		grid-template-columns: var(--filters) 0 var(--runs) 0 minmax(0, 1fr);
+		background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+	}
+	.panel { min-height: 0; overflow: auto; border-right: 1px solid var(--line); }
+	.detail { min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+	.toolbar { flex-shrink: 0; display: flex; gap: 4px; flex-wrap: wrap; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+	.toolbar button { font: inherit; font-size: 12px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); color: var(--ink); }
+	.plot-wrap { position: relative; flex: 1; min-height: 0; padding: 8px; overflow: hidden; }
+	.plot-host { position: absolute; inset: 8px; }
+	.bottom { flex-shrink: 0; border-top: 1px solid var(--line); overflow: auto; height: var(--bottom); }
+
+	.row { display: grid; grid-template-columns: 56px 1fr 90px 70px; gap: 8px; padding: 4px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+	.tl { display: grid; grid-template-columns: minmax(10rem, 40%) 1fr; align-items: center; gap: 8px; padding: 3px 8px; border-bottom: 1px solid var(--line); font-size: 12px; }
+	.tl span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, Menlo, monospace; }
+	.tl .bar { position: relative; height: 12px; }
+	.tl .bar i { position: absolute; top: 0; height: 12px; border-radius: 2px; background: #17a398; }
+	/* Off-screen rows skip layout; the intrinsic size keeps the scrollbar right. */
+	.cv .row, .cv .tl, .cv .facet { content-visibility: auto; contain-intrinsic-size: auto 22px; }
+	.cv .facet { contain-intrinsic-size: auto 120px; }
+	.row span { overflow: hidden; text-overflow: ellipsis; }
+	.facet { padding: 6px 10px; }
+	.facet b { display: block; font-size: 11px; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+	.facet label { display: flex; gap: 6px; padding: 1px 0; }
+	.facet label span:last-child { margin-left: auto; color: var(--muted); }
+
+	/* Splitter: a zero-wide grid cell with a wider grab area, like Splitter.svelte. */
+	.split { position: relative; z-index: 10; touch-action: none; user-select: none; }
+	.split.v { height: 100%; }
+	.split.h { height: 0; width: 100%; }
+	.split .grab { position: absolute; }
+	.split.v .grab { top: 0; bottom: 0; left: 50%; width: 8px; transform: translateX(-50%); cursor: col-resize; }
+	.split.h .grab { left: 0; right: 0; top: 50%; height: 8px; transform: translateY(-50%); cursor: row-resize; }
+	.split .grab::after { content: ''; position: absolute; background: transparent; }
+	.split.v .grab::after { top: 0; bottom: 0; left: 3px; width: 2px; }
+	.split.h .grab::after { left: 0; right: 0; top: 3px; height: 2px; }
+	.split:hover .grab::after, .split.dragging .grab::after { background: var(--accent); }
+</style>
+</head>
+<body>
+	<form class="controls" id="controls">
+		<a href="index.html" style="color:var(--accent)">← Scenarios</a>
+		<label>plot
+			<select name="plot">
+				<option value="none">none</option>
+				<option value="canvas2d">plain canvas (own drawing)</option>
+				<option value="bokeh-webgl">Bokeh, webgl (as the app)</option>
+				<option value="bokeh-canvas">Bokeh, canvas</option>
+			</select>
+		</label>
+		<label>points <select name="points"><option>100</option><option>2000</option><option>20000</option><option>200000</option></select></label>
+		<label>plots <select name="plots"><option>1</option><option>2</option></select></label>
+		<label title="Bokeh draws at devicePixelRatio when on"><input type="checkbox" name="hidpi" /> hidpi</label>
+		<label>side panels <select name="sides"><option value="light">light</option><option value="heavy">heavy (1500 runs, 40 facets)</option><option value="timeline">light + 2000-row timeline below the plot</option></select></label>
+		<label>drag mode
+			<select name="mode">
+				<option value="live">live (each pointermove)</option>
+				<option value="raf">live, one write per frame</option>
+				<option value="freeze">live, plot frozen until release</option>
+				<option value="release">guide, apply on release</option>
+			</select>
+		</label>
+		<label title="content-visibility: auto on list rows, so off-screen rows skip layout"><input type="checkbox" name="cv" /> skip off-screen rows</label>
+		<label title="How a new size is written">size write <select name="write"><option value="var">CSS variable on the grid (as the app)</option><option value="direct">grid columns / height directly</option></select></label>
+		<button type="button" id="sweep" title="Moves the run-list divider back and forth for 3 s through the same code as a drag">Auto sweep</button>
+		<span class="scenario" id="scenario"></span>
+	</form>
+
+	<div class="viewer" id="viewer">
+		<aside class="panel" id="filters"></aside>
+		<div class="split v" role="separator" data-var="--filters" data-min="120"><div class="grab"></div></div>
+		<section class="panel" id="runs"></section>
+		<div class="split v" role="separator" data-var="--runs" data-min="160"><div class="grab"></div></div>
+		<section class="detail" id="detail">
+			<div class="toolbar"><b style="margin-right:auto">sweep on DUT-7 <span style="color:var(--muted)">#412</span></b>
+				<button>Edit plot</button><button>Keep this zoom</button><button>Open in notebook</button><button>Save to procedure</button></div>
+			<div id="plots" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>
+			<div class="split h" role="separator" data-var="--bottom" data-min="80" data-reverse><div class="grab"></div></div>
+			<div class="bottom" id="bottom"></div>
+		</section>
+	</div>
+
+	<script src="lab.js"></script>
+</body>
+</html>

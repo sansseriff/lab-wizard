@@ -25,17 +25,17 @@
 	import FacetSidebar from '$lib/data/FacetSidebar.svelte';
 	import RunDetails from '$lib/data/RunDetails.svelte';
 	import RunList from '$lib/data/RunList.svelte';
-	import Timeline from '$lib/data/Timeline.svelte';
+	import RunTimeline from '$lib/data/RunTimeline.svelte';
 	import { errorMessage } from '$lib/api';
 	import { dataApi } from '$lib/data/api';
 	import {
 		axisLabel,
 		describePlot,
 		flatten,
+		plotKey,
 		sameSpec,
 		show,
 		specForRuns,
-		stepsOfPoint,
 		type Facet,
 		type Filters,
 		type LineShape,
@@ -44,6 +44,7 @@
 		type RunDetail,
 		type RunRow,
 		type Series,
+		type Loops,
 		type Step
 	} from '$lib/data/model';
 
@@ -70,7 +71,6 @@
 
 	// ---- the sidebar and the run list ----
 	let facets = $state<Facet[]>([]);
-	let matching = $state(0);
 	let runs = $state<RunRow[]>([]);
 	let total = $state(0);
 	let pages = 1;
@@ -86,9 +86,11 @@
 	// The plot is always shown; these are the tabs of the panel under it.
 	let tab = $state(queryChoice('tab', ['timeline', 'details'] as const, 'timeline'));
 	let editing = $state(false);
-	let steps = $state<Step[]>([]);
+	let steps = $state.raw<Step[]>([]);
+	let loops = $state.raw<Loops>({});
 	let stepsRun = $state<number | null>(null);
 	let point = $state<(Point & { run: number }) | null>(null);
+	let plotView = $state<BokehPlot | null>(null);
 
 	// ---- the panels' sizes, dragged by the user ----
 	let filtersWidth = $state(240);
@@ -96,6 +98,20 @@
 	let bottomHeight = $state(260);
 	let viewerWidth = $state(0);
 	let detailHeight = $state(0);
+	// The bottom panel may grow only until the plot is at its least height
+	// (BokehPlot's 280 px and its area's padding), or the plot spills over the
+	// panel's tabs. What else the column holds (the run's title bar, the plot's
+	// toolbars, a chosen point) is measured, never the panel or the plot itself,
+	// whose sizes follow from the limit: that would feed back into it.
+	let titleHeight = $state(0);
+	let plotColumnHeight = $state(0);
+	let plotAreaHeight = $state(0);
+	const PLOT_LEAST = 280 + 16;
+	const bottomMax = $derived(
+		plotColumnHeight
+			? detailHeight - titleHeight - (plotColumnHeight - plotAreaHeight) - PLOT_LEAST
+			: detailHeight - PLOT_LEAST
+	);
 
 	// ---- dialogs ----
 	let notebookSource = $state<string | null>(null);
@@ -113,7 +129,8 @@
 		'procedure',
 		...facets.map((f) => f.key).filter((k) => k.startsWith('run.') || k.startsWith('device.'))
 	]);
-	const highlight = $derived(point && point.run === stepsRun ? stepsOfPoint(point) : new Set<string>());
+	// A point chosen on the plot is a moment on its run's timeline: when it was recorded.
+	const pointMoment = $derived(point && point.run === stepsRun ? Date.parse(point.t) : null);
 	const running = $derived(runs.find((r) => r.id === focus)?.status === 'running');
 
 	function syncUrl() {
@@ -139,7 +156,6 @@
 			const [f, r] = await Promise.all([dataApi.facets(current), dataApi.runs(current, 1, PAGE * pages)]);
 			if (asked !== JSON.stringify(filters)) return; // the filters moved on meanwhile
 			facets = f.facets;
-			matching = f.runs;
 			runs = r.runs;
 			total = r.total;
 			listError = '';
@@ -223,7 +239,10 @@
 	async function loadSteps(runId: number) {
 		stepsRun = runId;
 		const result = await dataApi.steps(runId);
-		if (stepsRun === runId) steps = result.steps;
+		if (stepsRun === runId) {
+			steps = result.steps;
+			loops = result.loops;
+		}
 	}
 
 	function showTab(next: typeof tab) {
@@ -287,7 +306,9 @@
 			return;
 		}
 		try {
-			await dataApi.savePlot(detail.run.procedure, { ...$state.snapshot(spec), name });
+			// A kept zoom belongs to this run, not to every run of the procedure.
+			const { x_range: _x, y_range: _y, ...plot } = $state.snapshot(spec);
+			await dataApi.savePlot(detail.run.procedure, { ...plot, name });
 			const next = await dataApi.run(detail.run.id);
 			detail = next;
 			const index = next.plots.findIndex((p) => p.name === name);
@@ -297,6 +318,41 @@
 			if (saving) saving.error = message(e);
 		}
 	}
+
+	/** Keep what the plot is zoomed to: the effect below saves it with the run. */
+	function keepZoom() {
+		const shown = plotView?.shownRanges();
+		if (!spec || !shown) return;
+		spec.x_range = shown.x;
+		spec.y_range = shown.y;
+	}
+
+	function fitData() {
+		if (!spec) return;
+		delete spec.x_range;
+		delete spec.y_range;
+	}
+
+	// ---- a kept zoom (here or in Edit plot) is saved with the focused run's plot ----
+	$effect(() => {
+		const ranges = JSON.stringify([spec?.x_range ?? null, spec?.y_range ?? null]);
+		untrack(() => {
+			const source = plotSource;
+			if (!detail || !source) return;
+			if (ranges === JSON.stringify([source.x_range ?? null, source.y_range ?? null])) return;
+			const [x_range, y_range] = JSON.parse(ranges);
+			const runId = detail.run.id;
+			dataApi
+				.saveView(runId, plotKey(source), x_range, y_range)
+				.then(() => {
+					// Now the run's plot as it is kept: Reset returns here, not to a fit.
+					if (detail?.run.id !== runId || detail.plots[plotIndex] !== source) return;
+					source.x_range = x_range;
+					source.y_range = y_range;
+				})
+				.catch((e) => (plotError = message(e)));
+		});
+	});
 
 	function pointValues(values: Record<string, unknown>): [string, string][] {
 		return flatten(values).map(([key, value]) => [
@@ -321,14 +377,16 @@
 		<p class="text-xs text-crit" role="alert">{listError}</p>
 	{/if}
 
+	<!-- The columns are written as the property itself, not as CSS variables:
+	     a variable set here is inherited, so WebKit would restyle every row
+	     below on each frame of a drag (resize-lab measured it). -->
 	<div
-		class="grid min-h-0 flex-1 grid-cols-[var(--filters)_0_var(--runs)_0_minmax(0,1fr)] overflow-hidden rounded border border-line bg-surface"
-		style:--filters="{filtersWidth}px"
-		style:--runs="{runsWidth}px"
+		class="grid min-h-0 flex-1 overflow-hidden rounded border border-line bg-surface"
+		style:grid-template-columns="{filtersWidth}px 0 {runsWidth}px 0 minmax(0,1fr)"
 		bind:clientWidth={viewerWidth}
 	>
 		<aside class="min-h-0 border-r border-line" aria-label="Filters">
-			<FacetSidebar {facets} {filters} runs={matching} onchange={(next) => (filters = next)} />
+			<FacetSidebar {facets} {filters} onchange={(next) => (filters = next)} />
 		</aside>
 
 		<Splitter
@@ -345,9 +403,11 @@
 				{runs}
 				{total}
 				{selected}
+				{filters}
 				loading={loadingRuns}
 				onselect={(ids) => (selected = ids)}
 				onmore={more}
+				onfilters={(next) => (filters = next)}
 			/>
 		</section>
 
@@ -376,7 +436,7 @@
 					</div>
 				</div>
 			{:else}
-				<div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
+				<div class="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5" bind:clientHeight={titleHeight}>
 					<div class="min-w-0 flex-1">
 						<p class="truncate text-body font-semibold">
 							{detail.run.procedure} on {detail.run.device ?? 'no device'}
@@ -389,7 +449,7 @@
 				</div>
 
 				<!-- The plot is what the page is for, so it is never behind a tab. -->
-				<div class="flex min-h-0 flex-1 flex-col" aria-label="Plot">
+				<div class="flex min-h-0 flex-1 flex-col" aria-label="Plot" bind:clientHeight={plotColumnHeight}>
 						<div class="flex flex-wrap items-center gap-1 border-b border-line px-3 py-1.5">
 							{#each detail.plots as plot, i (i)}
 								<button
@@ -403,10 +463,17 @@
 								<span class="text-fine text-warn">edited</span>
 								<button class="text-fine text-accent hover:underline" onclick={() => showPlot(plotIndex)}>Reset</button>
 							{/if}
-							<div class="ml-auto flex gap-1">
+							<div class="ml-auto flex flex-wrap justify-end gap-1">
 								<button class="lw-btn lw-btn-sm" aria-pressed={editing} onclick={() => (editing = !editing)} disabled={!spec}
 									>{editing ? 'Done editing' : 'Edit plot'}</button
 								>
+								<Tooltip text="Zoom with the plot's tools, then keep that view for this run: the Run page, notebook and exported PNG show it too">{#snippet child({ props })}<button {...props}
+									class="lw-btn lw-btn-sm"
+									disabled={!spec || !drawn}
+									onclick={keepZoom}>Keep this zoom</button>{/snippet}</Tooltip>
+								{#if spec?.x_range || spec?.y_range}
+									<button class="lw-btn lw-btn-sm" onclick={fitData}>Fit all data</button>
+								{/if}
 								<button class="lw-btn lw-btn-sm" onclick={openNotebook} disabled={!spec}>Open in notebook</button>
 								<Tooltip text="Add this plot to {detail.run.procedure}, for every run of it">{#snippet child({ props })}<button {...props}
 									class="lw-btn lw-btn-sm"
@@ -426,9 +493,10 @@
 										Nothing to plot: this run recorded no columns to draw against each other.
 									</p>
 								{:else}
-									<div class="relative min-h-0 flex-1 p-2">
+									<div class="relative min-h-0 flex-1 p-2" bind:clientHeight={plotAreaHeight}>
 										{#if drawn}
 											<BokehPlot
+												bind:this={plotView}
 												series={drawn.series}
 												xLabel={axisLabel([spec.x], drawn.units)}
 												yLabel={axisLabel(spec.y, drawn.units)}
@@ -437,6 +505,8 @@
 												connect={spec.connect}
 												logX={!!spec.log_x}
 												logY={!!spec.log_y}
+												xRange={spec.x_range}
+												yRange={spec.y_range}
 												{onpoint}
 											/>
 										{/if}
@@ -488,7 +558,7 @@
 					bind:size={bottomHeight}
 					initial={Math.round(detailHeight * 0.5)}
 					min={120}
-					max={detailHeight - 280}
+					max={bottomMax}
 					orientation="horizontal"
 					reverse
 					storageKey="lw.data.bottomHeight"
@@ -521,7 +591,7 @@
 									/>
 								</div>
 							{/if}
-							<Timeline {steps} {highlight} />
+							<RunTimeline {steps} {loops} cursor={pointMoment} />
 						{:else}
 							<RunDetails {detail} />
 						{/if}

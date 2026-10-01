@@ -35,6 +35,7 @@
 	},
 	"dependencies": {
 		"@bokeh/bokehjs": "3.8.2",
+		"@internationalized/date": "^3.9.0",
 		"@vitejs/plugin-legacy": "^8.2.3",
 		"bits-ui": "^2.18.1",
 		"openapi-fetch": "0.17.0",

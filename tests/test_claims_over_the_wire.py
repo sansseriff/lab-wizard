@@ -296,3 +296,32 @@ def test_the_picker_is_told_which_instruments_a_run_is_holding(live: LiveServer,
     # The local tree is the same hardware, so it carries the same answer.
     local = next(s for s in held["sources"] if s["kind"] == "local")
     assert [c["holder"] for c in local["claims"]] == ["pcr_run"]
+
+
+# --------------------------- the call log ---------------------------
+
+
+def test_the_server_lists_calls_in_flight_and_how_recent_ones_ended(live: LiveServer):
+    session, watcher = live.session(), live.session()
+    worker = threading.Thread(target=lambda: session.call("call", {"path": "inst://slow", "method": "work", "args": [0.5]}))
+    worker.start()
+    deadline = time.monotonic() + 3
+    while not (active := watcher.call("calls_recent")["active"]):
+        assert time.monotonic() < deadline, "the slow call never showed as in flight"
+        time.sleep(0.02)
+    assert (active[0]["path"], active[0]["method"], active[0]["args"]) == ("inst://slow", "work", "0.5")
+    worker.join()
+
+    with pytest.raises(Exception):
+        session.call("call", {"path": "inst://slow", "method": "nope"})
+    with RemoteClaim(live.url, [CH0], holder="calibration") as claim:
+        session.claim_token = claim.token
+        RemoteCounter(session, CH0).set_threshold(-50.0)
+
+    calls = watcher.call("calls_recent")
+    assert calls["active"] == []
+    newest, refused, slow = calls["recent"][:3]
+    assert (newest["method"], newest["holder"], newest["ok"]) == ("set_threshold", "calibration", True)
+    assert refused["ok"] is False and "nope" in refused["error"]
+    assert slow["ok"] is True and slow["duration_ms"] >= 500
+    assert calls["total"] >= 3

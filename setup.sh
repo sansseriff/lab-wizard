@@ -70,5 +70,17 @@ echo ""
 echo "Building frontend (output -> lab_wizard/wizard/backend/static/)..."
 bun run ./build.ts
 
+# --- 3. macOS: app bundle for the Dock icon ---
+
+# macOS shows the icon of the app bundle a window runs from; without one the
+# wizard's window gets the icon of the terminal that launched it.
+if [[ "$(uname)" == "Darwin" ]]; then
+    echo ""
+    echo "Building Lab Wizard.app (gives the wizard window its Dock icon)..."
+    cd "$REPO_ROOT"
+    uv run python -m lab_wizard.wizard.backend.macos_app \
+        || echo "Could not build Lab Wizard.app; the wizard still works, with a generic Dock icon."
+fi
+
 echo ""
 echo "Setup complete. Next run 'uv run wizard init .' once, then launch the UI with 'uv run wizard'."

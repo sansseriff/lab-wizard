@@ -30,14 +30,11 @@ from lab_wizard.lib.instruments.general.parent_child import (
 )
 
 
-Kind = Literal["instrument", "step"]
+Kind = Literal["instrument"]
 SCHEMA_VERSION = 4
 
 _KIND_DIRS = {
     "instrument": "instruments",
-    # Procedure step schemas (``*StepParams``), discovered the same way so a new
-    # step is picked up by dropping a file in — see lab_wizard.lib.procedures.
-    "step": "procedures/steps",
 }
 _SKIP_PARTS = {"__pycache__", "addons"}
 _source_maps: dict[str, dict[str, dict[str, Any]] | None] = {
@@ -266,15 +263,8 @@ def get_source_map(kind: Kind = "instrument") -> dict[str, dict[str, Any]]:
     return result
 
 
-def _runtime_base(kind: Kind) -> type:
-    if kind == "instrument":
-        return BaseModel
-    from lab_wizard.lib.procedures.spec import StepParams
-    return StepParams
-
-
 def _validate_params_class(type_str: str, cls: type, kind: Kind) -> None:
-    if not isinstance(cls, type) or not issubclass(cls, _runtime_base(kind)):
+    if not isinstance(cls, type) or not issubclass(cls, BaseModel):
         raise ResourceAuditError(f"{cls!r} is not a valid {kind} Params class")
     if kind == "instrument" and not (
         issubclass(cls, CanInstantiate) or issubclass(cls, ChildParams)

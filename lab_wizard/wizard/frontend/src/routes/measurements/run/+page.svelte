@@ -264,8 +264,8 @@
 		{#if runError}<Callout tone="crit">{runError}</Callout>{/if}
 
 		<div
-			class="grid min-h-0 flex-1 grid-cols-[var(--setup)_1rem_minmax(0,1fr)]"
-			style:--setup="{setupWidth}px"
+			class="grid min-h-0 flex-1"
+			style:grid-template-columns="{setupWidth}px 1rem minmax(0,1fr)"
 			bind:clientWidth={pageWidth}
 		>
 			{#if settings.style === 'embedded'}
