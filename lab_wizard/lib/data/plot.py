@@ -18,6 +18,11 @@ The result is a frame with one row per plotted point: ``run_id``, ``seq``,
 ``series`` (legend text), ``axis`` (``y`` or ``y2``), ``y_name``, ``x``, ``y``,
 and ``z`` for waterfalls. Every expression may be a derived one (see
 ``expressions``).
+
+A line never doubles back. With x one of the parameters a run's procedure
+varies, each run's line is split by every other one it varies, so runs of
+different procedures overlay with each drawn as one clean scan per setting;
+and with several runs no line joins two of them (see :func:`_labels`).
 """
 
 from __future__ import annotations
@@ -25,9 +30,9 @@ from __future__ import annotations
 import json
 import pprint
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Collection, Literal, Mapping
 
 import polars as pl
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,7 +58,9 @@ __all__ = [
     "run_plots",
     "runs_context",
     "saved_views",
+    "split_by",
     "to_series",
+    "varied_parameters",
     "with_views",
 ]
 
@@ -120,7 +127,9 @@ def _where(spec: PlotSpec, columns: list[str], params: Params | None) -> pl.Expr
     return keep.fill_null(False)
 
 
-_BINDING_STEPS = {"sweep": "parameter", "repeat": "parameter", "with_parameter": "parameter"}
+# The steps that bind a parameter for their rows, and its name when a step leaves it out.
+# A retry's attempt is left out: a retried point is the same point taken again.
+_BINDING_STEPS: dict[str, str | None] = {"sweep": None, "repeat": "repeat", "with_parameter": None}
 
 
 def _bindings(step: Any, depth: int = 0, enclosing: tuple[str, ...] = ()) -> list[tuple[int, str, str, tuple[str, ...]]]:
@@ -131,12 +140,12 @@ def _bindings(step: Any, depth: int = 0, enclosing: tuple[str, ...] = ()) -> lis
     out: list[tuple[int, str, str, tuple[str, ...]]] = []
     if isinstance(step, dict):
         kind = step.get("type", "")
-        name_field = _BINDING_STEPS.get(kind)
+        name = step.get("parameter", _BINDING_STEPS[kind]) if kind in _BINDING_STEPS else None
         inner = enclosing
-        if name_field and isinstance(step.get(name_field), str):
-            out.append((depth, kind, step[name_field], enclosing))
+        if isinstance(name, str):
+            out.append((depth, kind, name, enclosing))
             if kind == "sweep":
-                inner = (*enclosing, step[name_field])
+                inner = (*enclosing, name)
         for value in step.values():
             out.extend(_bindings(value, depth + 1, inner))
     elif isinstance(step, list):
@@ -212,15 +221,59 @@ def with_views(plots: list[PlotSpec], views: Mapping[str, Mapping[str, Any]]) ->
     return [PlotSpec.model_validate({**p.model_dump(), **views[plot_key(p)]}) if plot_key(p) in views else p for p in plots]
 
 
-def _labels(spec: PlotSpec, run_labels: dict[int, str] | None) -> pl.Expr:
-    run_text = pl.format("run {}", pl.col("run_id"))
-    if run_labels:
-        run_text = pl.col("run_id").replace_strict(run_labels, default=None, return_dtype=pl.String).fill_null(run_text)
-    if spec.series == "run":
-        return run_text
-    if spec.series:
-        return pl.format("{} = {}", pl.lit(spec.series), pl.col(spec.series).cast(pl.String))
-    return pl.lit("")
+def _within(spec: PlotSpec, columns: Collection[str], varied: list[str]) -> list[str]:
+    """The columns one run's lines are split by beyond its run and ``series`` (see :func:`_labels`)."""
+    if spec.series is None or spec.x not in varied:
+        return []  # one line asked for, or x measured, not set: the rows cannot visit it twice
+    legs = [f"{name}_leg" for name in varied if f"{name}_leg" in columns]
+    return [
+        name for name in dict.fromkeys(varied + legs)
+        if name != spec.x and name != spec.series and name not in spec.where and name in columns
+    ]
+
+
+def split_by(spec: PlotSpec, columns: Collection[str], varied: Mapping[int, list[str]]) -> list[str]:
+    """Every column some run's lines are split by beyond its run and ``series``, so the page can say so."""
+    return list(dict.fromkeys(name for names in varied.values() for name in _within(spec, columns, names)))
+
+
+def _labels(
+    spec: PlotSpec,
+    frame: pl.DataFrame,
+    run_labels: dict[int, str] | None,
+    varied: Mapping[int, list[str]] | None,
+) -> pl.Expr:
+    """Each row's line, as its legend text: rows with the same text are one line.
+
+    A line holds one run's rows (when several are drawn, or ``series: run``),
+    one value of a column ``series``, and, when x is one of the parameters
+    its run's procedure varies (``varied``), one value of every other one: a
+    sweep around or inside x, a repeat, a ``with_parameter``, a waypoint
+    sweep's leg. A column the plot's ``where`` fixes, or its ``series``,
+    splits nothing more. So a plot of one procedure laid over a run of
+    another draws that run as clean scans too, however its steps are nested.
+    ``series: null`` asks for one line through every point and gets it.
+    """
+    if spec.series is None:
+        return pl.lit("")
+    has_runs = "run_id" in frame.columns
+    several = has_runs and frame["run_id"].n_unique() > 1
+    value = lambda column: pl.format("{} = {}", pl.lit(column), pl.col(column).cast(pl.String))  # noqa: E731
+    parts: list[pl.Expr] = []
+    if has_runs and (several or spec.series == "run"):
+        run_text = pl.format("run {}", pl.col("run_id"))
+        if run_labels:
+            run_text = pl.col("run_id").replace_strict(run_labels, default=None, return_dtype=pl.String).fill_null(run_text)
+        parts.append(run_text)
+    if spec.series != "run":
+        parts.append(value(spec.series))  # null on a run without the column: its own line
+    within: pl.Expr = pl.lit(None, dtype=pl.String)
+    for run_id, names in (varied or {}).items() if has_runs else ():
+        if split := _within(spec, frame.columns, names):
+            text = pl.concat_str([value(name) for name in split], separator=" · ", ignore_nulls=True)
+            within = pl.when(pl.col("run_id") == run_id).then(text).otherwise(within)
+    parts.append(within)
+    return pl.concat_str(parts, separator=" · ", ignore_nulls=True)
 
 
 def evaluate_plot(
@@ -231,6 +284,7 @@ def evaluate_plot(
     bins: dict[str, dict[str, Any]] | None = None,
     params: Params | None = None,
     derived: dict[str, str] | None = None,
+    varied: Mapping[int, list[str]] | None = None,
 ) -> pl.DataFrame:
     """The rows to draw for ``spec``, from ``points`` (as ``Runs.points`` gives).
 
@@ -238,7 +292,8 @@ def evaluate_plot(
     column's bin axis, ``{name: {"start": 0, "step": 4}}``, as recorded in
     ``runs.columns``. ``params`` is ``{run_id: params}``, for ``param("...")``.
     ``derived`` adds the procedure's own derived columns; the spec's
-    ``derived`` are added over them.
+    ``derived`` are added over them. ``varied`` is ``{run_id: [parameter]}``,
+    what each run's procedure varied between its rows (:func:`varied_parameters`).
     """
     spec = spec if isinstance(spec, PlotSpec) else PlotSpec.model_validate(spec)
     frame = points.sort(["run_id", "seq"]) if {"run_id", "seq"} <= set(points.columns) else points
@@ -247,7 +302,7 @@ def evaluate_plot(
         frame = derive(frame, all_derived, params)
 
     keep = _where(spec, frame.columns, params)
-    series = _labels(spec, run_labels)
+    series = _labels(spec, frame, run_labels, varied)
     x = compile_expression(spec.x, frame.columns, params)
     parts: list[pl.DataFrame] = []
     for axis, names in (("y", spec.y), ("y2", spec.y2)):
@@ -361,6 +416,8 @@ class RunsContext:
     params: dict[int, dict[str, Any]]
     derived: dict[int, dict[str, str]]
     units: dict[str, str | None]
+    # {run_id: [parameter]}: what each run's procedure varied between its rows.
+    varied: dict[int, list[str]] = field(default_factory=dict)
 
 
 def runs_context(lab: Any, run_ids: list[int], label: str | None = None) -> RunsContext:
@@ -383,7 +440,24 @@ def runs_context(lab: Any, run_ids: list[int], label: str | None = None) -> Runs
         params=runs.params(),
         derived=runs.derived_by_run(),
         units={name: meta.get("unit") for name, meta in columns.items() if isinstance(meta, dict)},
+        varied=_varied(lab, run_ids),
     )
+
+
+def varied_parameters(definition: dict[str, Any] | None) -> list[str]:
+    """Every parameter a procedure's steps vary between its rows, in tree order."""
+    return list(dict.fromkeys(name for _depth, _kind, name, _around in _bindings((definition or {}).get("body"))))
+
+
+def _varied(lab: Any, run_ids: list[int]) -> dict[int, list[str]]:
+    """``{run_id: [parameter]}``: :func:`varied_parameters` of each run's recorded definition."""
+    if not run_ids:
+        return {}
+    where = ", ".join("?" * len(run_ids))
+    return {
+        run_id: varied_parameters(json.loads(definition) if definition else None)
+        for run_id, definition in lab.query(f"SELECT id, definition FROM runs WHERE id IN ({where})", run_ids)
+    }
 
 
 def draw_rows(spec: PlotSpec | dict[str, Any], points: pl.DataFrame, context: RunsContext) -> pl.DataFrame:
@@ -395,6 +469,7 @@ def draw_rows(spec: PlotSpec | dict[str, Any], points: pl.DataFrame, context: Ru
         run_labels=context.labels,
         bins=context.bins,
         params=context.params,
+        varied=context.varied,
     )
 
 

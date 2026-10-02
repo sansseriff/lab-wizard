@@ -13,6 +13,7 @@
 	 */
 	import '$lib/procedures/composer.css';
 	import { onDestroy, untrack } from 'svelte';
+	import { fly } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ApiError, errorMessage } from '$lib/api';
@@ -190,12 +191,63 @@
 		}
 	}
 
+	// Stopping unlocks the settings at once rather than when the run has finished
+	// making its instruments safe: the dying run read them long ago, and they are
+	// only the next run's. A run that is still going after STOP_GRACE_MS locks
+	// them again.
+	const STOP_GRACE_MS = 10_000;
+	let stopping = $state(false);
+	let stopTimer: ReturnType<typeof setTimeout> | undefined;
+	const locked = $derived(active && !stopping);
+
 	async function stop() {
+		if (!active || stopping) return;
+		stopping = true;
+		hinting = false;
+		clearTimeout(stopTimer);
+		stopTimer = setTimeout(() => {
+			if (!active) return;
+			stopping = false;
+			runError = 'The run has not stopped yet, so its settings are locked again until it ends.';
+		}, STOP_GRACE_MS);
 		try {
 			status = await runApi.stop(project);
 		} catch (e) {
+			clearTimeout(stopTimer);
+			stopping = false;
 			runError = errorMessage(e);
 		}
+	}
+
+	// The run ending is what stopping waited for.
+	$effect(() => {
+		if (!active)
+			untrack(() => {
+				clearTimeout(stopTimer);
+				stopping = false;
+				hinting = false;
+			});
+	});
+
+	// ---- the locked settings: one click says how to unlock them, a double click does ----
+	let hinting = $state(false);
+	let hintTimer: ReturnType<typeof setTimeout> | undefined;
+
+	function hintLocked() {
+		if (!locked) return;
+		hinting = true;
+		clearTimeout(hintTimer);
+		hintTimer = setTimeout(() => (hinting = false), 2500);
+	}
+
+	// Listened for directly: Svelte's delegated onclick skips a disabled element.
+	function lockedClicks(node: HTMLElement) {
+		node.addEventListener('click', hintLocked);
+		node.addEventListener('dblclick', stop);
+		return () => {
+			node.removeEventListener('click', hintLocked);
+			node.removeEventListener('dblclick', stop);
+		};
 	}
 
 	// Keyed on the project, not on mount: moving between projects stays on this
@@ -204,7 +256,11 @@
 		const name = project;
 		untrack(() => open(name));
 	});
-	onDestroy(() => clearTimeout(timer));
+	onDestroy(() => {
+		clearTimeout(timer);
+		clearTimeout(stopTimer);
+		clearTimeout(hintTimer);
+	});
 
 	async function open(name: string) {
 		clearTimeout(timer);
@@ -247,7 +303,7 @@
 			{#snippet actions()}
 				<Pill tone={stateTone[status.state]} dot={active}>{stateLabel}</Pill>
 				{#if active}
-					<button class="lw-btn" onclick={stop}>Stop</button>
+					<button class="lw-btn" onclick={stop} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</button>
 				{:else}
 					<button
 						class="lw-btn lw-btn-primary"
@@ -293,13 +349,18 @@
 					panelClass="flex min-h-0 flex-1 flex-col"
 				>
 					<fieldset
-						class="flex min-h-0 min-w-0 flex-1 flex-col"
-						disabled={active}
+						class="setup-fields relative flex min-h-0 min-w-0 flex-1 flex-col"
+						disabled={locked && mode === 'form'}
+						{@attach lockedClicks}
 					>
-						{#if active}
-							<p class="px-3.5 py-2 text-fine text-muted">
-								The run read these when it started; they are locked until it ends.
-							</p>
+						{#if hinting}
+							<div
+								class="locked-notice"
+								role="status"
+								transition:fly={{ y: -8, duration: 140 }}
+							>
+								Double-click to abort the run and edit.
+							</div>
 						{/if}
 						{#if mode === 'yaml'}
 							<!-- The composer's YAML view: the file itself, edited in place. -->
@@ -307,6 +368,7 @@
 								class="editor-code min-h-0 flex-1"
 								spellcheck="false"
 								bind:value={yamlText}
+								readonly={locked}
 								aria-label="Project YAML"
 							></textarea>
 							<p class="editor-code-status">
@@ -402,11 +464,13 @@
 						{/if}
 					</fieldset>
 					<div class="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
-						<button class="lw-btn lw-btn-sm" onclick={save} disabled={!dirty || hasClientProblems || saving || active}>Save</button>
+						<button class="lw-btn lw-btn-sm" onclick={save} disabled={!dirty || hasClientProblems || saving || locked}>Save</button>
 						{#if dirty}
 							<button class="lw-btn lw-btn-sm" onclick={() => settings && show(settings)} disabled={saving}>Discard</button>
 						{/if}
-						{#if hasClientProblems}
+						{#if locked}
+							<span class="min-w-0 flex-1 basis-0 truncate text-fine text-muted" title="The run read these when it started. Double-click them to abort it and edit.">Locked while it runs · double-click to edit</span>
+						{:else if hasClientProblems}
 							<span class="text-fine text-crit">Fix the fields marked in red.</span>
 						{:else if saveMessage}
 							<span class="text-fine text-crit" role="alert">{saveMessage}</span>
@@ -452,3 +516,35 @@
 		</div>
 	</section>
 {/if}
+
+<style>
+	/* Disabled controls swallow pointer events in WebKit, so a click on one would
+	   never reach the fieldset; let it fall through to the field around it. The
+	   YAML is read-only instead of disabled, so it still scrolls and still hears
+	   the click. */
+	.setup-fields:disabled :global(:is(input, textarea, select, button)) {
+		pointer-events: none;
+	}
+	.setup-fields:disabled {
+		cursor: default;
+	}
+	.setup-fields textarea[readonly] {
+		opacity: 0.6;
+	}
+	.locked-notice {
+		position: absolute;
+		top: 0.5rem;
+		left: 50%;
+		translate: -50% 0;
+		z-index: 10;
+		white-space: nowrap;
+		border: 1px solid var(--color-line);
+		border-radius: 0.375rem;
+		background: var(--color-surface);
+		box-shadow: 0 4px 14px rgb(0 0 0 / 0.12);
+		padding: 0.375rem 0.75rem;
+		font-size: 0.75rem;
+		color: var(--color-ink);
+		pointer-events: none;
+	}
+</style>

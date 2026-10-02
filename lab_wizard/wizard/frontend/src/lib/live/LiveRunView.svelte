@@ -87,6 +87,7 @@
 										logY={!!shown.spec.log_y}
 										xRange={shown.spec.x_range}
 										yRange={shown.spec.y_range}
+										webgl={false}
 									/>
 								</div>
 								<p class="px-1 pt-1 text-fine text-muted">{describePlot(shown.spec, shown.shape)}</p>
@@ -99,7 +100,7 @@
 
 		<section class="rounded border border-line bg-surface" aria-label="Timeline">
 			<h3 class="border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-2">
-				{live.running ? 'Now' : 'Timeline'}
+				Timeline
 			</h3>
 			<RunTimeline steps={live.steps} loops={live.detail?.loops ?? {}} live={live.running} now={live.now} />
 		</section>

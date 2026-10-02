@@ -245,6 +245,8 @@ export type LineShape = {
 	lines: number;
 	/** Fewest and most points on one line. */
 	points: [number, number];
+	/** The parameters some run's lines were split by beyond its run and ``series``. */
+	split?: string[];
 };
 
 function names(list: string[]): string {
@@ -253,15 +255,17 @@ function names(list: string[]): string {
 
 /** What a plot draws, in words: "6 scans of count_rate against bias_voltage, one for
  * each value of trigger_mV, 20 points each". Without ``shape`` (nothing drawn yet,
- * as in the composer) it says the same without the counts. */
-export function describePlot(plot: PlotDecl, shape?: LineShape | null): string {
+ * as in the composer) it says the same without the counts, splitting by ``within``
+ * (``splitWithin``) where the drawn shape would say what it split by. */
+export function describePlot(plot: PlotDecl | PlotSpec, shape?: LineShape | null, within: string[] = []): string {
 	const what = `${names([...plot.y, ...(plot.y2 ?? [])]) || '…'} against ${plot.x || '…'}`;
+	// With several runs no line joins two of them (``_labels`` in lib/data/plot.py).
+	const byRun = plot.series === undefined || plot.series === 'run' || ('runs' in plot && plot.runs.length > 1);
+	const columns = [...(plot.series && plot.series !== 'run' ? [plot.series] : []), ...(shape?.split ?? within)];
 	const each =
-		plot.series === undefined || plot.series === 'run'
-			? 'run'
-			: plot.series
-				? `value of ${plot.series}`
-				: null;
+		plot.series === null
+			? null
+			: [byRun ? 'run' : '', columns.length ? `value of ${names(columns)}` : ''].filter(Boolean).join(' and ') || 'run';
 	if (!shape) return each ? `One scan of ${what} for each ${each}.` : `One scan of ${what}, through every point.`;
 	if (!shape.lines) return `Nothing to draw: no point has ${what.replace(' against ', ' and ')}.`;
 	const [fewest, most] = shape.points;
@@ -270,25 +274,19 @@ export function describePlot(plot: PlotDecl, shape?: LineShape | null): string {
 	return `${shape.lines} scans of ${what}, one for each ${each ?? 'line'}, ${points} points each.`;
 }
 
-/** The other swept parameters a plot leaves inside one line, read from the procedure itself.
+/** What else a run's lines are split by, read from the procedure itself: ``_within`` in lib/data/plot.py.
  *
- * Each run has a row for every combination of its swept parameters. With x
- * one of them, a line holding several values of another visits each x once per
- * value of it and doubles back, unless that parameter is what the lines are
- * split by, or a condition fixes it. ``swept`` are the parameters the
- * procedure's sweeps and repeats bind. It is said in the composer, where the
- * plot is chosen before anything is measured; on a drawn plot the zigzag
- * speaks for itself.
+ * A line never doubles back. With x one of the parameters the procedure
+ * varies (``varied``: its sweeps, repeats and ``with_parameter``s), each line
+ * holds one value of every other one, and of a waypoint sweep's leg, unless
+ * the plot splits by it already or a condition fixes it. Said in the
+ * composer, where the plot is chosen before anything is measured.
  */
-export function sweptWithin(plot: PlotDecl, swept: string[]): string[] {
-	if (!swept.includes(plot.x)) return [];
+export function splitWithin(plot: PlotDecl, varied: string[], columns: string[]): string[] {
+	if (plot.series === null || !varied.includes(plot.x)) return [];
 	const fixed = new Set(Object.keys(plot.where ?? {}));
-	return swept.filter((p) => p !== plot.x && p !== plot.series && !fixed.has(p));
-}
-
-/** ``sweptWithin`` in words: short, the fix sits beside it. */
-export function sweptWithinWarning(plot: PlotDecl, swept: string[]): string | null {
-	const others = sweptWithin(plot, swept);
-	if (!others.length) return null;
-	return `${names(others)} ${others.length > 1 ? 'are' : 'is'} also swept, so this line will zigzag.`;
+	const legs = varied.map((name) => `${name}_leg`).filter((leg) => columns.includes(leg));
+	return [...new Set([...varied, ...legs])].filter(
+		(name) => name !== plot.x && name !== plot.series && !fixed.has(name) && columns.includes(name)
+	);
 }

@@ -5,7 +5,7 @@
 	 * being looked at), so a plot is edited the same way wherever it is. It
 	 * edits ``plot`` in place; the backend checks every name and expression.
 	 */
-	import { describePlot, sweptWithin, sweptWithinWarning, type LineShape } from '$lib/data/model';
+	import { describePlot, splitWithin, type LineShape } from '$lib/data/model';
 	import { PER_RUN, whereValue, type AxisRange, type PlotDecl } from '$lib/procedures/model';
 	import Select from '$lib/components/Select.svelte';
 
@@ -23,13 +23,12 @@
 		labelKeys?: string[];
 		/** How the drawn rows fell into lines, where something has been drawn. */
 		shape?: LineShape | null;
-		/** The parameters the procedure's sweeps and repeats bind (the composer knows them). */
+		/** The parameters the procedure varies between rows (the composer knows them). */
 		swept?: string[];
 	} = $props();
 
 	// Said where the plot is chosen, before anything is measured.
-	const warning = $derived(sweptWithinWarning(plot, swept));
-	const fixes = $derived(sweptWithin(plot, swept));
+	const within = $derived(splitWithin(plot, swept, columns));
 
 	const id = $props.id();
 
@@ -144,17 +143,7 @@
 			]}
 		/></label
 	>
-	<p class="mt-1.5 text-xs text-ink-2">{describePlot(plot, shape)}</p>
-	{#if warning}
-		<div class="mt-2 rounded border border-warn/30 bg-warn-wash px-2.5 py-2 text-xs text-warn" role="status">
-			<p>{warning}</p>
-			<div class="mt-1.5 flex flex-wrap gap-1">
-				{#each fixes as column (column)}
-					<button class="lw-btn lw-btn-sm" onclick={() => update({ series: column })}>One line per {column}</button>
-				{/each}
-			</div>
-		</div>
-	{/if}
+	<p class="mt-1.5 text-xs text-ink-2">{describePlot(plot, shape, within)}</p>
 </div>
 {#if plot.series === undefined || plot.series === 'run'}
 	<label class="editor-field"

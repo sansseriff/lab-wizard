@@ -8,7 +8,7 @@
 	 * chart comes first, and the context below follows the pointer over it, or
 	 * the moment kept by a click there or by a point chosen on the plot.
 	 */
-	import { activity as build, closeUpSpan, contextAt, expected, kindColor, readableLevels, span, timeByKind, type Expected } from './activity';
+	import { activity as build, CLOSE_UP_MS, contextAt, expected, kindColor, readableLevels, span, timeByKind, type Expected } from './activity';
 	import ActivityChart from './ActivityChart.svelte';
 	import RunContext from './RunContext.svelte';
 	import type { Loops, Step } from './model';
@@ -66,36 +66,63 @@
 	// The close-up: travelling with now while a run goes and nothing else is
 	// chosen, else centred on the chosen moment.
 	const following = $derived(live && moment === null);
-	// One width for the whole run, kept once settled, so the close-up never zooms.
-	let settledSpan: number | null = null;
-	let spanFor = NaN;
-	const runSpan = $derived.by(() => {
-		if (spanFor !== run.start) {
-			settledSpan = null;
-			spanFor = run.start;
-		}
-		if (settledSpan !== null) return settledSpan;
-		const { span: width, settled } = closeUpSpan(run);
-		if (settled) settledSpan = width;
-		return width;
-	});
-	const closeSpan = $derived(following || moment !== null ? runSpan : null);
+	const closeSpan = $derived(following || moment !== null ? CLOSE_UP_MS : null);
 	// What is expected next is kept while the run keeps to it: a new step that
 	// starts close to where one of its kind was expected leaves it be, so it
-	// travels steadily. It is worked out afresh only when the run has drifted
-	// from it, or there is less than half a close-up of it left.
+	// travels steadily. When it is about to run out it is extended from the
+	// same step it was worked out from, which gives the same steps in the same
+	// places and more after them. It is worked out afresh, and moves, only when
+	// the run has drifted from it, or every half minute.
 	let plan: Expected[] = [];
+	let anchor = -1;
+	let anchorStart = NaN;
 	const upcoming = $derived.by(() => {
-		if (!following || closeSpan === null) return (plan = []);
-		const latest = run.execs[run.leaves.at(-1) ?? -1];
+		if (!following || closeSpan === null || !run.leaves.length) {
+			anchor = -1;
+			return (plan = []);
+		}
+		const latestAt = run.leaves.length - 1;
+		const latest = run.execs[run.leaves[latestAt]];
 		const close = closeSpan * 0.03;
+		const anchored = anchor >= 0 && anchor < run.leaves.length && run.execs[run.leaves[anchor]].t0 === anchorStart;
 		const onTrack =
-			!!latest &&
+			anchored &&
 			plan.length > 0 &&
+			clock - anchorStart < 30_000 &&
 			(plan[0].t0 > latest.t0 || plan.some((e) => e.name === latest.name && Math.abs(e.t0 - latest.t0) <= close));
-		const enough = plan.length > 0 && (plan.at(-1)!.t1 ?? 0) > clock + closeSpan / 2;
-		if (!onTrack || !enough) plan = expected(run, closeSpan);
-		return plan;
+		// As far as the close-up can show: it is painted a close-up and a half
+		// past its line, and slides on until it is painted again.
+		const reach = clock + 2 * closeSpan;
+		if (!onTrack) {
+			anchor = latestAt;
+			anchorStart = latest.t0;
+			plan = expected(run, reach - anchorStart, anchor);
+		} else if (plan.reduce((end, e) => (e.depth === undefined ? Math.max(end, e.t1 ?? e.t0) : end), 0) < reach) {
+			// Judged by the steps: a loop's rounds reach further than the steps in them.
+			plan = expected(run, reach - anchorStart, anchor);
+		}
+		// The rest of the step running now, and of each loop's round running now:
+		// to where the prediction had that one end, if it has it (the same kind,
+		// starting close to when it did), so the two agree; else to when one of
+		// its kind usually ends. Fixed in time, so they travel with everything
+		// else; one that goes on longer is drawn as far as it is known, and no
+		// further guessed.
+		const predictedEnd = (name: string, t0: number, depth: number | undefined) =>
+			plan.find((e) => e.depth === depth && e.name === name && Math.abs(e.t0 - t0) <= close)?.t1 ?? undefined;
+		const rests: Expected[] = [];
+		if (latest.t1 === null) {
+			const usual = run.meanByShape.get(latest.shape);
+			const end = predictedEnd(latest.name, latest.t0, undefined) ?? (usual !== undefined ? latest.t0 + usual : undefined);
+			if (end !== undefined) rests.push({ t0: latest.t0, t1: end, cat: run.kinds.indexOf(latest.name), exec: -1, name: latest.name, continues: true });
+		}
+		for (const [d, depth] of run.depths.entries()) {
+			const round = run.execs[depth.iterations.at(-1) ?? -1];
+			if (!round || round.t1 !== null) continue;
+			const length = run.meanByShape.get(round.shape);
+			const end = predictedEnd(depth.label, round.t0, d) ?? (length !== undefined ? round.t0 + length : undefined);
+			if (end !== undefined) rests.push({ t0: round.t0, t1: end, cat: round.iteration! % 2, exec: -1, name: depth.label, continues: true, depth: d });
+		}
+		return [...rests, ...plan];
 	});
 	const failed = $derived(run.failures.length);
 </script>
@@ -129,7 +156,7 @@
 		<RunContext {context} {rows} live={following} />
 		{#if closeSpan !== null}
 			<div>
-				<p class="mb-1 pl-[7.5rem] text-fine text-muted">
+				<p class="mb-1 truncate pl-[7.5rem] text-fine text-muted">
 					Close up, {span(closeSpan)} around {following ? 'now' : 'that moment'}. Point at a step to see what it is.
 				</p>
 				<ActivityChart

@@ -24,12 +24,12 @@
 			.filter((step) => step.type === 'sweep' && typeof step.parameter === 'string')
 			.map((step) => step.parameter as string)
 	);
-	/** Everything varied between a run's rows: sweeps and repeats. */
+	/** Everything varied between a run's rows: sweeps, repeats and labels (``varied_parameters``). */
 	const varied = $derived([
 		...swept,
 		...editor.steps
 			.map(({ step }) => step)
-			.filter((step) => step.type === 'repeat')
+			.filter((step) => step.type === 'repeat' || step.type === 'with_parameter')
 			.map((step) => (typeof step.parameter === 'string' ? step.parameter : 'repeat'))
 	]);
 	/** Every name an axis can use: recorded columns, then derived ones. */

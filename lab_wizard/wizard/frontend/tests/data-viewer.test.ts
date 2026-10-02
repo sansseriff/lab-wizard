@@ -2,8 +2,7 @@ import { expect, test } from 'bun:test';
 import {
 	axisLabel,
 	describePlot,
-	sweptWithin,
-	sweptWithinWarning,
+	splitWithin,
 	describeFilter,
 	facetLabel,
 	flatten,
@@ -95,18 +94,31 @@ test('a plot says what it draws, counts included once it is drawn', () => {
 		'2 scans of count_rate against bias_voltage, one for each run, 18–20 points each.'
 	);
 	expect(describePlot({ ...plot, series: null })).toBe('One scan of count_rate against bias_voltage, through every point.');
+	// Several runs: no line joins two, and a run splits by what else its procedure varied.
+	expect(describePlot({ ...plot, series: 'run', runs: [48, 55] }, { lines: 7, points: [31, 239], split: ['trigger_mV'] })).toBe(
+		'7 scans of count_rate against bias_voltage, one for each run and value of trigger_mV, 31–239 points each.'
+	);
+	expect(describePlot({ ...plot, runs: [53, 55] }, { lines: 12, points: [239, 239], split: [] })).toBe(
+		'12 scans of count_rate against bias_voltage, one for each run and value of trigger_mV, 239 points each.'
+	);
+	// Before anything is drawn, the composer says what the procedure will split by.
+	expect(describePlot({ ...plot, series: 'run' }, null, ['trigger_mV', 'repeat'])).toBe(
+		'One scan of count_rate against bias_voltage for each run and value of trigger_mV and repeat.'
+	);
 });
 
-test('before any run, the procedure itself says when a line would double back', () => {
-	const swept = ['bias_voltage', 'trigger_mV'];
+test('a line never doubles back: it splits by whatever else the procedure varies', () => {
+	const varied = ['bias_voltage', 'trigger_mV'];
+	const columns = ['bias_voltage', 'trigger_mV', 'count_rate'];
 	const plot = { x: 'bias_voltage', y: ['count_rate'], series: 'run' };
-	expect(sweptWithin(plot, swept)).toEqual(['trigger_mV']);
-	expect(sweptWithinWarning(plot, swept)).toBe('trigger_mV is also swept, so this line will zigzag.');
-	// Split by it, or fix it with a condition, and each line is a clean scan.
-	expect(sweptWithin({ ...plot, series: 'trigger_mV' }, swept)).toEqual([]);
-	expect(sweptWithin({ x: 'trigger_mV', y: ['count_rate'], where: { bias_voltage: { per_run: 'max' } } }, swept)).toEqual([]);
-	// x measured rather than swept: the rows cannot repeat it.
-	expect(sweptWithin({ x: 'sense_voltage', y: ['current'] }, ['bias_voltage'])).toEqual([]);
-	// A repeat varies between rows as much as a sweep does.
-	expect(sweptWithin({ x: 'bias_voltage', y: ['counts'] }, ['bias_voltage', 'repeat'])).toEqual(['repeat']);
+	expect(splitWithin(plot, varied, columns)).toEqual(['trigger_mV']);
+	// Split by it already, or fixed by a condition: nothing more to split.
+	expect(splitWithin({ ...plot, series: 'trigger_mV' }, varied, columns)).toEqual([]);
+	expect(splitWithin({ x: 'trigger_mV', y: ['count_rate'], where: { bias_voltage: { per_run: 'max' } } }, varied, columns)).toEqual([]);
+	// One line asked for, or x measured rather than set: the rows cannot repeat it.
+	expect(splitWithin({ ...plot, series: null }, varied, columns)).toEqual([]);
+	expect(splitWithin({ x: 'sense_voltage', y: ['current'] }, ['bias_voltage'], ['bias_voltage', 'sense_voltage'])).toEqual([]);
+	// A repeat varies between rows as much as a sweep does, and a waypoint sweep doubles back by its legs.
+	expect(splitWithin({ x: 'bias_voltage', y: ['counts'] }, ['bias_voltage', 'repeat'], ['bias_voltage', 'repeat', 'counts'])).toEqual(['repeat']);
+	expect(splitWithin({ x: 'bias_voltage', y: ['sense_voltage'] }, ['bias_voltage'], ['bias_voltage', 'bias_voltage_leg'])).toEqual(['bias_voltage_leg']);
 });

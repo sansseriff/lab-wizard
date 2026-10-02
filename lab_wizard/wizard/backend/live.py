@@ -144,6 +144,6 @@ class LiveFeed:
                 plot = PlotSpec.model_validate(spec)
                 drawn = data_api.drawn(plot, points, runs_context(lab, [self.run_id], plot.label))
             except (data_api.DataRequestError, ValueError) as e:
-                drawn = {"series": [], "units": {}, "shape": {"lines": 0, "points": [0, 0]}, "error": str(e)}
+                drawn = {"series": [], "units": {}, "shape": {"lines": 0, "points": [0, 0], "split": []}, "error": str(e)}
             out.append({"name": spec.get("name"), "spec": spec, **drawn})
         return out

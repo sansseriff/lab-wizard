@@ -276,6 +276,70 @@ def test_one_run_split_into_a_line_per_value_of_a_column(db: Path):
     assert [s["label"] for s in to_series(rows)] == ["trigger_mV = -50", "trigger_mV = -40"]
 
 
+def test_overlaid_runs_split_by_a_column_never_join_into_one_line(db: Path):
+    rows = load_plot({"runs": [1, 2], "x": "bias_voltage", "y": ["count_rate"], "series": "trigger_mV"}, db)
+    assert [s["label"] for s in to_series(rows)] == [
+        "run 1 · trigger_mV = -50", "run 1 · trigger_mV = -40", "run 2 · trigger_mV = -30", "run 2 · trigger_mV = -20",
+    ]
+
+
+def test_one_runs_plot_laid_over_another_procedures_run_draws_that_run_as_clean_scans():
+    """A single PCR curve's plot (``series: run``) over a run that swept trigger levels too:
+    the trigger run splits by what its procedure varied, rather than zigzagging through every point."""
+    points = pl.DataFrame(
+        [{"run_id": 1, "seq": i, "bias": b, "rate": b} for i, b in enumerate((0.1, 0.2))]
+        + [{"run_id": 2, "seq": i, "bias": b, "trigger": t, "rate": b - t}
+           for i, (t, b) in enumerate((t, b) for t in (-50, -100) for b in (0.1, 0.2))]
+    )
+    varied = {1: ["bias"], 2: ["trigger", "bias"]}
+    labels = [s["label"] for s in to_series(evaluate_plot({"x": "bias", "y": ["rate"]}, points, varied=varied))]
+    assert labels == ["run 1", "run 2 · trigger = -50", "run 2 · trigger = -100"]
+    # A where that fixes the column leaves nothing to split by; nor does asking for one line.
+    fixed = evaluate_plot({"x": "bias", "y": ["rate"], "where": {"trigger": -50}}, points, varied=varied)
+    assert set(fixed["series"]) == {"run 2"}  # run 1 has no trigger to match
+    assert set(evaluate_plot({"x": "bias", "y": ["rate"], "series": None}, points, varied=varied)["series"]) == {""}
+    # x measured rather than set: the rows cannot visit it twice, so nothing splits.
+    assert set(evaluate_plot({"x": "rate", "y": ["bias"]}, points, varied=varied)["series"]) == {"run 1", "run 2"}
+
+
+def test_however_deep_the_nesting_each_line_is_one_setting_of_everything_else():
+    from lab_wizard.lib.data.plot import line_shape
+
+    points = pl.DataFrame([
+        {"run_id": 7, "seq": i, "temperature": k, "repeat": r, "bias": b, "rate": b * k + r}
+        for i, (k, r, b) in enumerate((k, r, b) for k in (1.0, 4.0) for r in (0, 1) for b in (0.1, 0.2, 0.3))
+    ])
+    rows = evaluate_plot({"x": "bias", "y": ["rate"]}, points, varied={7: ["temperature", "repeat", "bias"]})
+    assert line_shape(rows) == {"lines": 4, "points": [3, 3]}
+    assert to_series(rows)[0]["label"] == "run 7 · temperature = 1.0 · repeat = 0"
+    # Split by one of them explicitly and the rest still keep the lines apart.
+    by_t = evaluate_plot({"x": "bias", "y": ["rate"], "series": "temperature"}, points, varied={7: ["temperature", "repeat", "bias"]})
+    assert line_shape(by_t)["lines"] == 4 and to_series(by_t)[0]["label"] == "temperature = 1.0 · repeat = 0"
+
+
+def test_a_waypoint_sweep_splits_into_its_legs():
+    points = pl.DataFrame([
+        {"run_id": 3, "seq": i, "v": v, "v_leg": leg, "i": v * 2}
+        for i, (v, leg) in enumerate([(0.0, 0), (1.0, 0), (0.0, 1), (-1.0, 1)])
+    ])
+    rows = evaluate_plot({"x": "v", "y": ["i"]}, points, varied={3: ["v"]})
+    assert [s["label"] for s in to_series(rows)] == ["run 3 · v_leg = 0", "run 3 · v_leg = 1"]
+
+
+def test_what_a_procedure_varies_between_its_rows():
+    from lab_wizard.lib.data.plot import split_by, varied_parameters
+
+    definition = {"body": {"type": "sequence", "children": [
+        {"type": "with_parameter", "parameter": "phase", "value": "dark", "body": {"type": "measure"}},
+        {"type": "repeat", "count": 3, "body": {"type": "retry", "max_attempts": 2, "body": {
+            "type": "sweep", "parameter": "bias", "values": [0.1], "body": {"type": "measure"}}}},
+    ]}}
+    # A repeat's index is "repeat" unless named; a retry's attempt is the same point taken again.
+    assert varied_parameters(definition) == ["phase", "repeat", "bias"]
+    spec = PlotSpec(x="bias", y=["rate"], where={"phase": "light"})
+    assert split_by(spec, ["phase", "repeat", "bias", "rate"], {1: varied_parameters(definition)}) == ["repeat"]
+
+
 def test_a_measured_value_against_another_measured_value(db: Path):
     rows = load_plot({"runs": [1], "x": "device_voltage", "y": ["count_rate"], "series": None}, db)
     assert rows.height == 4 and set(rows["x"]) == {0.0}

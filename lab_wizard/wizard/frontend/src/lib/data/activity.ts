@@ -427,7 +427,10 @@ export function readableLevels(a: Activity): (boolean | null)[] {
 
 // --------------------------- close up ---------------------------
 
-export type Expected = Segment & { name: string };
+/** A step expected to run, or with ``depth`` a round of the loop that deep;
+ * ``continues`` marks the rest of one running now. ``cat`` is a step's kind,
+ * or a round's place in its loop's alternation of shades. */
+export type Expected = Segment & { name: string; continues?: boolean; depth?: number };
 
 /** The innermost steps a running run is expected to take next, placed in time, up to ``horizon`` ms ahead.
  *
@@ -437,11 +440,15 @@ export type Expected = Segment & { name: string };
  * from that step, so the gaps between steps are kept too. That stretch, from
  * the same place to here, is one period of the run, and repeats until the
  * horizon, but not past the outermost loop's last round.
+ *
+ * ``anchor`` is the step to expect after, by its place in ``leaves``: the latest
+ * by default. Asked again from the same step with a longer horizon, it gives
+ * the same steps in the same places, and more after them.
  */
-export function expected(a: Activity, horizon: number): Expected[] {
+export function expected(a: Activity, horizon: number, anchor: number = a.leaves.length - 1): Expected[] {
 	const { execs, leaves } = a;
-	if (!a.running || !leaves.length) return [];
-	const position = leaves.length - 1;
+	if (!a.running || anchor < 0 || anchor >= leaves.length) return [];
+	const position = anchor;
 	const leaf = execs[leaves[position]];
 	const outer = (path: string) => path.replace(/#\d+(?=\/|$)/, '#');
 	const place = outer(leaf.path);
@@ -466,62 +473,55 @@ export function expected(a: Activity, horizon: number): Expected[] {
 	const period = leaf.t0 - template.t0;
 	const out: Expected[] = [];
 	if (period <= 0) return out;
-	for (let k = 0; k <= fullPeriods; k++) {
+	// Where the predicted steps stop: the end of the last round, or the horizon.
+	let stopAt = leaf.t0 + horizon;
+	steps: for (let k = 0; k <= fullPeriods; k++) {
 		for (let q = from + 1; q <= position; q++) {
 			// The period ends with the step running now, which has not finished:
 			// it is taken as it went the round before, a period on.
 			const source = q === position ? from : q;
 			const shift = (q === position ? k + 1 : k) * period;
 			const e = execs[leaves[source]];
-			// The last period stops where the last round does.
-			if (k === fullPeriods && round(execs[leaves[q]].path) !== round(template.path)) return out;
 			const t0 = leaf.t0 + (e.t0 - template.t0) + shift;
-			if (t0 - leaf.t0 > horizon) return out;
+			// The last period stops where the last round does.
+			if (k === fullPeriods && round(execs[leaves[q]].path) !== round(template.path)) {
+				stopAt = t0;
+				break steps;
+			}
+			if (t0 - leaf.t0 > horizon) break steps;
 			const t1 = leaf.t0 + ((e.t1 ?? e.t0) - template.t0) + shift;
 			out.push({ t0, t1, cat: a.kinds.indexOf(e.name), exec: -1, name: e.name });
 		}
 	}
-	return out;
-}
 
-/** Rounds shorter than this are not what a close-up is sized by: they would not show as boxes. */
-const VISIBLE_ROUND_MS = 100;
-
-/** How much of the run a close-up shows, as a round number of ms, and whether that is settled.
- *
- * A few rounds of the innermost loop whose rounds are long enough to see
- * (bias points of a second, not the trigger levels of a millisecond inside
- * them); with no loop, a dozen steps. It is one width for the whole run,
- * whatever step it is at, so the close-up never zooms as the run moves in and
- * out of a loop. While the run goes it is settled once that loop has three
- * rounds finished, and the caller keeps it from then on.
- */
-export function closeUpSpan(a: Activity): { span: number; settled: boolean } {
-	let depth: Depth | null = null;
-	for (const d of a.depths) if (d.round !== null && d.round >= VISIBLE_ROUND_MS) depth = d;
-	depth ??= a.depths.find((d) => d.round !== null) ?? null;
-	let want: number;
-	let settled: boolean;
-	if (depth) {
-		want = depth.round! * 4;
-		settled = !a.running || depth.finished >= 3;
-	} else {
-		let sum = 0;
-		let n = 0;
-		for (const i of a.leaves) {
-			const e = a.execs[i];
-			if (e.t1 !== null) {
-				sum += e.t1 - e.t0;
-				n++;
+	// The rounds of each loop in the same stretch, repeated the same way: a
+	// round of the outermost loop (one per period) counts on, one of a loop
+	// inside it starts over each period as that loop does. Only with a period
+	// that is a round of the outermost loop, which is known from its first.
+	if (samePlace < 0) return out.sort((x, y) => x.t0 - y.t0);
+	for (const [d, depth] of a.depths.entries()) {
+		if (d >= MAX_LOOP_LANES) break;
+		for (const i of depth.iterations) {
+			const r = execs[i];
+			if (r.t0 <= template.t0 || r.t0 > leaf.t0) continue;
+			const length = r.t1 !== null ? r.t1 - r.t0 : a.meanByShape.get(r.shape);
+			if (length === undefined) continue;
+			for (let k = 0; k <= fullPeriods; k++) {
+				const t0 = r.t0 + (k + 1) * period;
+				if (t0 >= stopAt || t0 - leaf.t0 > horizon) break;
+				const index = r.iteration! + (d === 0 ? k + 1 : 0);
+				out.push({ t0, t1: t0 + length, cat: index % 2, exec: -1, name: depth.label, depth: d });
 			}
 		}
-		want = n ? (sum / n) * 12 : 1000;
-		settled = !a.running || n >= 12;
 	}
-	want = Math.min(10 * 60_000, Math.max(400, want));
-	const unit = 10 ** Math.floor(Math.log10(want));
-	return { span: [1, 2, 5, 10].map((m) => m * unit).find((q) => q >= want) ?? unit * 10, settled };
+	// In time order, a loop's rounds before the steps they hold.
+	return out.sort((x, y) => x.t0 - y.t0 || (x.depth ?? Infinity) - (y.depth ?? Infinity));
 }
+
+/** How much of the run a close-up shows. One width for every run, so a
+ * travelling close-up always goes by at the same speed: a step crosses it in
+ * four seconds, long steps as long bars and quick ones as slivers. */
+export const CLOSE_UP_MS = 4000;
 
 /** The segment of a lane running at ``at``, if any. */
 export function segmentAt(segments: Segment[], at: number, now: number): Segment | null {

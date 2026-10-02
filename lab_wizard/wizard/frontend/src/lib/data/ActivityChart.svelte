@@ -52,6 +52,18 @@
 		onpick?: (at: number) => void;
 	} = $props();
 
+	// The travelling close-up's "now" line is this far behind the clock. A step
+	// reaches the page some tens of ms after it happens; drawn at the clock, a
+	// new one would appear already past the line. A little behind, every step
+	// has arrived by the time it reaches the line.
+	const PLAYHEAD_DELAY_MS = 200;
+
+	// How solid everything past the travelling close-up's line is: what is
+	// about to cross it, recorded or expected alike, as one. Only steps that
+	// have not begun are told apart, by a dashed outline; a box turns solid as
+	// it crosses the line, and nowhere else.
+	const UPCOMING = 0.3;
+
 	const LOOP_H = 12;
 	const STEPS_H = 18;
 	const GAP = 3;
@@ -104,7 +116,7 @@
 
 	function viewAt(clock: number): [number, number] {
 		if (closeUp === null) return view ?? domain;
-		const middle = center ?? clock;
+		const middle = center ?? (travelling ? clock - PLAYHEAD_DELAY_MS : clock);
 		return [middle - closeUp / 2, middle + closeUp / 2];
 	}
 	const shown = $derived(viewAt(travelling ? frameNow : now));
@@ -147,15 +159,22 @@
 		const span = closeUp;
 		if (!travelling || !past || !future || span === null || width <= 0) return;
 		const wallAtZero = Date.now() - performance.now();
+		// One device pixel's worth of time. Every painting starts on a multiple of
+		// it, so a step's edge lands on the same pixel column whenever it is
+		// painted again; starting anywhere else would round each edge afresh,
+		// and repainting many times a second would make the edges shimmer.
+		const msPerPixel = span / (width * (devicePixelRatio || 1));
 		const paintAndSlide = () => {
 			// The time of the frame being made, on the timeline the animation runs on.
 			const t = (document.timeline.currentTime as number | null) ?? performance.now();
-			const origin = wallAtZero + t;
-			// Two close-ups of time from half a close-up before now: room to slide a whole close-up.
-			const v0 = origin - span / 2;
+			// The time at the "now" line.
+			const origin = wallAtZero + t - PLAYHEAD_DELAY_MS;
+			// Two close-ups of time from half a close-up before now (room to slide a
+			// whole close-up), starting on the pixel grid.
+			const v0 = Math.floor((origin - span / 2) / msPerPixel) * msPerPixel;
 			const v1 = v0 + 2 * span;
 			paint(past, 2 * width, v0, v1, origin, 'past');
-			paint(future, 2 * width, v0, v1, origin, 'future');
+			paint(future, 2 * width, v0, v1, origin, 'future', wallAtZero + t);
 			for (const c of [past, future]) {
 				for (const old of c.getAnimations()) old.cancel();
 				const slide = c.animate([{ transform: 'translateX(0px)' }, { transform: `translateX(${-width}px)` }], {
@@ -163,7 +182,8 @@
 					easing: 'linear',
 					fill: 'forwards'
 				});
-				slide.startTime = t;
+				// Unmoved when the canvas's middle-of-the-view time was at the line: a hair before this frame.
+				slide.startTime = v0 + span / 2 + PLAYHEAD_DELAY_MS - wallAtZero;
 			}
 		};
 		paintAndSlide();
@@ -202,7 +222,8 @@
 		v0: number,
 		v1: number,
 		clock: number,
-		part: 'all' | 'past' | 'future'
+		part: 'all' | 'past' | 'future',
+		known: number = clock
 	) {
 		if (cssWidth <= 0) return;
 		const dpr = devicePixelRatio || 1;
@@ -214,8 +235,14 @@
 		ctx.setTransform(1, 0, 0, 1, 0, 0);
 		ctx.clearRect(0, 0, w, h);
 		const x = (t: number) => ((t - v0) / (v1 - v0)) * w;
-		// A step still running is drawn up to now, or in the past half of a travelling close-up to its end.
-		const runningTo = part === 'past' ? v1 : clock;
+		// How far a step still running is drawn: to now; in the past half of a
+		// travelling close-up to the end, as the "now" line clips it; in the
+		// future half to as far as anything is known (``known``, the clock, ahead
+		// of the line by its delay).
+		const runningTo = part === 'past' ? v1 : part === 'future' ? known : clock;
+		// Past the line, what has been recorded but not reached it yet is faint;
+		// crossing the line it turns solid, in the same place and shape.
+		const fade = part === 'future' ? UPCOMING : 1;
 		const { '--accent': accent, '--muted': muted, '--line-2': line, '--crit': crit, '--ink-2': ink } = colors;
 
 		lanes.forEach((lane, i) => {
@@ -226,9 +253,12 @@
 			ctx.globalAlpha = 0.25;
 			ctx.fillRect(0, y, w, laneH);
 			ctx.globalAlpha = 1;
-			if (part === 'future') return;
 			const { cat, mixed, weight: raw } = binLane(lane.segments, v0, v1, w, cats, runningTo);
-			const weight = lane.kind === 'steps' ? smooth(raw, cats, cat, lane.segments, v0, v1, w, runningTo) : raw;
+			// Averaged with neighbouring columns only over the whole run: a close-up is
+			// painted on a fixed pixel grid, where each column's mix is already the
+			// same from one painting to the next, and averaging over a range that
+			// moves with every painting would change how a step looks each time.
+			const weight = lane.kind === 'steps' && closeUp === null ? smooth(raw, cats, cat, lane.segments, v0, v1, w, runningTo) : raw;
 
 			// A loop lane: iterations in alternating shades, one even shade where
 			// they are too short to tell apart.
@@ -251,10 +281,11 @@
 				if (runLook) {
 					if (lane.kind === 'loop') {
 						ctx.fillStyle = accent;
-						ctx.globalAlpha = runLook === 'm' ? 0.45 : runLook === '0' ? 0.6 : 0.32;
+						ctx.globalAlpha = (runLook === 'm' ? 0.45 : runLook === '0' ? 0.6 : 0.32) * fade;
 						ctx.fillRect(runStart, y, c - runStart, laneH);
 						ctx.globalAlpha = 1;
 					} else {
+						ctx.globalAlpha = fade;
 						let stack = y + laneH;
 						runLook.split(',').forEach((px, k) => {
 							const hk = Number(px);
@@ -263,6 +294,7 @@
 							ctx.fillStyle = kindColor(k);
 							ctx.fillRect(runStart, stack, c - runStart, hk);
 						});
+						ctx.globalAlpha = 1;
 					}
 				}
 				runStart = c;
@@ -273,36 +305,59 @@
 		const stepsTop = Math.round(tops[lanes.length - 1] * dpr);
 		const stepsH = Math.round(STEPS_H * dpr);
 
-		// The steps expected next: a faint fill in their colours, and a dashed
-		// outline on those wide enough for one to read as a box. They stay where
-		// they are expected, so they travel with everything else; where the step
-		// running now has gone on past one's start, that part of it is not drawn.
+		// What is expected, as faint as what is recorded past the line: a loop's
+		// rounds in their alternating shades, so its stripes go on; steps, with a
+		// dashed outline on those not yet begun and wide enough to read as a box.
+		// The rest of a step or round running now has no outline, so it and what
+		// is known of it read as one.
 		ctx.lineWidth = dpr;
 		ctx.setLineDash([3 * dpr, 2 * dpr]);
-		const nowX = Math.round(x(clock));
+		const knownX = Math.round(x(part === 'future' ? known : clock));
+		const loopLanes = lanes.length - 1;
+		// Per lane, where the rest of what runs in it now ends: nothing else is expected before.
+		const restX = new Map<number, number>();
 		for (const e of part === 'past' ? [] : expectedSteps) {
-			const a = Math.max(part === 'future' ? 0 : nowX, Math.round(x(e.t0)));
+			// A round of a loop deeper than the lanes shown is left out, as its lane is.
+			if (e.depth !== undefined && e.depth >= loopLanes) continue;
+			const lane = e.depth ?? loopLanes;
+			// Placed by times that do not change from one painting to the next, so
+			// they travel at the speed of everything else: a rest from where what is
+			// known of it ends (the two are drawn alike, so the joint does not show),
+			// the others after that rest. One expected before now (the run is late)
+			// overlaps what is known, faintly.
+			const after = restX.get(lane) ?? -Infinity;
+			const a = e.continues ? Math.max(knownX, Math.round(x(e.t0))) : Math.max(Math.round(x(e.t0)), after, part === 'all' ? knownX : -Infinity);
+			if (e.continues) restX.set(lane, Math.round(x(e.t1 ?? e.t0)));
 			const b = Math.round(x(e.t1 ?? e.t0));
 			if (b <= a || b < 0 || a > w) continue;
+			if (e.depth !== undefined) {
+				ctx.fillStyle = accent;
+				ctx.globalAlpha = (e.cat === 0 ? 0.6 : 0.32) * UPCOMING;
+				ctx.fillRect(a, Math.round(tops[lane] * dpr), b - a, Math.round(LOOP_H * dpr));
+				ctx.globalAlpha = 1;
+				continue;
+			}
 			const color = kindColor(Math.max(0, e.cat));
 			ctx.fillStyle = color;
-			ctx.globalAlpha = 0.18;
+			ctx.globalAlpha = UPCOMING;
 			ctx.fillRect(a, stepsTop, Math.max(1, b - a), stepsH);
 			ctx.globalAlpha = 1;
-			if (b - a >= 12 * dpr) {
+			if (!e.continues && b - a >= 12 * dpr) {
 				ctx.strokeStyle = color;
 				ctx.strokeRect(a + 0.5 * dpr, stepsTop + 0.5 * dpr, b - a - dpr, stepsH - dpr);
 			}
 		}
 		ctx.setLineDash([]);
 
-		// Failures: a mark above the steps lane where each one happened.
+		// Failures: a mark above the steps lane where each one happened (faded past the line, like the step).
 		ctx.fillStyle = crit;
-		for (const f of part === 'future' ? [] : activity.failures) {
+		ctx.globalAlpha = fade;
+		for (const f of activity.failures) {
 			const fx = x(activity.execs[f].t1 ?? activity.execs[f].t0);
 			if (fx < 0 || fx > w) continue;
 			ctx.fillRect(Math.round(fx) - dpr, stepsTop - 2 * dpr, 2 * dpr, stepsH + 2 * dpr);
 		}
+		ctx.globalAlpha = 1;
 
 		const bottom = Math.round((height - AXIS_H) * dpr);
 		// The whole run, while it goes: what is still to come, faintly, to the end of the axis.
@@ -356,7 +411,8 @@
 		ctx.textBaseline = 'top';
 		const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1e3, 2e3, 5e3, 1e4, 2e4, 3e4, 6e4, 12e4, 3e5, 6e5, 12e5, 18e5, 36e5, 72e5];
 		const every = steps.find((s) => (s / (v1 - v0)) * cssWidth >= 80) ?? steps.at(-1)!;
-		const first = Math.max(0, Math.ceil((v0 - activity.start) / every) * every);
+		// From the tick before the left edge: its label reaches into view.
+		const first = Math.max(0, (Math.ceil((v0 - activity.start) / every) - 1) * every);
 		// Ticks closer than a second say as many decimals as tell them apart.
 		const decimals = every < 1000 ? Math.max(1, Math.ceil(-Math.log10(every / 1000))) : 0;
 		const tick = (t: number) => (t === 0 ? '0' : decimals ? `${(t / 1000).toFixed(decimals)} s` : span(t));
@@ -436,6 +492,8 @@
 		const [v0, v1] = shown;
 		const clock = travelling ? frameNow : now;
 		const at = timeOf(hover.x, v0, v1);
+		// Past the line is what is expected, while travelling.
+		const line = travelling ? clock - PLAYHEAD_DELAY_MS : clock;
 		const lane = lanes.findIndex((l, i) => hover!.y >= tops[i] - GAP / 2 && hover!.y < tops[i] + (l.kind === 'loop' ? LOOP_H : STEPS_H) + GAP / 2);
 		const where = contextAt(activity, at, clock);
 		const path = where ? where.crumbs.map((c) => c.label).join(' › ') : 'before the first step';
@@ -451,7 +509,7 @@
 					what = level ? `${level.label} ${level.index + 1}${level.total !== null ? ` of ${level.total}` : ''} · ${took}` : took;
 				}
 			} else if (lanes[lane].kind === 'steps') {
-				const next = at > clock ? expectedSteps.find((e) => e.t0 <= at && (e.t1 ?? e.t0) >= at) : undefined;
+				const next = at > line ? expectedSteps.find((e) => e.t0 <= at && (e.t1 ?? e.t0) >= at) : undefined;
 				if (next) what = `${next.name} · about ${span((next.t1 ?? next.t0) - next.t0)}, expected`;
 			}
 		}

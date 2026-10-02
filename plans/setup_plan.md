@@ -1,13 +1,13 @@
-# The apparatus record: what the experiment was, dated
+# Setups: what the experiment was, recorded with every run
 
-> **Status: Proposed (2026-09-29).** Nothing is built. Decisions marked
-> **(open)** in §9 need an answer before Phase 1.
+> **Status: Proposed (2026-10-01).** Nothing is built. Decisions marked
+> **(open)** in §10 can wait until the phase that needs them.
 >
 > **This is a startup document**, written for an engineer or agent picking this
 > up cold. It builds on [`semantic_data_plan.md`](semantic_data_plan.md) (the
-> lab database, facets, the Data page) and replaces the free-form `run.metadata`
-> editor on the Run page. As with that plan, no backwards compatibility with
-> existing databases is required.
+> lab database, facets, the Data page, derived columns) and replaces the
+> free-form `run.metadata` editor on the Run page. As with that plan, no
+> backwards compatibility with existing databases is required.
 
 ---
 
@@ -15,172 +15,324 @@
 
 A run's data only means something next to the state of the apparatus it was
 taken on: which detector was mounted, which bias resistor was in the line,
-which laser, which shunt, which fibre and attenuator chain, which cryostat and
-what it was cooled to. Today a run captures that in three unrelated places:
+which balun, what the cryoamp was biased at, how much QCL power. Today that is
+spread over three places:
 
 | What | Where it lives now | What goes wrong |
 |---|---|---|
-| The device under test | `run.device`, a name in the `devices` table, with properties (`wafer`) | Fine for the device itself. It is the only part of the apparatus with a registry. |
-| Instrument settings | a snapshot of each bound instrument's params, taken when the run starts | Fine, and automatic — but it only covers what an instrument *is set to*, not what is wired to it. |
-| Everything else | `run.metadata` in **each project's** YAML, typed on the Run page | Typed again in every project; drifts between projects; typos become new filter values; nothing records *when* it changed; a project made last month still says what was true last month. |
+| The device under test | `run.device`, a name in the `devices` table, with properties (`wafer`) | Fine. It is the only part of the apparatus with a registry. |
+| Instrument settings | a snapshot of each bound instrument's params, taken at run start | Fine, and automatic, but it covers only what an instrument *is set to*, not what is wired to it. |
+| Everything else | `run.metadata` in **each project's** YAML, or a procedure param | Typed again in every project; drifts between projects; typos become new filter values; a blank or stale field goes unnoticed. |
 
-The third row is most of the apparatus, and it changes all the time, in small
-steps: a resistor swapped on Tuesday, a new laser on Thursday. What a lab
-needs is closer to a **lab notebook for the apparatus** than to per-run fields:
-one record of the setup, changed in small dated edits, and every run linked to
-the version that was true when it ran.
+The worst case is a value that scales the data. `iv_curve` infers current
+through `readout.bias_resistance_ohm`, a procedure param with a default of
+100 kΩ. Forget to change it after swapping in a 10 kΩ resistor and every IV
+curve for a week is off by ten, silently.
 
-## 2. What it should let a lab member do
+## 2. Where a value lives
 
-1. **Describe the apparatus once**, as a structured record: fields with units
-   where they have them (`bias_resistor: 100 kΩ`, `laser: {model, wavelength: 1550 nm}`).
-2. **Change it in small, dated steps**, each with a note ("swapped R_bias after
-   the open-circuit on channel 2"), and see the history as a timeline.
-3. **Have every run record which version it ran on**, without typing
-   anything at run time.
-4. **Filter and compare by it** on the Data page: every run with the 100 kΩ
-   resistor; *what changed between these two runs?*
-5. **Keep several**, when a lab has more than one bench or cryostat.
+Values differ by **who changes them, and how**. That decides where each one
+lives:
+
+| Kind | Changed by | Lives in | Recorded with each run as |
+|---|---|---|---|
+| Connection (address, port) | nobody, per run | `config/instruments` | nothing; instruments are referred to by `attribute_name` |
+| Instrument state (scope at 50 Ω, a laser's power set over the bus) | software, outside the measurement | the instrument's baseline in `config/instruments` | the instrument snapshot (exists today) |
+| **Setup facts** (bias resistor, balun, cryoamp bias, QCL power set at a knob) | a person, with hands | **the setup** (this plan) | a copy of the setup's fields |
+| Procedure params (the sweep, the settle time) | the procedure, during the run | the project | `params` |
+
+Something can move between rows. A laser whose power the procedure sweeps is a
+procedure param. The same laser left at a fixed power by its driver is
+instrument state. Set at a front-panel knob, its power is a setup fact. The
+test is always whether the software sets it, and when.
+
+The device is not in this table. It has its own record (§3).
 
 ## 3. Concepts
 
-**Setup** — a named record of one apparatus: `cryostat-A`, `optics-bench`. It
-holds the lab-specific facts about the experiment that are *not* needed to
-connect to an instrument or to scale a plot. (Connection details stay in
-`config/instruments`; a run's measurement params stay in its project.)
+**Setup**: a named, long-lived description of one experiment, such as
+`cryostat-A` or `optics-bench`. It holds the experiment's **current** setup
+facts as free-form fields, plus the device currently mounted in it. A lab may
+have several setups on one computer, for different people, benches or
+measurements. Two setups may share an instrument (one voltage source moved
+between them). The instrument stays one workspace-level record, and leases
+decide who holds it.
 
-**Revision** — one version of a setup, immutable once saved: its fields, when
-it took effect, who made it, and a note. Editing a setup always adds a
-revision; nothing is overwritten. A setup's *current* revision is its latest.
+**Sticky values**: a setup's fields are what was true last time. Opening the
+wizard next week starts from them. Changing the one value that changed is a
+quick edit, not a re-entry of everything.
 
-**Link** — a project names the setup it runs on (by name, not by revision).
-When a run starts it resolves that name to the current revision and records
-both the revision's id **and a copy of its fields** with the run. The copy is
-what keeps a run self-describing, the rule the Data page now follows for plots:
-everything needed to understand a past measurement comes from the measurement
-itself, even if the setup is later deleted or its history corrected.
+**Snapshot**: when a run starts, it records the setup's name, a **copy of its
+fields**, and the mounted device. The copy is what keeps a run
+self-describing. Editing the setup later never changes a past run. Plots of
+last month's runs stay as they were drawn last month, even if the setup is
+renamed or deleted.
 
-**Fields template (open, §9)** — optionally, a lab-wide list of the fields a
-setup has, each with a type, a unit, and for some a list of allowed values
-(the lab's lasers). A template is what turns "a typo becomes a new filter
-value" into "a typo is refused", the same move the device combobox made for
-device names.
+**History is read from runs.** Setups have no revision table. Diffing the
+copies of consecutive runs on a setup gives its timeline, for example
+"bias_resistor 100 kΩ → 10 kΩ between run 41 (Tue) and run 42 (Thu)". A
+change that no run saw affected no data.
 
-## 4. The data model
+**Correction**: changing a field in past runs' copies, deliberately, from the
+Data page ("those were 10 kΩ, not 100 kΩ"). Each correction is logged with the
+old value, and derived columns are computed when data is read, so the
+affected plots rescale at once. This is the only way a snapshot changes. A
+live link from runs to the setup would rescale old plots whenever someone
+edited the setup today; a correction does so only on purpose.
+
+**Device and setup change independently.** Sometimes the bench stays the same
+and the SNSPD is swapped. Other times the resistor, balun or cryoamp bias
+changes and the device stays. So the device stays its own record, with its
+intrinsic properties (wafer, area), which go with it from setup to setup. The
+setup only *remembers which device is mounted*, as a sticky default like any
+other field. It refers to the device and copies none of its properties.
+
+## 4. Procedures that need setup facts
+
+A procedure does not know which bench it will run on. A measurement does: it
+is the procedure made specific, by name, in the projects folder. So setup
+facts work the way instruments already do:
+
+| | The procedure declares | Creating a measurement binds it to |
+|---|---|---|
+| Instruments | a **role**: `voltage_source: VSource` | an instrument in `config/instruments` |
+| Setup facts | a **need**: `bias_resistance: ohm` | a field of the chosen setup: `channel2.bias_resistor` |
+
+The procedure declares its needs beside its roles, and its derived columns
+read them by the need's name:
+
+```yaml
+roles:
+  voltage_source: {behavior: VSource, description: Biases the detector through the bias resistor.}
+  voltage_sense:  {behavior: VSense,  description: Reads the voltage across the detector.}
+needs:
+  bias_resistance: {unit: ohm, description: the resistor the current is inferred through}
+derived:
+  current: (bias_voltage - sense_voltage) / setup("bias_resistance")
+```
+
+- **`setup("name")`** joins `param("path")` in the expression language
+  (`lib/data/expressions.py`). `name` is one of the procedure's needs, never
+  a field path, so the procedure knows nothing about any one setup's layout.
+  It returns the bound field's value from each run's own copy, converted to
+  the need's unit: `{value: 100, unit: kΩ}` reads as `100000.0` for
+  `unit: ohm`. Conversion covers SI prefixes on the same base unit; any other
+  unit is an error naming the field.
+- **In the procedure editor**, using `setup("x")` in a derived column for an
+  undeclared `x` offers to declare it, asking for its unit. A need no
+  expression reads is flagged, as an unused role would be.
+- **The setup is not typed against procedures.** It stays free-form fields.
+  A need with no field bound, or bound to a field that is missing or not a
+  number in that unit, stops a run before it starts (§7). A need has no
+  default, because a default is exactly what made the 100 kΩ mistake silent.
+- Two setups that spell a field differently (`bias_resistor` here, `r_bias`
+  there) are no problem: each measurement binds the need to its own setup's
+  field.
+- `iv_curve` drops `readout.bias_resistance_ohm` from `params` and declares
+  the need `bias_resistance`. A param that no step reads is the sign of a
+  setup fact in the wrong place.
+- Custom (Python) measurements have no definition to declare needs in. They
+  read the run's setup copy themselves, if at all.
+
+## 5. The data model
 
 In the lab database, beside `devices`:
 
 ```sql
 CREATE TABLE setups (
-    id    INTEGER PRIMARY KEY,
-    name  TEXT NOT NULL UNIQUE,
-    notes TEXT
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE,
+    notes      TEXT,
+    fields     TEXT NOT NULL DEFAULT '{}',   -- JSON: the current facts
+    device_id  INTEGER REFERENCES devices(id) -- what is mounted now
 );
 
-CREATE TABLE setup_revisions (
-    id           INTEGER PRIMARY KEY,
-    setup_id     INTEGER NOT NULL REFERENCES setups(id),
-    effective_at TEXT NOT NULL,     -- when the apparatus changed
-    recorded_at  TEXT NOT NULL,     -- when someone wrote it down
-    author       TEXT,
-    note         TEXT,              -- "swapped R_bias after the open circuit"
-    fields       TEXT NOT NULL      -- JSON: the whole record, not a diff
+CREATE TABLE run_corrections (
+    id       INTEGER PRIMARY KEY,
+    run_id   INTEGER NOT NULL REFERENCES runs(id),
+    field    TEXT NOT NULL,     -- "bias_resistor", or "channel2.bias_resistor"
+    old      TEXT,              -- JSON; null if the field was missing
+    new      TEXT,              -- JSON; null removes it
+    at       TEXT NOT NULL,
+    author   TEXT,
+    note     TEXT NOT NULL      -- "was the 10 kΩ since Tuesday's swap"
 );
 
 -- runs gains:
---   setup_revision_id INTEGER REFERENCES setup_revisions(id)
---   setup             TEXT     -- JSON copy of that revision's fields
+--   setup         TEXT   -- the setup's name, as it was
+--   setup_fields  TEXT   -- JSON copy of its fields at run start, corrections applied
+--   setup_needs   TEXT   -- JSON: the measurement's bindings, {"bias_resistance": "channel2.bias_resistor"}
+-- runs loses:
+--   metadata
 ```
 
-Whole records rather than diffs, so reading any revision (or a run's copy) is
-one row. A diff between two revisions is computed for display.
+One correction made on twelve runs is twelve rows sharing `at` and `note`,
+shown as one entry. Undoing a correction is another correction.
 
-`effective_at` and `recorded_at` are separate because people write things down
-late: a resistor swapped on Tuesday and recorded on Thursday is effective on
-Tuesday. See §9 for what that means for runs made in between.
+Quantities are `{value, unit}`, as `run.metadata` uses now.
 
-**Facets.** A run's setup copy flattens into facets exactly as `run.metadata`
-does now, under `setup.` (`setup.bias_resistor`, `setup.laser.model`), with
-quantities (`{value, unit}`) as one leaf. So filtering by apparatus needs no new
-machinery on the Data page. `setup` (the name) and `setup.revision` are facets
-too.
+**Pictures** are field values too: `{image: "3f9a…c1.jpg"}`, a reference to
+a file in `<data_dir>/setup_images/` (beside `lab.db`), named by the SHA-256
+of its contents. A field may hold one image or a list (`wiring_photos`).
+Because a picture is a field, it is snapshotted with the run, shows in the
+timeline and in "what changed" ("wiring_photo changed", with both
+thumbnails), and can be corrected like any value. Files are written once and
+never changed. A file is deleted only when no setup and no run's copy refers to
+it, which a cleanup command checks; nothing deletes automatically. Images are
+not facets.
 
-**Where the project says it.** The project YAML's `run:` block gains
-`setup: cryostat-A` and loses `metadata:`. `RunStarted` gains the resolved
-revision. A run started from a terminal resolves it the same way, since it
-records into the same database.
+A run records its bindings with its copy, so reading `setup("bias_resistance")`
+for a past run needs neither the project nor the setup: the run's
+`setup_needs` names the field, and its `setup_fields` holds the value. A
+correction changes the value in the copy, so it reaches every derived column
+bound to that field.
 
-## 5. The pages
+**Where the project says it.** The project YAML gains a `setup:` block beside
+`roles:`, written when the measurement is created:
 
-**Setup page** (new top-level section, beside Instruments; see §9 for the name):
+```yaml
+run:
+  operator: null
+  notes: null
+setup:
+  name: mid-ir-bench
+  needs:                     # which of the setup's fields fills each need
+    bias_resistance: channel2.bias_resistor
+roles:
+  voltage_source: yoko_ch1
+  voltage_sense: keithley
+```
 
-- A list of setups; each opens to its **current record** as a form (from the
-  template if there is one, free-form fields otherwise, as the metadata editor
-  does now) and its **timeline**: revisions newest first, each with its date,
-  author, note and what it changed ("bias_resistor 100 kΩ → 50 kΩ").
-- Editing and saving adds a revision; the note is asked for then.
-- The timeline marks the runs made on each revision, linking to the Data page.
+`run:` loses `metadata:` and `device:`. The device comes from the setup's
+mounted device, so there is one place that says what is in the cryostat. A
+run started from a terminal resolves the setup and its needs the same way,
+because it records into the same database. `RunStarted` carries the setup
+name, the copy of its fields, the bindings and the device.
 
-**Run page:** the metadata editor goes. In its place, a setup picker (a
-combobox of setups) and a read-only summary of the revision the next run will
-record, with a warning when it changed since this project's last run
-("bias_resistor changed on Tuesday").
+## 6. Filtering by anything in a setup
 
-**Data page:** `setup.*` filters in the sidebar; in a run's details, the
-setup revision it ran on; and for two selected runs, **what changed** between
-their setups (and their instruments' snapshots, which already exist).
+Every leaf of a run's `setup_fields` becomes a facet under `setup.`
+(`setup.bias_resistor`, `setup.qcl.power`, `setup.balun`). Facets of a run's
+`metadata` work this way today under `run.`, so this is mostly a rename:
 
-## 6. Phases
+- `facets.run_facets` flattens `setup_fields` under `setup.` in place of
+  `metadata` under `run.`, and adds `setup` (the name) as a facet. `device`
+  and `device.*` are unchanged.
+- `data_api.FACET_GROUPS` gets a **Setup** section (`setup`, `setup.`) in
+  place of **Run**, placed after Device.
+- A numeric field with many values gets the range filter already used for
+  numeric facets. Text fields (balun model) get the value checkboxes.
+- **Units.** A facet's `num` is converted to the field's base unit, so a
+  range over `bias_resistor` compares 100 kΩ and 100000 Ω correctly, and both
+  show as one value. This uses the same prefix conversion as `setup()`.
+- A correction rewrites the facets of the runs it touched
+  (`write_run_facets`), so filters show corrected values.
 
-1. **Record** — the tables, `RunStarted`/recorder support, facets, and
-   `setup:` in the project YAML; `run.metadata` removed. Schema version 2.
-2. **Setup page** — list, edit (adds a revision), timeline with diffs.
-3. **Run page** — setup picker and "changed since last run".
-4. **Data page** — what changed between two runs; runs per revision.
-5. **Template** — lab-wide fields with types, units and allowed values, if §9
-   decides for it.
+Filtering by device, setup and procedure params at the same time takes no new
+query. It is the existing AND of facet filters.
 
-Each phase is usable on its own; 1 and 2 are the minimum worth shipping.
+## 7. The pages
 
-## 7. What it is not
+**Setup page** (a new top-level section, beside Instruments):
 
-- Not instrument configuration: addresses and baselines stay in
-  `config/instruments`, and a run's instrument settings are still snapshotted
-  automatically. The Setup page may *show* the instrument tree beside the
-  setup, as one view of "the experiment", but they stay separate records.
-- Not measurement params: the sweep, the gate time, stay in the project.
-- Not an inventory system: it records what is installed, not what is on the
+- A list of setups, with a button to create one.
+- Each setup opens to its current fields as a form (free-form, as the
+  metadata editor is now, plus an image field that takes a dropped or chosen
+  file, or several), its mounted device (the device combobox), and its
+  **timeline**: the changes between consecutive runs, newest first, each
+  linking to its runs on the Data page, with corrections marked.
+
+**Create measurement** (the Select resources page, which binds roles to
+instruments today) gains a **Setup** section beside Instruments:
+
+- a setup picker (a combobox of setups, or create one by name);
+- then one row per need: its name, unit and description, and a combobox that
+  searches **that setup's** fields. Typing `bias` lists `channel2.bias_resistor`
+  and `cryoamp.bias_v` with their current values; fields in the need's unit
+  come first, and fields in another dimension are shown but cannot be chosen.
+  A need with an exact name match is bound already;
+- if no field fits, **Add to setup**: name the field and give its value, and
+  it is written to the setup and bound;
+- every need must be bound to create the measurement, as every role must be
+  bound to an instrument.
+
+**Run page:** the metadata editor goes. In its place:
+
+- the setup's name and **the bound fields first**, with their values, editable
+  in place. Editing one writes to the setup, because the bench changed, not
+  just this run. A bound field that has gone missing blocks Start and is asked
+  for here;
+- the mounted device, likewise editable, which writes to the setup;
+- the setup's other fields, folded away, read-only here;
+- changing the setup re-runs the binding for the new setup, with exact
+  name matches bound already.
+
+**Data page:**
+
+- the **Setup** facet section (§6);
+- in a plot's derived columns, `setup("…")` offers the needs of the selected
+  runs' procedures;
+- in a run's details, its setup name, its copy of the fields, and any
+  corrections made to it;
+- for two selected runs, **what changed**: their setup copies, devices and
+  instrument snapshots, diffed;
+- **Correct setup field**, on a selection of runs: choose a field, give the
+  right value and a note. It shows the current values it will replace, writes
+  the corrections, and offers to set the setup's current value too.
+
+## 8. Phases
+
+1. **Record**: the `setups` table; `setup`/`setup_fields`/`setup_needs` on
+   runs; the `setup:` block in the project YAML; `run.metadata` and the
+   project's `device:` removed; `setup.*` facets and the Setup sidebar
+   section. Schema version 2.
+2. **Setup page**: list, create, edit fields, mounted device, pictures.
+3. **Needs**: `needs:` in procedure definitions, `setup()` in the expression
+   language with unit conversion, the Setup section on Create measurement
+   with its field combobox, `iv_curve` ported.
+4. **Run page**: the bound fields in place, refuse to start without them.
+5. **Corrections**: `run_corrections`, the Data page action, facets
+   rewritten.
+6. **History**: the timeline on the Setup page, and what changed between two
+   runs on the Data page.
+
+Phases 1 and 2 are the minimum worth shipping. Phases 3 to 5 are what fixes
+the wrong resistor.
+
+**Stretch goal, after phase 6: changed since this measurement last ran.** The
+Run page compares the setup's current fields with the copy recorded by this
+project's latest run, and shows what differs as an information line:
+"bias_resistor changed 100 kΩ → 10 kΩ since this measurement last ran
+(Tuesday)". There is nothing to accept or sync: the project YAML refers to
+the setup by name, and the next run records the current values regardless.
+It reuses phase 6's diff of two copies.
+
+## 9. What it is not
+
+- Not instrument configuration. Addresses and baselines stay in
+  `config/instruments`, and a run's instrument settings are still
+  snapshotted automatically.
+- Not measurement params. The sweep and the gate time stay in the project.
+- Not the device registry. Devices keep their own record and properties.
+- Not an inventory system. It records what is installed, not what is on the
   shelf.
+- Not a link. A run never reads its setup again after it starts; it reads its
+  copy.
 
-## 8. Why the lab database, not YAML files
+## 10. Open questions
 
-Runs link to revisions, and facets and the "what changed" views need them in
-the same place as the runs. Revisions are append-only records, which is what
-a database is good at and a hand-edited YAML file is bad at (an edit that
-overwrites history is one save away). Export to YAML for reading stays easy,
-as it is for runs.
-
-## 9. Open questions
-
-1. **(open) The name.** "Configuration" collides with `config/`, which is
-   instrument configuration. Candidates: *Setup*, *Apparatus*, *Bench*,
-   *Experiment*. This document says *setup*.
-2. **(open) Is the device part of the setup?** The device changes most often
-   and is what a run is *about*, so it probably stays its own run field with
-   its own registry. But "mounted device" as a setup field would make device
-   swaps show on the setup timeline. Suggestion: keep `run.device`, and show
-   device changes on the setup timeline by reading runs.
-3. **(open) One setup per run, or several composed?** A cryostat record and an
-   optics record might change independently and be shared across benches.
-   Composition (`setups: [cryostat-A, optics-1550]`) is more flexible and
-   harder to explain. Suggestion: one per run to start.
-4. **(open) Late entries.** A revision recorded Thursday but effective Tuesday
-   means runs on Wednesday recorded the old revision. They keep their copy (the
-   rule in §3), but the Data page should say "the setup was corrected after
-   this run: bias_resistor was 50 kΩ from Tuesday". Or should re-linking such
-   runs be allowed, as an explicit, logged action?
-5. **(open) A template, or free-form only?** Free-form is quick to start and
-   typo-prone; a template is the fix, but someone has to maintain it.
-6. **(open) Per-run extras.** With `metadata` gone, is anything per-run still
-   needed besides `notes`? (A per-run temperature reading belongs in the data,
-   recorded by a step, not in the setup.)
+1. **(open) The name.** "Configuration" collides with `config/`. This
+   document says *setup*. Alternatives: *Bench*, *Experiment*, *Apparatus*.
+2. **(open) Log edits to the setup itself?** The timeline is read from runs,
+   so an edit is visible once a run uses it, but a reason for the change
+   ("swapped R_bias after the open circuit") can only go in that run's notes.
+   A small `setup_changes` log would hold reasons and edits that no run saw.
+   Suggestion: wait until notes prove too weak.
+3. **(open) A field template.** Free-form fields let typos become new facet
+   values (`bias_resistor` vs `bias_resistance`) within a setup. Bindings
+   already absorb spelling differences between setups (§4), so a lab-wide
+   list of known fields is only about filtering. Offering existing paths as
+   you type a new field may be enough.
+4. **(open) Per-run extras.** With `metadata` gone, is anything per-run still
+   needed besides `notes`? A per-run temperature reading belongs in the data,
+   recorded by a step.

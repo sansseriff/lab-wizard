@@ -43,6 +43,7 @@ from lab_wizard.lib.data.plot import (
     run_plots,
     runs_context,
     saved_views,
+    split_by,
     to_series,
     with_views,
 )
@@ -343,7 +344,8 @@ def drawn(spec: PlotSpec, points: pl.DataFrame, context: RunsContext) -> dict[st
     except ExpressionError as e:
         raise DataRequestError(str(e)) from e
     # How the rows fall into lines, so the page can say what it drew.
-    return {"series": to_series(rows), "units": context.units, "shape": line_shape(rows)}
+    shape = {**line_shape(rows), "split": split_by(spec, points.columns, context.varied)}
+    return {"series": to_series(rows), "units": context.units, "shape": shape}
 
 
 def plot(db: Path, data: Mapping[str, Any]) -> dict[str, Any]:

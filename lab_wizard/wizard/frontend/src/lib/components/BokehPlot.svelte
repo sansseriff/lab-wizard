@@ -27,7 +27,8 @@
 		logY = false,
 		xRange = null,
 		yRange = null,
-		onpoint
+		onpoint,
+		webgl = true
 	}: {
 		series: Series[];
 		xLabel?: string;
@@ -40,6 +41,10 @@
 		xRange?: AxisRange | null;
 		yRange?: AxisRange | null;
 		onpoint?: (runId: number, seq: number) => void;
+		/** Draw with WebGL (fast for many points) or a plain canvas. The live view uses
+		 * a plain canvas: WebGL shares the GPU with the page's own animation (the
+		 * timeline's close-up), which then misses frames, most of all in Safari. */
+		webgl?: boolean;
 	} = $props();
 
 	// Distinguishable in both themes; the brand indigo first.
@@ -78,7 +83,7 @@
 	$effect(() => {
 		if (!Bokeh || !host) return;
 		const next = JSON.stringify([
-			kind, connect, logX, logY, xRange, yRange, xLabel, yLabel, y2Label, theme,
+			kind, connect, logX, logY, xRange, yRange, xLabel, yLabel, y2Label, theme, webgl,
 			series.map((s) => [s.label, s.axis, s.y_name])
 		]);
 		if (next === shape && sources.length === series.length) {
@@ -120,7 +125,7 @@
 		const [ink, muted, line, surface] = ['--ink-2', '--muted', '--line', '--surface'].map(token);
 		const fig = B.Plotting.figure({
 			sizing_mode: 'stretch_both',
-			output_backend: 'webgl',
+			output_backend: webgl ? 'webgl' : 'canvas',
 			tools: 'pan,box_zoom,wheel_zoom,reset,save,tap',
 			x_range: range(B, xRange),
 			y_range: range(B, yRange),
