@@ -9,31 +9,47 @@ It combines:
 - a user-owned YAML configuration tree in a Lab Wizard workspace,
 - and a GUI workflow for generating runnable measurement project folders from templates.
 
-## Setup
+## Install
 
-Run the setup script from the root of the repository:
-
-```bash
-bash setup.sh
-```
-
-This will:
-
-1. Install [uv](https://docs.astral.sh/uv/) (the Python package manager), if not already present.
-2. Create a `.venv` and install all Python dependencies via `uv sync`.
-3. Install [Bun](https://bun.sh/) (the JavaScript runtime), if not already present.
-4. Install frontend dependencies and build the static frontend assets (used to display the wizard GUI).
-
-After setup, initialize the repository root as a local workspace and start the
-GUI:
+Run this in a terminal, from the folder that should hold the `lab-wizard`
+checkout (macOS or Linux; needs git):
 
 ```bash
-wizard init .
-wizard
+curl -fsSL https://raw.githubusercontent.com/sansseriff/lab-wizard/master/install.sh | bash
 ```
 
-(Use `uv run wizard init .` and `uv run wizard` if the virtual environment
-is not activated.)
+or with wget:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/sansseriff/lab-wizard/master/install.sh | bash
+```
+
+Only pipe a script into bash if you trust its source. To read it first:
+
+```bash
+curl -fsSL -o install.sh https://raw.githubusercontent.com/sansseriff/lab-wizard/master/install.sh
+less install.sh   # it clones the repo, then runs setup.sh from the checkout
+bash install.sh
+```
+
+The installer clones the repository into `./lab-wizard` (or pulls the latest,
+if run inside an existing checkout) and runs `setup.sh`, which:
+
+1. Installs [uv](https://docs.astral.sh/uv/) (the Python package manager), if not already present.
+2. Creates a `.venv` and installs all Python dependencies via `uv sync`.
+3. Installs [Bun](https://bun.sh/) (the JavaScript runtime), if not already present.
+4. Installs the frontend dependencies and builds the wizard GUI.
+5. On macOS, builds `Lab Wizard.app` so the window gets its Dock icon.
+6. Initializes the checkout as a Lab Wizard workspace (`wizard init .`).
+
+Then start the GUI:
+
+```bash
+cd lab-wizard
+uv run wizard
+```
+
+In a checkout you already have, `bash setup.sh` runs the same setup.
 
 When installing `lab-wizard` from PyPI in a new directory, initialize that
 directory first:
