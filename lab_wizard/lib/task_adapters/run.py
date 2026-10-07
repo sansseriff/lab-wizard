@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from lab_procedure import ProcedureRunner, RunStarted, Status, Step
 
 from lab_wizard.lib.data import DATABASE_NAME, DatabaseRecorder
 from lab_wizard.lib.data.settings import load_data_settings
+from lab_wizard.lib.data.setups import SetupError, resolve_needs, setup_for_run
 from lab_wizard.lib.plotters import MplPlotter, WebPlotter
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.savers import FileSaver
@@ -41,6 +43,7 @@ from lab_wizard.lib.utilities.model_tree import (
     OutputsConfig,
     ProjectConfig,
     RunConfig,
+    SetupBinding,
     load_project_config,
 )
 from lab_wizard.lib.workspace import find_workspace
@@ -53,6 +56,7 @@ __all__ = [
     "database_path",
     "project_outputs",
     "run_outputs",
+    "resolve_setup",
     "run_procedure",
     "run_started",
 ]
@@ -106,6 +110,35 @@ def project_outputs(project_dir: Path) -> list[RunSink]:
     return sinks
 
 
+def resolve_setup(
+    connection: sqlite3.Connection | None,
+    binding: SetupBinding | None,
+    definition: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """``(fields, device)`` of the setup ``binding`` names, checked against the procedure's needs.
+
+    Raises :class:`SetupError` naming every need that cannot be read, so a
+    run that would scale its data with a missing or wrong value never starts.
+    """
+    binding = binding or SetupBinding()
+    fields: dict[str, Any] = {}
+    device = None
+    if binding.name:
+        if connection is None:
+            raise SetupError(f"setup {binding.name!r} is in the lab database, and this run records none")
+        fields, device = setup_for_run(connection, binding.name)
+    declared = (definition or {}).get("needs") or {}
+    if declared:
+        _values, problems = resolve_needs(fields, binding.needs, declared)
+        if problems:
+            where = f"setup {binding.name!r}" if binding.name else "no setup"
+            raise SetupError(
+                f"{(definition or {}).get('name') or 'The procedure'} reads {', '.join(sorted(declared))} from its setup, "
+                f"and the measurement is on {where}: " + "; ".join(problems[n] for n in sorted(problems))
+            )
+    return fields, device
+
+
 def run_started(
     procedure: str,
     resources: Any,
@@ -113,23 +146,32 @@ def run_started(
     definition: dict[str, Any] | None = None,
     project_dir: Path | None = None,
     run: RunConfig | None = None,
+    setup: SetupBinding | None = None,
+    connection: sqlite3.Connection | None = None,
 ) -> RunStarted:
     """Everything known about a run of ``procedure`` before it starts.
 
-    ``run`` gives the run's device, operator, notes and metadata; without it
-    they are read from the project's ``run:`` block.
+    ``run`` gives the run's operator and notes, and ``setup`` the setup it is
+    on; without them they are read from the project's ``run:`` and ``setup:``
+    blocks. The setup's fields and mounted device are read from the lab
+    database through ``connection`` and copied into the run.
     """
+    project = _project(project_dir) if run is None or setup is None else None
     if run is None:
-        project = _project(project_dir)
         run = project.run if project is not None else None
+    if setup is None:
+        setup = project.setup if project is not None else None
+    fields, device = resolve_setup(connection, setup, definition)
     params = getattr(resources, "params", None)
     return RunStarted(
         procedure=procedure,
-        device=(run.device or None) if run else None,
+        device=device,
         operator=(run.operator or None) if run else None,
         notes=(run.notes or None) if run else None,
         project=project_dir.name if project_dir is not None else None,
-        metadata=dict(run.metadata) if run else {},
+        setup=setup.name if setup is not None else None,
+        setup_fields=fields,
+        setup_needs=dict(setup.needs) if setup is not None else {},
         definition=definition,
         params=params.model_dump(mode="json") if hasattr(params, "model_dump") else {},
         instruments=baseline_snapshot(resources),
@@ -186,21 +228,31 @@ def run_procedure(
     project_dir: str | Path | None = None,
     sinks: list[RunSink] | None = None,
     run: RunConfig | None = None,
+    setup: SetupBinding | None = None,
     database: str | Path | None = None,
 ) -> Status:
     """Run ``root`` against ``resources``, recording it if it belongs to a project.
 
     What the project's YAML would say can be given instead: ``sinks`` replace
-    the ones its ``outputs:`` asks for, ``run`` its ``run:`` block, and
-    ``database`` where its workspace records runs. An embedded-style project
-    gives all three, so it reads nothing from its folder when it runs.
+    the ones its ``outputs:`` asks for, ``run`` its ``run:`` block, ``setup``
+    its ``setup:`` block, and ``database`` where its workspace records runs. An
+    embedded-style project gives all four, so it reads nothing from its folder
+    when it runs; its setup's fields still come from the lab database.
     """
     project_path = Path(project_dir).resolve() if project_dir is not None else None
     runner = ProcedureRunner(instruments=resources)
     outputs = run_outputs(project_dir=project_path, database=database, sinks=sinks)
     outputs.attach(runner.context.data_bus, runner.context.status_bus)
     try:
-        started = run_started(procedure, resources, definition=definition, project_dir=project_path, run=run)
+        started = run_started(
+            procedure,
+            resources,
+            definition=definition,
+            project_dir=project_path,
+            run=run,
+            setup=setup,
+            connection=outputs.recorder.connection if outputs.recorder is not None else None,
+        )
         return runner.run(root, started)
     finally:
         outputs.close()

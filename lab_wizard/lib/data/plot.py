@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from lab_wizard.lib.data.expressions import (
     ExpressionError,
     Params,
+    SetupValues,
     compile_expression,
     derive,
 )
@@ -95,7 +96,7 @@ class PlotSpec(BaseModel):
     y_range: tuple[float | None, float | None] | None = None
 
 
-def _where(spec: PlotSpec, columns: list[str], params: Params | None) -> pl.Expr:
+def _where(spec: PlotSpec, columns: list[str], params: Params | None, setup: SetupValues | None) -> pl.Expr:
     """Which rows to draw, as one condition. Evaluated over whole runs.
 
     A ``where`` chooses the points to draw; it does not change what a
@@ -104,7 +105,7 @@ def _where(spec: PlotSpec, columns: list[str], params: Params | None) -> pl.Expr
     """
     keep = pl.lit(True)
     for column, wanted in spec.where.items():
-        expr = compile_expression(column, columns, params)
+        expr = compile_expression(column, columns, params, setup)
         if isinstance(wanted, dict):
             if set(wanted) == {"in"}:
                 keep &= expr.is_in(list(wanted["in"]))
@@ -283,6 +284,7 @@ def evaluate_plot(
     run_labels: dict[int, str] | None = None,
     bins: dict[str, dict[str, Any]] | None = None,
     params: Params | None = None,
+    setup: SetupValues | None = None,
     derived: dict[str, str] | None = None,
     varied: Mapping[int, list[str]] | None = None,
 ) -> pl.DataFrame:
@@ -290,7 +292,8 @@ def evaluate_plot(
 
     ``run_labels`` maps a run id to its legend text; ``bins`` gives an array
     column's bin axis, ``{name: {"start": 0, "step": 4}}``, as recorded in
-    ``runs.columns``. ``params`` is ``{run_id: params}``, for ``param("...")``.
+    ``runs.columns``. ``params`` is ``{run_id: params}``, for ``param("...")``,
+    and ``setup`` ``{run_id: {need: value}}``, for ``setup("...")``.
     ``derived`` adds the procedure's own derived columns; the spec's
     ``derived`` are added over them. ``varied`` is ``{run_id: [parameter]}``,
     what each run's procedure varied between its rows (:func:`varied_parameters`).
@@ -299,15 +302,15 @@ def evaluate_plot(
     frame = points.sort(["run_id", "seq"]) if {"run_id", "seq"} <= set(points.columns) else points
     all_derived = {**(derived or {}), **spec.derived}
     if all_derived:
-        frame = derive(frame, all_derived, params)
+        frame = derive(frame, all_derived, params, setup)
 
-    keep = _where(spec, frame.columns, params)
+    keep = _where(spec, frame.columns, params, setup)
     series = _labels(spec, frame, run_labels, varied)
-    x = compile_expression(spec.x, frame.columns, params)
+    x = compile_expression(spec.x, frame.columns, params, setup)
     parts: list[pl.DataFrame] = []
     for axis, names in (("y", spec.y), ("y2", spec.y2)):
         for name in names:
-            y = compile_expression(name, frame.columns, params)
+            y = compile_expression(name, frame.columns, params, setup)
             label = series if len(spec.y) + len(spec.y2) == 1 else (
                 pl.concat_str([series, pl.lit(name)], separator=" · ") if spec.series else pl.lit(name)
             )
@@ -383,7 +386,10 @@ def line_shape(rows: pl.DataFrame) -> dict[str, Any]:
 
 
 def derive_per_run(
-    points: pl.DataFrame, derived_by_run: dict[int, dict[str, str]], params: Params | None = None
+    points: pl.DataFrame,
+    derived_by_run: dict[int, dict[str, str]],
+    params: Params | None = None,
+    setup: SetupValues | None = None,
 ) -> pl.DataFrame:
     """``points`` with each run's own derived columns added.
 
@@ -398,9 +404,9 @@ def derive_per_run(
         return points
     if len(groups) == 1:
         (derived, _ids), = groups.values()
-        return derive(points, derived, params)
+        return derive(points, derived, params, setup)
     parts = [
-        derive(points.filter(pl.col("run_id").is_in(ids)), derived, params) if derived
+        derive(points.filter(pl.col("run_id").is_in(ids)), derived, params, setup) if derived
         else points.filter(pl.col("run_id").is_in(ids))
         for derived, ids in groups.values()
     ]
@@ -418,6 +424,8 @@ class RunsContext:
     units: dict[str, str | None]
     # {run_id: [parameter]}: what each run's procedure varied between its rows.
     varied: dict[int, list[str]] = field(default_factory=dict)
+    # {run_id: {need: value}}: what setup("...") reads in each run.
+    setup: dict[int, dict[str, float]] = field(default_factory=dict)
 
 
 def runs_context(lab: Any, run_ids: list[int], label: str | None = None) -> RunsContext:
@@ -441,6 +449,7 @@ def runs_context(lab: Any, run_ids: list[int], label: str | None = None) -> Runs
         derived=runs.derived_by_run(),
         units={name: meta.get("unit") for name, meta in columns.items() if isinstance(meta, dict)},
         varied=_varied(lab, run_ids),
+        setup=runs.setup_values(),
     )
 
 
@@ -465,10 +474,11 @@ def draw_rows(spec: PlotSpec | dict[str, Any], points: pl.DataFrame, context: Ru
     spec = spec if isinstance(spec, PlotSpec) else PlotSpec.model_validate(spec)
     return evaluate_plot(
         spec,
-        derive_per_run(points, context.derived, context.params),
+        derive_per_run(points, context.derived, context.params, context.setup),
         run_labels=context.labels,
         bins=context.bins,
         params=context.params,
+        setup=context.setup,
         varied=context.varied,
     )
 

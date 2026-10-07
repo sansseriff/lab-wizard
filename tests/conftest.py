@@ -88,7 +88,7 @@ def _isolated_lease_dir(tmp_path_factory, monkeypatch):
 
 # ---- The simulated bench ----
 #
-# Tests that measure something run lab_wizard's real drivers against lab_sim's
+# Tests that measure something run lab_wizard's real drivers against lab_wizard.sim's
 # simulated bench: a SIM900 rack behind a Prologix controller (on a
 # pseudo-terminal), a 53220A counter and an AQ2212 attenuator (on TCP ports),
 # all wired to one simulated SNSPD. Each test gets its own bench, so a port one
@@ -209,7 +209,7 @@ class Rig:
 @pytest.fixture
 def make_rig():
     """Start a bench, optionally with its own detector constants: ``make_rig(noise_volts=1e-5)``."""
-    from lab_sim import Bench, BenchConfig
+    from lab_wizard.sim import Bench, BenchConfig
 
     benches: list[Any] = []
 

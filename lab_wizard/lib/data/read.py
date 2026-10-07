@@ -29,6 +29,7 @@ from lab_wizard.lib.data.expressions import derive
 from lab_wizard.lib.data.facets import facet_value
 from lab_wizard.lib.data.recorder import settle_interrupted_runs
 from lab_wizard.lib.data.schema import DATABASE_NAME, open_database
+from lab_wizard.lib.data.setups import resolve_needs
 from lab_wizard.lib.workspace import find_workspace
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ __all__ = ["Lab", "Runs", "facets", "find", "lab_database"]
 
 Filters = Mapping[str, Any]
 
-_JSON_COLUMNS = ("metadata", "definition", "params", "instruments", "columns")
+_JSON_COLUMNS = ("setup_fields", "setup_needs", "definition", "params", "instruments", "columns")
 
 
 def lab_database(start: str | Path | None = None) -> Path:
@@ -208,14 +209,14 @@ class Runs:
         schema = {
             "id": pl.Int64, "procedure": pl.String, "status": pl.String, "started_at": pl.String,
             "ended_at": pl.String, "device": pl.String, "operator": pl.String, "notes": pl.String,
-            "project": pl.String, "points": pl.Int64,
+            "project": pl.String, "setup": pl.String, "points": pl.Int64,
         }
         if not self.ids:
             return pl.DataFrame(schema=schema)
         where, params = self._where()
         rows = self.lab.query(
             f"""SELECT r.id, r.procedure, r.status, r.started_at, r.ended_at, d.name, r.operator,
-                       r.notes, r.project, (SELECT COUNT(*) FROM points p WHERE p.run_id = r.id)
+                       r.notes, r.project, r.setup, (SELECT COUNT(*) FROM points p WHERE p.run_id = r.id)
                 FROM runs r LEFT JOIN devices d ON d.id = r.device_id
                 WHERE r.id IN {where}""",
             params,
@@ -252,6 +253,25 @@ class Runs:
             return {}
         where, ids = self._where()
         return {r[0]: json.loads(r[1] or "{}") for r in self.lab.query(f"SELECT id, params FROM runs WHERE id IN {where}", ids)}
+
+    def setup_values(self) -> dict[int, dict[str, float]]:
+        """``{run_id: {need: value}}``: what ``setup("…")`` reads in each run.
+
+        Each need its procedure declared, read from the run's own copy of its
+        setup through the run's own bindings, in the need's unit. A need that
+        cannot be read is left out, so it reads as null.
+        """
+        if not self.ids:
+            return {}
+        where, ids = self._where()
+        out: dict[int, dict[str, float]] = {}
+        for run_id, fields, needs, definition in self.lab.query(
+            f"SELECT id, setup_fields, setup_needs, definition FROM runs WHERE id IN {where}", ids
+        ):
+            declared = (json.loads(definition) if definition else {}).get("needs") or {}
+            values, _problems = resolve_needs(json.loads(fields or "{}"), json.loads(needs or "{}"), declared)
+            out[run_id] = values
+        return out
 
     def derived_by_run(self) -> dict[int, dict[str, str]]:
         """``{run_id: {name: expression}}``: the ``derived:`` columns each run recorded.
@@ -310,7 +330,7 @@ class Runs:
         )
         if frame.is_empty():
             frame = pl.DataFrame(schema={"run_id": pl.Int64, "seq": pl.Int64, "t": pl.Datetime("us", "UTC")})
-        return derive(frame, derived, self.params()) if derived else frame
+        return derive(frame, derived, self.params(), self.setup_values()) if derived else frame
 
     def steps(self) -> pl.DataFrame:
         """Every step execution, in the order they started: the timeline."""

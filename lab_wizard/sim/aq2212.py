@@ -17,9 +17,9 @@ import logging
 import re
 from typing import Optional
 
-from lab_sim.snspd import SnspdModel
+from lab_wizard.sim.snspd import SnspdModel
 
-logger = logging.getLogger("lab_sim.aq2212")
+logger = logging.getLogger("lab_wizard.sim.aq2212")
 
 AQ2212_IDN = "YOKOGAWA,AQ2212,SIMULATED,lab_sim"
 

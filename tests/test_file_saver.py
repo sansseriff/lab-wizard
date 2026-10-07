@@ -8,6 +8,7 @@ produce identical files.
 from __future__ import annotations
 
 import csv
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -17,14 +18,15 @@ import pytest
 import yaml
 
 from lab_procedure import Point, RunStarted, Sequence, Status, Step, Sweep, WithParameter
-from lab_wizard.lib.data import PlotSpec, find
+from lab_wizard.lib.data import PlotSpec, find, open_database
 from lab_wizard.lib.data.plot import default_plot
 from lab_wizard.lib.data.run_folder import export_run, folder_name
 from lab_wizard.lib.data.settings import DataSettings, FileSettings, save_data_settings
+from lab_wizard.lib.data.setups import save_setup
 from lab_wizard.lib.plotters import MplPlotter, WebPlotter
 from lab_wizard.lib.savers import FileSaver
 from lab_wizard.lib.task_adapters.sinks import RunInfo, StandInSink
-from lab_wizard.lib.task_adapters.run import project_outputs, run_procedure
+from lab_wizard.lib.task_adapters.run import database_path, project_outputs, run_procedure
 from lab_wizard.lib.workspace import initialize_workspace
 
 DEFINITION: dict[str, Any] = {
@@ -61,14 +63,19 @@ class Resources:
     params: Any = None
 
 
-def _project(tmp_path: Path, device: str = "A7", outputs: str = "") -> Path:
+def _project(tmp_path: Path, outputs: str = "") -> Path:
+    """A project on setup ``bench``, which has device A7 mounted."""
     project_dir = tmp_path / "probe_1"
     project_dir.mkdir(parents=True)
     (project_dir / "probe_1.yaml").write_text(
-        f"project: {{measurement_type: probe}}\nrun: {{device: {device}, operator: andrew, metadata: {{cryostat: BF1}}}}\n"
+        "project: {measurement_type: probe}\nrun: {operator: andrew}\nsetup: {name: bench}\n"
         + (f"outputs: {outputs}\n" if outputs else ""),
         encoding="utf-8",
     )
+    with closing(open_database(database_path(project_dir))) as db:
+        with db:
+            db.execute("insert or ignore into devices (name) values ('A7')")
+        save_setup(db, "bench", {"cryostat": "BF1"}, device="A7")
     return project_dir
 
 
@@ -106,7 +113,7 @@ def test_a_run_is_saved_as_a_folder_named_by_the_template(tmp_path: Path):
     assert (run["run_id"], run["procedure"], run["status"], run["device"], run["operator"]) == (
         1, "probe", "success", "A7", "andrew",
     )
-    assert run["metadata"] == {"cryostat": "BF1"}
+    assert (run["setup"], run["setup_fields"]) == ("bench", {"cryostat": "BF1"})
     assert yaml.safe_load((folder / "procedure.yaml").read_text())["plots"][0]["name"] == "Counts"
 
 
@@ -145,21 +152,17 @@ def test_a_folder_is_a_complete_copy_of_the_runs_database_rows(tmp_path: Path):
 
 def test_a_folder_template_can_name_any_filter(tmp_path: Path):
     facets = {"date": "2026-09-22", "procedure": "mcr_curve", "device": "A7", "device.wafer": "W12",
-              "run.cryostat": "Blue/Fors 1", "time": "143012"}
+              "setup.cryostat": "Blue/Fors 1", "time": "143012"}
     assert folder_name("{device.wafer}/{device}/{date}_{procedure}", facets) == Path("W12/A7/2026-09-22_mcr_curve")
-    assert folder_name("{run.cryostat}/{operator}_{time}", facets) == Path("Blue_Fors 1/none_143012")
+    assert folder_name("{setup.cryostat}/{operator}_{time}", facets) == Path("Blue_Fors 1/none_143012")
     assert folder_name("../{procedure}", facets) == Path("none/mcr_curve")  # cannot climb out of the root
 
 
 def test_a_template_using_a_device_property_reads_it_from_the_lab_database(tmp_path: Path):
-    from contextlib import closing
-
-    from lab_wizard.lib.data import open_database
-
     project_dir = _project(tmp_path)
 
     with closing(open_database(project_dir / "data" / "lab.db")) as db, db:
-        db.execute("""insert into devices (name, properties) values ('A7', '{"wafer": "W12"}')""")
+        db.execute("""update devices set properties = '{"wafer": "W12"}' where name = 'A7'""")
     saver = FileSaver(path="{device.wafer}/{device}")
     _run(tmp_path, saver, project_dir=project_dir)
     assert saver.folder.path == project_dir / "data" / "files" / "W12" / "A7"

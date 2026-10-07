@@ -28,6 +28,7 @@ from lab_wizard.wizard.backend.models import (
 )
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
 from lab_wizard.wizard.backend.projects import list_projects
+from lab_wizard.wizard.backend.transport_status import servers_holding
 from lab_wizard.wizard.backend.remote_servers import (
     list_remote_attributes,
 )
@@ -89,6 +90,9 @@ def api_measurement_choices(env: Env = Depends(get_env)):
                 "description": definition.description,
                 "roles": {role: decl.behavior for role, decl in definition.roles.items()},
                 "records": definition.emitted_fields(),
+                # What its derived columns read from the setup, for the
+                # measurement to bind to the setup's fields.
+                "needs": {need: decl.model_dump(mode="json") for need, decl in definition.needs.items()},
                 "presets": list_presets(config_dir, name),
             }
         )
@@ -180,22 +184,25 @@ def api_create_measurement_project(
     env: Env = Depends(get_env),
 ):
     """Create a project from a procedure or a custom measurement (``body.kind``)."""
+    config_dir = Path(workspace_config_dir(env))
     try:
         if body.kind == "procedure":
-            return generate_procedure_project(
-                config_dir=Path(workspace_config_dir(env)),
+            result = generate_procedure_project(
+                config_dir=config_dir,
                 projects_dir=workspace_projects_dir(env),
                 req=body,
             )
-        return generate_custom_measurement_project(
-            config_dir=Path(workspace_config_dir(env)),
-            projects_dir=workspace_projects_dir(env),
-            measurements_dir=env.measurements_dir,
-            req=body,
-        )
+        else:
+            result = generate_custom_measurement_project(
+                config_dir=config_dir,
+                projects_dir=workspace_projects_dir(env),
+                measurements_dir=env.measurements_dir,
+                req=body,
+            )
     except Exception as e:
         logger.exception("Create measurement project API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
+    return _with_held_hardware(config_dir, result)
 
 
 @router.post("/api/create-custom-resource-project")
@@ -204,15 +211,31 @@ def api_create_custom_resource_project(
     env: Env = Depends(get_env),
 ):
     """Create a new timestamped project containing a programmatically built setup file."""
+    config_dir = Path(workspace_config_dir(env))
     try:
-        return generate_custom_resource_project(
-            config_dir=Path(workspace_config_dir(env)),
+        result = generate_custom_resource_project(
+            config_dir=config_dir,
             projects_dir=workspace_projects_dir(env),
             req=body,
         )
     except Exception as e:
         logger.exception("Create custom resource project API failed: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
+    return _with_held_hardware(config_dir, result)
+
+
+def _with_held_hardware(config_dir: Path, result: dict) -> dict:
+    """Add the servers that hold hardware the generated file opens itself.
+
+    The project is written either way; this is what the person needs to know
+    before running it. Never fails the request: the files already exist.
+    """
+    try:
+        held = servers_holding(config_dir, result.get("local_roots", []))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Could not ask servers what they hold: %s", e)
+        held = []
+    return {**result, "held_by_servers": held}
 
 
 # Serve SvelteKit static build from resolved directory at root (mounted last)

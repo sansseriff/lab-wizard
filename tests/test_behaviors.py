@@ -192,7 +192,8 @@ def test_the_ported_procedures_keep_the_params_the_measurements_had(tmp_path):
     still validate because the procedures kept the same params."""
     from lab_wizard.lib.procedures.storage import load_procedure
 
-    iv = load_procedure(tmp_path, "iv_curve").param_defaults()
-    assert set(iv) == {"bias", "readout", "safety"}
-    assert iv["readout"] == {"bias_resistance_ohm": 100_000.0}
+    iv = load_procedure(tmp_path, "iv_curve")
+    assert set(iv.param_defaults()) == {"bias", "safety"}
+    # The bias resistor moved out of the params: it is a fact about the setup.
+    assert iv.needs["bias_resistance"].unit == "ohm"
     assert set(load_procedure(tmp_path, "pcr_curve").param_defaults()) == {"bias", "readout"}

@@ -43,6 +43,7 @@ from lab_wizard.wizard.backend._generation_common import (
     _compose_pedagogical_embedded,
     _create_unique_project_dir,
     _resolve_selection_node,
+    _root_paths,
     _sanitize_identifier,
     _selected_runtime_imports,
     _selected_runtime_type,
@@ -338,9 +339,10 @@ def _custom_resource_yaml(
             "measurement_type": "custom_resource",
             "created_by": "lab_wizard",
         },
-        # Who and what the run is about, recorded with every run. ``device`` names
-        # the device under test in the lab database; it is filled in before a run.
-        "run": {"device": None, "operator": None, "notes": None, "metadata": {}},
+        # Who ran it, and why; recorded with every run.
+        "run": {"operator": None, "notes": None},
+        # The setup it runs on: its fields and mounted device go with each run.
+        "setup": {"name": None, "needs": {}},
         "measurement": {"params": {}},
         "resources": {
             "instruments": {
@@ -531,4 +533,5 @@ def generate_custom_resource_project(
         "project_name": project_dir.name,
         "yaml_file": str(yaml_path),
         "setup_file": str(setup_path),
+        "local_roots": _root_paths([leaf for leaf in leaves if leaf is not None]),
     }

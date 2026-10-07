@@ -128,7 +128,7 @@ def record_run(
     device: str | None = None,
     operator: str | None = None,
     notes: str | None = None,
-    metadata: Mapping[str, Any] | None = None,
+    setup: str | None = None,
     params: Any = None,
     units: Mapping[str, str | None] | None = None,
     plots: list[dict[str, Any]] | None = None,
@@ -138,9 +138,11 @@ def record_run(
     """Record one run in the lab database, from a script or a notebook.
 
     ``database`` defaults to the lab database of the workspace around the
-    current directory (or ``LAB_WIZARD_WORKSPACE``). ``params`` (a dict or a
-    pydantic model) and ``metadata`` are recorded with the run and become
-    filters on the Data page; ``units`` gives columns their units up front;
+    current directory (or ``LAB_WIZARD_WORKSPACE``). ``setup`` names the
+    setup the run is taken on: its fields are copied into the run, and its
+    mounted device is the run's unless ``device`` is given. ``params`` (a dict
+    or a pydantic model) and the setup's fields are recorded with the run and
+    become filters on the Data page; ``units`` gives columns their units up front;
     ``plots`` are how the Data page draws the run, as a procedure's ``plots:``.
     ``resources``, if given, is snapshotted like a project's instruments.
     ``sinks`` are anything more the run should produce, such as a
@@ -150,9 +152,16 @@ def record_run(
     and ``failed`` if it raises; the exception is not swallowed.
     """
     from lab_wizard.lib.data.read import lab_database
+    from lab_wizard.lib.data.setups import setup_for_run
     from lab_wizard.lib.task_adapters.run import run_outputs
 
     outputs = run_outputs(database=database if database is not None else lab_database(), sinks=sinks or [])
+    assert outputs.recorder is not None
+    try:
+        fields, mounted = setup_for_run(outputs.recorder.connection, setup)
+    except BaseException:
+        outputs.close()
+        raise
     context = RunContext()
     outputs.attach(context.data_bus, context.status_bus)
     if hasattr(params, "model_dump"):
@@ -160,10 +169,11 @@ def record_run(
     context.data_bus.emit(
         RunStarted(
             procedure=procedure,
-            device=device,
+            device=device or mounted,
             operator=operator,
             notes=notes,
-            metadata=dict(jsonable(metadata or {})),
+            setup=setup,
+            setup_fields=fields,
             definition={"name": procedure, "plots": list(plots or [])},
             params=dict(jsonable(params or {})),
             instruments=baseline_snapshot(resources) if resources is not None else {},

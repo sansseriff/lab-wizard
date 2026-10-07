@@ -15,7 +15,9 @@ from collections.abc import Iterator, Mapping
 from datetime import datetime
 from typing import Any
 
-__all__ = ["facet_value", "is_quantity", "metadata_units", "run_facets", "write_run_facets"]
+from lab_wizard.lib.data.units import in_base, to_base
+
+__all__ = ["facet_value", "is_image", "is_quantity", "quantity_units", "run_facets", "write_run_facets"]
 
 Facet = tuple[str, str, float | None]
 
@@ -44,24 +46,39 @@ def is_quantity(data: Any) -> bool:
     return isinstance(data, Mapping) and set(data) == {"value", "unit"} and isinstance(data["unit"], str)
 
 
-def metadata_units(data: Any, prefix: str = "run") -> dict[str, str]:
-    """``{"run.temperature": "K"}``: the unit of every quantity in a run's metadata."""
+def is_image(data: Any) -> bool:
+    """Whether ``data`` is a picture, ``{image: "<sha256>.jpg"}``: a leaf, never a facet."""
+    return isinstance(data, Mapping) and set(data) == {"image"} and isinstance(data["image"], str)
+
+
+def quantity_units(data: Any, prefix: str = "setup") -> dict[str, str]:
+    """``{"setup.bias_resistor": "Ω"}``: the unit each quantity's facet is in.
+
+    Facets compare a quantity in its base unit (:func:`_leaves`), so that is the
+    unit given: ``kΩ`` is filtered, and shown, as ``Ω``.
+    """
     if is_quantity(data):
-        return {prefix: data["unit"]} if data["unit"] else {}
+        return {prefix: to_base(data["unit"])[1]} if data["unit"] else {}
     out: dict[str, str] = {}
-    if isinstance(data, Mapping):
+    if isinstance(data, Mapping) and not is_image(data):
         for key, value in data.items():
-            out.update(metadata_units(value, f"{prefix}.{key}"))
+            out.update(quantity_units(value, f"{prefix}.{key}"))
     return out
 
 
 def _leaves(prefix: str, data: Any) -> Iterator[Facet]:
-    """One facet per scalar leaf of nested dicts; lists are skipped.
+    """One facet per scalar leaf of nested dicts; lists and pictures are skipped.
 
-    A quantity (``{value, unit}``) is one leaf: its value is what is filtered by.
+    A quantity (``{value, unit}``) is one leaf, filtered by its value in its
+    base unit: 100 kΩ and 100000 Ω are one value, ``100000.0``.
     """
+    if is_image(data):
+        return
     if is_quantity(data):
-        data = data["value"]
+        value = data["value"]
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and data["unit"]:
+            value = in_base(value, data["unit"])
+        data = value
     if isinstance(data, Mapping):
         for key, value in data.items():
             yield from _leaves(f"{prefix}.{key}", value)
@@ -84,7 +101,7 @@ def run_facets(run: Mapping[str, Any], device: Mapping[str, Any] | None) -> list
         if scalar is not None:
             out.append((key, scalar[0], scalar[1]))
 
-    for key in ("procedure", "status", "operator", "project"):
+    for key in ("procedure", "status", "operator", "project", "setup"):
         add(key, run.get(key))
     started = run.get("started_at")
     if started:
@@ -95,7 +112,7 @@ def run_facets(run: Mapping[str, Any], device: Mapping[str, Any] | None) -> list
         add("device", device["name"])
         out.extend(_leaves("device", device.get("properties") or {}))
 
-    out.extend(_leaves("run", run.get("metadata") or {}))
+    out.extend(_leaves("setup", run.get("setup_fields") or {}))
     out.extend(_leaves("param", run.get("params") or {}))
 
     for role, snapshot in (run.get("instruments") or {}).items():
@@ -119,7 +136,7 @@ def write_run_facets(connection: sqlite3.Connection, run_id: int) -> None:
     if row is None:
         return
     run = dict(row)
-    for key in ("metadata", "params", "instruments", "columns"):
+    for key in ("setup_fields", "params", "instruments", "columns"):
         run[key] = json.loads(run[key]) if run[key] else {}
     device = None
     if run["device_id"] is not None:

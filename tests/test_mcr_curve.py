@@ -25,7 +25,7 @@ import pytest
 
 from lab_procedure import Point, ProcedureRunner, Status
 
-from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.sim import SnspdModel, SnspdParams
 from lab_wizard.lib.project import Project
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.storage import (

@@ -1,7 +1,9 @@
 # Setups: what the experiment was, recorded with every run
 
-> **Status: Proposed (2026-10-01).** Nothing is built. Decisions marked
-> **(open)** in §10 can wait until the phase that needs them.
+> **Status: Phases 1–4 built (2026-10-01).** Corrections (5), history (6) and
+> the stretch goal are not. Where the build differs from the text below, §11
+> says how. Decisions marked **(open)** in §10 can wait until the phase that
+> needs them.
 >
 > **This is a startup document**, written for an engineer or agent picking this
 > up cold. It builds on [`semantic_data_plan.md`](semantic_data_plan.md) (the
@@ -118,9 +120,9 @@ derived:
   the need's unit: `{value: 100, unit: kΩ}` reads as `100000.0` for
   `unit: ohm`. Conversion covers SI prefixes on the same base unit; any other
   unit is an error naming the field.
-- **In the procedure editor**, using `setup("x")` in a derived column for an
-  undeclared `x` offers to declare it, asking for its unit. A need no
-  expression reads is flagged, as an unused role would be.
+- **In the procedure editor** (the Plots tab's *Setup needs* panel), using
+  `setup("x")` in a derived column for an undeclared `x` offers to declare
+  it. An unused need is not flagged, as an unused role is not.
 - **The setup is not typed against procedures.** It stays free-form fields.
   A need with no field bound, or bound to a field that is missing or not a
   number in that unit, stops a run before it starts (§7). A need has no
@@ -253,8 +255,10 @@ instruments today) gains a **Setup** section beside Instruments:
   A need with an exact name match is bound already;
 - if no field fits, **Add to setup**: name the field and give its value, and
   it is written to the setup and bound;
-- every need must be bound to create the measurement, as every role must be
-  bound to an instrument.
+- the page asks for every need to be bound before it creates the
+  measurement, as every role must be bound to an instrument. The backend only
+  checks the bindings it is given, so a project can be made with a need left
+  for the Run page; its runs do not start until it is bound (§11).
 
 **Run page:** the metadata editor goes. In its place:
 
@@ -270,8 +274,8 @@ instruments today) gains a **Setup** section beside Instruments:
 **Data page:**
 
 - the **Setup** facet section (§6);
-- in a plot's derived columns, `setup("…")` offers the needs of the selected
-  runs' procedures;
+- in a plot's derived columns, `setup("…")` reads the needs of the selected
+  runs' procedures (offering them as you type is not built);
 - in a run's details, its setup name, its copy of the fields, and any
   corrections made to it;
 - for two selected runs, **what changed**: their setup copies, devices and
@@ -336,3 +340,32 @@ It reuses phase 6's diff of two copies.
 4. **(open) Per-run extras.** With `metadata` gone, is anything per-run still
    needed besides `notes`? A per-run temperature reading belongs in the data,
    recorded by a step.
+
+## 11. As built (phases 1–4)
+
+Where the code is, and where it differs from the text above.
+
+- **Data:** `lib/data/setups.py` (fields, needs, the `setups` table,
+  pictures), `lib/data/units.py` (SI prefixes; mirrored for the page in
+  `frontend/src/lib/setups/units.ts`), schema version 2 in `lib/data/schema.py`.
+  A version 1 `lab.db` is refused with a message to move it aside.
+- **Runs:** `RunStarted` carries `setup`, `setup_fields` and `setup_needs`
+  in place of `metadata`. `lib/task_adapters/run.py` `resolve_setup` copies
+  the setup and checks the procedure's needs when a run starts; the Run page's
+  launch checks the same first, so the refusal shows there instead of after
+  instruments are claimed. `record_run(setup=...)` does the same for a script.
+- **Generation is lenient about unbound needs.** Outside a workspace a
+  project records into its own database, which does not exist before the
+  project does, so a backend that insisted on every need being bound could not
+  create one there. It checks the bindings it is given (the setup exists, each
+  bound field reads in its need's unit) and leaves the rest to the run.
+- **Old projects:** a `run:` block's `device:` and `metadata:` are ignored,
+  not refused. Such a project records no device until it names a setup with
+  one mounted.
+- **Pages:** Setups (`routes/setups`), the Setup section on Select resources
+  and on the Run page (`lib/setups/NeedBindings.svelte`, shared), the Setup
+  facets and run details on the Data page. Run page edits to bound fields and
+  the mounted device are a draft, saved to the setup when the project is
+  saved.
+- **Naming:** "setup" now means two things in the code: this, and a project's
+  generated `*_setup.py` file. §10.1 is still open.

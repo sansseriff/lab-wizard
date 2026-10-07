@@ -101,6 +101,21 @@ This is the answer to *"how are instruments chosen for measurements based on
 generic instruments?"*: the measurement asks for a **behavior** (the generic ABC),
 and the wizard offers every configured instrument that **is-a** that behavior.
 
+## Binding a procedure's needs to a setup
+
+A procedure can also need facts about the bench to draw its plots: `iv_curve`
+infers its current through the bias resistor, so it declares a need
+`bias_resistance` in ohms. The same page that binds roles to instruments picks
+the **setup** the measurement runs on, and binds each need to one of that
+setup's fields: a search over the setup's fields lists those that read in the
+need's unit first, with their values, and greys out the rest with why. A field
+the setup does not have yet can be added from there. A need of the same name
+as a field that fits is bound already.
+
+This is the same move as roles: the procedure names what it needs, abstractly,
+and the measurement says which real thing fills it. Two setups that spell the
+field differently (`bias_resistor`, `r_bias`) are each bound once.
+
 ## Generating the project
 
 `POST /api/create-measurement-project` (→
@@ -108,7 +123,7 @@ and the wizard offers every configured instrument that **is-a** that behavior.
 does three things:
 
 1. **Writes a project YAML**: which instrument fills each role and where it
-   lives (`roles:`), a `run:` block, the `outputs:` chosen, and the
+   lives (`roles:`), a `run:` block, the setup and its bindings (`setup:`), the `outputs:` chosen, and the
    measurement's params. Instrument settings are not copied: a run reads them
    from the workspace's config, so readdressing a rack there reaches every
    project.
@@ -263,19 +278,26 @@ each instrument was configured with, and the procedure definition it ran. A
 project outside any workspace records into its own `data/lab.db` instead. The
 database does not need to be configured or selected.
 
-What the run is *about* comes from the project YAML's `run:` block, read at the
-start of every run, so edit it when you swap devices:
+What the run is *about* comes from the setup it runs on, named in the project
+YAML's `setup:` block, and who ran it from the `run:` block. Both are read at
+the start of every run:
 
 ```yaml
 run:
-  device: A7                        # the device under test, by name
   operator: andrew
   notes: first cooldown after rewiring
-  metadata: {cryostat: BlueFors1}   # anything else worth filtering runs by
+setup:
+  name: mid-ir-bench                # on the Setups page: its fields, pictures, mounted device
+  needs:                            # which of its fields fills each of the procedure's needs
+    bias_resistance: channel2.bias_resistor
 ```
 
-A device named here for the first time is added to the database. Everything in
-the block becomes something the Data page will be able to filter runs by.
+The setup itself lives in the lab database and is edited on the **Setups**
+page. Each run copies its fields and records its mounted device as the device
+under test, so editing a setup changes the next run and never a past one, and
+every field is something the Data page can filter runs by. A procedure need
+that is unbound, or bound to a field that is not a number in its unit, stops
+the run before it starts.
 
 Every run goes through the same steps, in this order:
 
@@ -322,13 +344,13 @@ measurement: change something, run, look, change it again.
 same file; switching saves). Everything here is read by the run when it
 starts, so nothing is regenerated:
 
-- **This run** — the device under test, operator and notes. Devices and
-  operators this lab has used are suggested.
-- **Metadata** — fields and groups of fields, anything worth finding the run by
-  later. Each becomes a Data page filter: `cryostat` is `run.cryostat`, a field
-  `fiber` in a group `optics` is `run.optics.fiber`. Names and values already
-  recorded are suggested, so the same thing keeps the same name. A number stays
-  a number, so it can be filtered by range.
+- **Setup** — the setup it runs on, the device mounted in it, and the setup's
+  fields the procedure reads, each bound to its need and editable in place.
+  Changing one changes the setup (the bench changed, not one project) and is
+  saved with the project. The setup's other fields are listed below, and are
+  edited on the Setups page.
+- **This run** — the operator and notes. Operators this lab has used are
+  suggested.
 - **Parameters** — a form built from the measurement's params model: numbers
   are checked as they are typed, and a sweep's mode switches its fields.
 - **Outputs** — files, and the live plot for runs started from a terminal.

@@ -91,6 +91,11 @@ def _node_lineage_leaf_to_root(node: _NodeRef) -> list[_NodeRef]:
     return out
 
 
+def _root_paths(leaves: list[_NodeRef]) -> list[str]:
+    """``inst://`` paths of the roots a generated file opens in its own process."""
+    return sorted({f"inst://{_node_lineage_leaf_to_root(leaf)[-1].key}" for leaf in leaves})
+
+
 def _validate_parent_chain(leaf: _NodeRef) -> None:
     actual = _node_lineage_leaf_to_root(leaf)
     actual_types = [n.type for n in actual]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 from pathlib import Path
 from textwrap import indent
 from typing import Any, Literal, NamedTuple
@@ -19,14 +20,17 @@ from lab_wizard.lib.custom_measurements import CustomMeasurement
 from lab_wizard.lib.procedures.codegen import measurement_module_source
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.project_module import module_path
+from lab_wizard.lib.data.schema import open_database
+from lab_wizard.lib.data.setups import resolve_needs, setup_for_run
 from lab_wizard.lib.task_adapters.run import database_path
-from lab_wizard.lib.utilities.model_tree import OutputsConfig, RoleBinding
+from lab_wizard.lib.utilities.model_tree import OutputsConfig, RoleBinding, SetupBinding
 from lab_wizard.wizard.backend._generation_common import (
     BaseSelection,
     _create_unique_project_dir,
     SelectedNodeRef,  # noqa: F401 - re-exported: selections name tree nodes by it
     _NodeRef,
     _resolve_selection_node,
+    _root_paths,
     _sanitize_identifier,
     _walk_tree,
 )
@@ -82,6 +86,11 @@ class GenerateProjectRequest(BaseModel):
     # What a run produces besides its database record, written to the project
     # YAML's outputs: block as given.
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
+    # The setup the measurement runs on, and which of its fields fills each of
+    # the procedure's needs. Each binding given must read as a number in its
+    # need's unit, or no project is written; a need left unbound is bound on
+    # the Run page, and a run does not start until it is.
+    setup: SetupBinding = Field(default_factory=SetupBinding)
 
 
 def _format_measurement_slug(measurement_name: str) -> str:
@@ -308,12 +317,16 @@ def _default_project_yaml(
     kind: str = "procedure",
     params_model: type[BaseModel] | None = None,
     procedure: dict[str, Any] | None = None,
+    setup: SetupBinding | None = None,
 ) -> dict[str, Any]:
     payload = {
         "project": _project_info(measurement_name, kind),
-        # Who and what the run is about, recorded with every run. ``device`` names
-        # the device under test in the lab database; it is filled in before a run.
-        "run": {"device": None, "operator": None, "notes": None, "metadata": {}},
+        # Who ran it, and why; recorded with every run.
+        "run": {"operator": None, "notes": None},
+        # The setup it runs on, by name on the Setups page, and which of the
+        # setup's fields fills each of the procedure's needs. The setup's
+        # fields and mounted device are copied into each run when it starts.
+        "setup": (setup or SetupBinding()).model_dump(mode="json"),
         "measurement": {
             # Written with each param's unit and description as a comment, as
             # instrument configs are, when the params model is known.
@@ -332,7 +345,7 @@ def _default_project_yaml(
         return payload
     # The procedure, in the file that holds its params' values: edit it here, and
     # <name>_measurement.py is built again from it before the next run.
-    ordered = {key: payload[key] for key in ("project", "run", "roles")}
+    ordered = {key: payload[key] for key in ("project", "run", "setup", "roles")}
     return {**ordered, "procedure": procedure, **{k: v for k, v in payload.items() if k not in ordered}}
 
 
@@ -365,6 +378,27 @@ def _params_for(
         return None
 
     return load_preset(config_dir, measurement, preset, model)
+
+
+def _check_setup(
+    project_dir: Path, setup: SetupBinding, measurement: ProcedureDefinition | CustomMeasurement
+) -> None:
+    """Refuse a setup that does not exist, or a bound need its field cannot fill."""
+    if not setup.name:
+        return
+    declared = measurement.needs if isinstance(measurement, ProcedureDefinition) else {}
+    unknown = sorted(set(setup.needs) - set(declared))
+    if unknown:
+        raise ValueError(f"{measurement.name} has no need named {', '.join(unknown)}")
+    connection = open_database(database_path(project_dir))
+    try:
+        fields, _device = setup_for_run(connection, setup.name)
+    finally:
+        connection.close()
+    bound = {name: decl.model_dump() for name, decl in declared.items() if name in setup.needs}
+    _values, problems = resolve_needs(fields, setup.needs, bound)
+    if problems:
+        raise ValueError("; ".join(problems[name] for name in sorted(problems)))
 
 
 def generate_project(
@@ -406,6 +440,13 @@ def generate_project(
     prefix = req.project_prefix or _format_measurement_slug(req.measurement_name)
     project_dir = _create_unique_project_dir(projects_dir, prefix)
     logger.info("Created project directory %s", project_dir)
+    try:
+        # Checked against the database the project's runs record into, which
+        # outside a workspace is the project's own.
+        _check_setup(project_dir, req.setup, measurement)
+    except Exception:
+        shutil.rmtree(project_dir, ignore_errors=True)
+        raise
 
     # A procedure's definition, as the project's YAML carries it; the module is
     # built from exactly this, so its recorded hash matches from the start.
@@ -428,6 +469,7 @@ def generate_project(
             kind=req.kind,
             params_model=params_model,
             procedure=procedure,
+            setup=req.setup,
         )
         custom = isinstance(measurement, CustomMeasurement)
         setup_code = production_setup_source(
@@ -458,6 +500,7 @@ def generate_project(
             params=params,
             outputs=req.outputs,
             database=database_path(project_dir),
+            setup=req.setup,
         )
 
     yaml_path = project_dir / f"{project_dir.name}.yaml"
@@ -487,4 +530,5 @@ def generate_project(
         "yaml_file": str(yaml_path),
         "setup_file": str(setup_path),
         "measurement_file": str(measurement_path),
+        "local_roots": _root_paths(list(resolved.local_nodes.values())),
     }

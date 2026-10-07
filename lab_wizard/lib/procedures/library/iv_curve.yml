@@ -2,8 +2,11 @@
 #
 # Ported from the hand-written lib/measurements/iv_curve. The sense lead sits
 # across the device, so the current through it is inferred from the bias
-# resistor: (bias - sensed voltage) / resistance. That is a derived column,
-# computed when the data is read, so a corrected resistance fixes every run.
+# resistor: (bias - sensed voltage) / resistance. The resistor is a fact about
+# the setup, not something the procedure does, so it is a need: a measurement
+# binds it to its setup's field, and each run reads the value its own copy of
+# the setup recorded. The current is a derived column, computed when the data
+# is read, so a corrected resistance rescales every run it applies to.
 schema_version: 1
 name: iv_curve
 description: Voltage across the detector against its bias, with the current through it inferred.
@@ -27,12 +30,6 @@ params:
       default: 0.05
       unit: s
       description: wait after setting each bias before reading
-  readout:
-    bias_resistance_ohm:
-      type: float
-      default: 100000.0
-      unit: ohm
-      description: the bias resistor the current is inferred through
   safety:
     turn_on_at_start:
       type: bool
@@ -64,8 +61,12 @@ body:
           voltage: {swept: bias_voltage}
         - {type: wait, seconds: {param: bias.settle_s}}
         - {type: read_voltage, sense: {role: voltage_sense}, field: sense_voltage}
+needs:
+  bias_resistance:
+    unit: ohm
+    description: the bias resistor the current is inferred through
 derived:
-  current: (bias_voltage - sense_voltage) / param("readout.bias_resistance_ohm")
+  current: (bias_voltage - sense_voltage) / setup("bias_resistance")
 plots:
   - name: IV
     x: sense_voltage

@@ -88,15 +88,15 @@ The fastest way to see the whole loop is to run it against the
 generated code, a simulated detector at the end of the wire. Nothing needs to be
 plugged in.
 
-1. In a second terminal, start the bench and leave it running:
+1. Start the bench. It runs in the background until `wizard sim stop`:
 
     ```bash
-    uv run lab-sim
+    uv run wizard sim
     ```
 
     It prints the address of each simulated instrument.
 2. **Instruments** → add a `prologix_gpib` controller whose port is the path
-   `lab-sim` printed, a `sim900` mainframe under it at GPIB address 5, and a
+   `wizard sim` printed, a `sim900` mainframe under it at GPIB address 5, and a
    `sim928` source in slot 1 and a `sim970` voltmeter in slot 2. See
    [Instruments](wizard/instruments.md).
 3. **Measurements → Create** → pick `iv_curve`, bind each role to one of those

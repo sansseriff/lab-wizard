@@ -3,7 +3,7 @@
 This is the full loop the wizard exists to produce, with no hardware and no
 mocks in it: a config tree is written, the wizard generates a project folder
 from it, the generated ``iv_curve_setup.py`` is executed as written, and the
-measurement runs through the real drivers onto lab_sim's simulated rack. What
+measurement runs through the real drivers onto lab_wizard.sim's simulated rack. What
 comes back is checked against the detector model's own physics.
 
 Two ways of running the generated file are covered, because they fail
@@ -19,6 +19,7 @@ import ast
 import importlib.util
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,9 +30,10 @@ import polars as pl
 
 from lab_procedure import Status
 
-from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.sim import SnspdModel, SnspdParams
 from lab_wizard.lib.project import Project
-from lab_wizard.lib.data import find
+from lab_wizard.lib.data import find, open_database
+from lab_wizard.lib.data.setups import save_setup
 from lab_wizard.lib.utilities.config_io import load_instruments
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
@@ -59,8 +61,19 @@ def _generate_project(tmp_path: Path, rig) -> dict[str, Any]:
             project_prefix="iv_sim",
         ),
     )
+    _put_on_a_bench(Path(out["project_dir"]))
     _set_measurement_params(Path(out["yaml_file"]))
     return out
+
+
+def _put_on_a_bench(project_dir: Path) -> None:
+    """The bench's 100 kΩ bias resistor, which the IV procedure's current is inferred through.
+
+    Outside a workspace a project records into its own database, so the setup
+    is made there; the project is then bound to it, as the Run page binds it.
+    """
+    with closing(open_database(project_dir / "data" / "lab.db")) as db:
+        save_setup(db, "bench", {"bias_resistor": {"value": 100, "unit": "kΩ"}})
 
 
 def _set_measurement_params(yaml_path: Path) -> None:
@@ -74,6 +87,7 @@ def _set_measurement_params(yaml_path: Path) -> None:
     with yaml_path.open("r", encoding="utf-8") as handle:
         payload = io.load(handle)
 
+    payload["setup"] = {"name": "bench", "needs": {"bias_resistance": "bias_resistor"}}
     params = payload["measurement"]["params"]
     params["bias"]["sweep"] = {"mode": "explicit", "values_V": list(SWEEP_V)}
     params["bias"]["settle_s"] = 0.0
@@ -149,7 +163,8 @@ def test_generated_setup_wires_the_simulated_rack(tmp_path: Path, rig) -> None:
     # project's YAML says which instrument fills each role, by name.
     assert payload["roles"] == {"voltage_source": source_name, "voltage_sense": meter_name}
     assert source_name not in setup_text
-    assert payload["measurement"]["params"]["readout"]["bias_resistance_ohm"] == 100_000.0
+    # The bias resistor is the setup's, bound by the project to the procedure's need.
+    assert payload["setup"] == {"name": "bench", "needs": {"bias_resistance": "bias_resistor"}}
 
 
 def test_generated_project_measures_the_simulated_iv_curve(tmp_path: Path, rig) -> None:

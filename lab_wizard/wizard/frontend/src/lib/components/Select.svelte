@@ -5,7 +5,8 @@
   height as `.lw-btn` and `.lw-input` beside it.
 -->
 <script lang="ts" module>
-	export type SelectOption = { value: string; label: string; disabled?: boolean };
+	/** `hint` is quieter text beside the label (a Combobox shows it, e.g. a field's value). */
+	export type SelectOption = { value: string; label: string; disabled?: boolean; hint?: string };
 </script>
 
 <script lang="ts">

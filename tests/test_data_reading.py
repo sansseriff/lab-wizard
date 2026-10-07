@@ -72,17 +72,26 @@ def _pcr(triggers: list[int]) -> Step:
     )
 
 
+PCR_DEFINITION = {"name": "pcr_curve", "needs": {"bias_resistance": {"unit": "MΩ"}}}
+
+
 @pytest.fixture
 def db(tmp_path: Path) -> Path:
     path = tmp_path / "lab.db"
+    # The two PCR runs had the same 100 kΩ bias resistor, written down two ways,
+    # bound through different paths.
     _record(path, _pcr([-50, -40]), RunStarted(
         procedure="pcr_curve", device="A7", operator="andrew",
-        params={"readout": {"gate_time_s": 1.0}}, metadata={"cryostat": "BlueFors1"},
+        params={"readout": {"gate_time_s": 1.0}},
+        setup="bench-1", setup_fields={"cryostat": "BlueFors1", "bias_resistor": {"value": 100, "unit": "kΩ"}},
+        setup_needs={"bias_resistance": "bias_resistor"}, definition=PCR_DEFINITION,
         columns={"trigger_mV": {"unit": "mV"}, "bias_voltage": {"unit": "V"}, "count_rate": {"unit": "Hz"}},
     ))
     _record(path, _pcr([-30, -20]), RunStarted(
         procedure="pcr_curve", device="B2", operator="sam",
-        params={"readout": {"gate_time_s": 0.5}}, metadata={"cryostat": "BlueFors2"},
+        params={"readout": {"gate_time_s": 0.5}},
+        setup="bench-2", setup_fields={"cryostat": "BlueFors2", "line": {"r_bias": {"value": 100000, "unit": "ohm"}}},
+        setup_needs={"bias_resistance": "line.r_bias"}, definition=PCR_DEFINITION,
     ))
     _record(path, Sequence(
         WithParameter("phase", "background", Measure(counts=10.0)),
@@ -110,7 +119,26 @@ def test_find_filters_by_any_facet_and_lists_newest_first(db: Path):
         assert lab.find(device=["A7", "B2"], procedure="pcr_curve").ids == [2, 1]
         assert lab.find({"param.readout.gate_time_s": 1.0}).ids == [3, 1]  # a float matches its stored text
         assert lab.find({"param.readout.gate_time_s": {"range": [0.1, 0.7]}}).ids == [2]
-        assert lab.find({"run.cryostat": "nowhere"}).ids == []
+        assert lab.find({"setup.cryostat": "nowhere"}).ids == []
+        assert lab.find({"setup.cryostat": "BlueFors2"}, setup="bench-2").ids == [2]
+
+
+def test_a_setup_quantity_is_one_value_however_it_was_written(db: Path):
+    with Lab(db) as lab:
+        everything = {(r["key"], r["value"]): r["runs"] for r in lab.facets().iter_rows(named=True)}
+        assert everything[("setup.bias_resistor", "100000.0")] == 1
+        assert everything[("setup.line.r_bias", "100000.0")] == 1
+        assert lab.find({"setup.bias_resistor": {"range": [9e4, 2e5]}}).ids == [1]
+
+
+def test_setup_reads_each_runs_own_need_in_the_unit_declared(db: Path):
+    with Lab(db) as lab:
+        runs = lab.find(procedure="pcr_curve")
+        assert runs.setup_values() == {1: {"bias_resistance": 0.1}, 2: {"bias_resistance": 0.1}}
+        frame = runs.points({"current_uA": 'bias_voltage / setup("bias_resistance")'})
+        assert frame.filter(pl.col("bias_voltage") == 0.03)["current_uA"].to_list() == pytest.approx([0.3] * 4)
+        # A run of a procedure with no needs reads null, not an error.
+        assert lab.find(procedure="mcr_curve").setup_values() == {3: {}}
 
 
 def test_a_date_range_is_compared_as_iso_dates(db: Path):

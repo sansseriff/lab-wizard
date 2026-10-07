@@ -6,11 +6,16 @@
 	import type { TreeItem, TreePathRef } from '$lib/components/TreeNode.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
 	import Callout from '$lib/components/Callout.svelte';
+	import HeldHardwareWarning, { type HoldingServer } from '$lib/components/HeldHardwareWarning.svelte';
 	import Pill from '$lib/components/Pill.svelte';
 	import Select from '$lib/components/Select.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { api, errorMessage, unwrap, type Schemas } from '$lib/api';
 	import { nodeAddress } from '$lib/instruments/model';
+	import Combobox from '$lib/components/Combobox.svelte';
+	import NeedBindings from '$lib/setups/NeedBindings.svelte';
+	import { setupsApi, type Setup } from '$lib/setups/api';
+	import { bindProblem, leaves, sameNameBindings, withField, type Bindings, type NeedDecl } from '$lib/setups/model';
 
 	type MatchingReq = {
 		module: string;
@@ -95,6 +100,42 @@
 	// A named preset from config/measurements/<name>/, or '' for the defaults.
 	let paramsPreset = $state('');
 	const reqs: ResourceReq[] = $derived((data?.requirements ?? []) as ResourceReq[]);
+
+	// ---- the setup it runs on, and which of its fields fills each need ----
+	const needs: Record<string, NeedDecl> = $derived(data?.needs ?? {});
+	let setups = $state<Setup[]>(untrack(() => (data?.setups ?? []) as Setup[]));
+	// One setup is the obvious choice; with several, the person picks.
+	let setupName = $state<string | null>(untrack(() => (setups.length === 1 ? setups[0].name : null)));
+	let bindings = $state<Bindings>(
+		untrack(() => (setupName ? sameNameBindings(data?.needs ?? {}, setups[0].fields) : {}))
+	);
+	const chosenSetup = $derived(setups.find((s) => s.name === setupName) ?? null);
+
+	function chooseSetup(name: string | null) {
+		setupName = name;
+		const setup = setups.find((s) => s.name === name);
+		bindings = setup ? sameNameBindings(needs, setup.fields) : {};
+	}
+
+	/** Add a field to the chosen setup, saved at once: a project is checked against it when created. */
+	async function setSetupField(path: string, value: unknown) {
+		const setup = chosenSetup;
+		if (!setup) return;
+		const saved = await setupsApi.save(setup.name, {
+			fields: withField(setup.fields, path, value),
+			device: setup.device,
+			notes: setup.notes
+		});
+		setups = setups.map((s) => (s.name === saved.name ? saved : s));
+	}
+
+	const needsDone = $derived.by(() => {
+		const names = Object.keys(needs);
+		if (!names.length) return true;
+		if (!chosenSetup) return false;
+		const byPath = new Map(leaves(chosenSetup.fields).map((l) => [l.path, l]));
+		return names.every((n) => bindings[n] && !bindProblem(byPath.get(bindings[n]), needs[n]));
+	});
 	const sources: Source[] = $derived((data?.sources ?? []) as Source[]);
 	const ownServer: { name: string; url: string } | null = $derived(data?.ownServer ?? null);
 
@@ -255,9 +296,14 @@
 	let rerouteError: string | null = $state(null);
 	let creatingProject = $state(false);
 	let createError: string | null = $state(null);
-	let createResult:
-		| null
-		| { project_name: string; project_dir: string; yaml_file: string; setup_file: string } = $state(null);
+	type CreateResult = {
+		project_name: string;
+		project_dir: string;
+		yaml_file: string;
+		setup_file: string;
+		held_by_servers: HoldingServer[];
+	};
+	let createResult: CreateResult | null = $state(null);
 
 	function shortBaseName(bt: string): string {
 		const m = bt?.match(/<class '([^']+)'>/);
@@ -321,7 +367,7 @@
 	function allDone(): boolean {
 		if (reqs.length === 0) return false;
 		for (const r of reqs) if (!isInstrumentReqComplete(r)) return false;
-		return true;
+		return needsDone;
 	}
 	function nextIncompleteAfter(variableName: string): string | null {
 		const idx = instrumentReqs.findIndex((r) => r.variable_name === variableName);
@@ -486,16 +532,18 @@
 				generation_style: generationStyle,
 				outputs: { files: saveFiles, live_plot: livePlot, plot: '' },
 				params_preset: paramsPreset || null,
-				project_prefix: projectPrefix.trim() || null
+				project_prefix: projectPrefix.trim() || null,
+				setup: { name: setupName, needs: setupName ? bindings : {} }
 			};
-			const res = await unwrap<{ project_name: string; project_dir: string; yaml_file: string; setup_file: string }>(
+			const res = await unwrap<CreateResult>(
 				api.POST('/api/create-measurement-project', { body })
 			);
 			createResult = {
 				project_name: res.project_name,
 				project_dir: res.project_dir,
 				yaml_file: res.yaml_file,
-				setup_file: res.setup_file
+				setup_file: res.setup_file,
+				held_by_servers: res.held_by_servers ?? []
 			};
 		} catch (err) {
 			createError = errorMessage(err) || 'Failed to create project';
@@ -513,7 +561,8 @@
 				<a class="lw-btn lw-btn-sm" href="/measurements/new">Choose another</a>
 			{/if}
 		{/snippet}
-		Bind each role this measurement declares to something real, then generate a runnable project.
+		Bind each role this measurement declares to an instrument, and each fact it reads from its setup to
+		one of the setup's fields, then generate a runnable project.
 	</PageHeader>
 
 	{#if !measurementName}
@@ -847,6 +896,48 @@
 			{/if}
 
 			<section class="space-y-2">
+				<h2 class="text-title font-medium">Setup</h2>
+				<div class="space-y-3 rounded border border-line bg-surface p-3.5">
+					<div>
+						<label class="lw-label" for="project-setup">The setup it runs on</label>
+						<Combobox
+							id="project-setup"
+							mono
+							value={setupName}
+							options={setups.map((s) => ({ value: s.name, label: s.name, hint: s.device ?? undefined }))}
+							onValueChange={chooseSetup}
+							noneLabel="No setup"
+						>
+							{#snippet empty(search)}
+								No setup named “{search}”. Create it on the
+								<a class="underline" href="/setups" target="_blank">Setups page</a>.
+							{/snippet}
+						</Combobox>
+						<p class="mt-1 text-fine text-muted">
+							Every run copies the setup's fields and records its mounted device{chosenSetup?.device
+								? ` (${chosenSetup.device})`
+								: ''}. It can be changed later, on the Run page.
+							{#if !setups.length}<a class="text-accent hover:underline" href="/setups" target="_blank">Create a setup →</a>{/if}
+						</p>
+					</div>
+					{#if Object.keys(needs).length}
+						<div>
+							<div class="mb-1 text-xs text-ink-2">
+								What {measurementName} reads from the setup to draw its plots
+							</div>
+							<NeedBindings
+								{needs}
+								fields={chosenSetup?.fields ?? null}
+								{bindings}
+								onchange={(b) => (bindings = b)}
+								onsetfield={setSetupField}
+							/>
+						</div>
+					{/if}
+				</div>
+			</section>
+
+			<section class="space-y-2">
 				<h2 class="text-title font-medium">Project</h2>
 				<div class="rounded border border-line bg-surface p-3.5">
 					<label class="lw-label" for="project-prefix">Project prefix — optional</label>
@@ -968,6 +1059,7 @@
 						>Set it up and run it →</a
 					>
 				</div>
+				<HeldHardwareWarning servers={createResult.held_by_servers} />
 			{/if}
 
 			{#if createError}

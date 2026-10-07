@@ -15,7 +15,7 @@ export type Facet = {
 	values: FacetValue[];
 	numeric: boolean;
 	range?: [number, number];
-	/** A metadata quantity's unit ({value, unit} in the run: block). */
+	/** A setup quantity's unit, the base unit its values are compared in (kΩ is filtered as Ω). */
 	unit?: string | null;
 };
 
@@ -33,13 +33,24 @@ export type RunRow = {
 	operator: string | null;
 	notes: string | null;
 	project: string | null;
+	setup: string | null;
 	points: number;
 };
 
 export type PlotSpec = PlotDecl & { runs: number[] };
 
 export type RunDetail = {
-	run: RunRow & { metadata: Record<string, unknown> };
+	run: RunRow;
+	/** The setup the run was taken on, as the run copied it when it started. */
+	setup: {
+		name: string | null;
+		fields: Record<string, unknown>;
+		/** Which field filled each of its procedure's needs. */
+		needs: Record<string, string>;
+		/** What each need read as, in its declared unit. */
+		values: Record<string, number>;
+		declared: Record<string, { unit?: string | null; description?: string }>;
+	};
 	params: Record<string, unknown>;
 	instruments: Record<string, { class?: string; type?: string; attribute_name?: string; params?: unknown }>;
 	columns: Record<string, { unit?: string | null; bins?: unknown }>;
@@ -181,7 +192,7 @@ export function duration(from: string, to: string | null, now: number = Date.now
 }
 
 /** Nested params as ``path: value`` rows, the way filters name them. */
-/** A value with a unit, as run metadata writes one: ``{value: 0.8, unit: K}``. */
+/** A value with a unit, as a setup field writes one: ``{value: 0.8, unit: K}``. */
 export function isQuantity(value: unknown): value is { value: unknown; unit: string } {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
 	const keys = Object.keys(value).sort();

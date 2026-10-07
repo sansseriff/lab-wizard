@@ -23,8 +23,13 @@ class RunStarted:
     notes: str | None = None
     # The project the run belongs to, by directory name.
     project: str | None = None
-    # Free-form facts about the run: {"cryostat": "BlueFors1"}.
-    metadata: dict[str, Any] = field(default_factory=dict)
+    # The setup the run was taken on, by name, and a copy of its fields as they
+    # were when it started: {"bias_resistor": {"value": 100, "unit": "kΩ"}}.
+    setup: str | None = None
+    setup_fields: dict[str, Any] = field(default_factory=dict)
+    # Which setup field fills each of the procedure's needs:
+    # {"bias_resistance": "channel2.bias_resistor"}.
+    setup_needs: dict[str, str] = field(default_factory=dict)
     # The procedure definition that built the step tree, as data.
     definition: dict[str, Any] | None = None
     # The measurement's own params: the sweep, the gate time.

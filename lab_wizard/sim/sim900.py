@@ -2,7 +2,7 @@
 
 The lab's drivers reach a real rack through a Prologix GPIB-USB controller,
 which the computer sees as a serial port. The simulator offers a serial port
-too (a pseudo-terminal, see :mod:`lab_sim.transports`), so the whole production
+too (a pseudo-terminal, see :mod:`lab_wizard.sim.transports`), so the whole production
 stack sits above it::
 
     Sim928 / Sim970          real driver, real commands
@@ -35,9 +35,9 @@ import re
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from lab_sim.snspd import SnspdModel
+from lab_wizard.sim.snspd import SnspdModel
 
-logger = logging.getLogger("lab_sim.sim900")
+logger = logging.getLogger("lab_wizard.sim.sim900")
 
 # ``CONN <slot>, "<escape>"`` — how a SIM900 is told to route the GPIB
 # connection into one module until the escape string comes back.

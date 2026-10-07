@@ -19,6 +19,7 @@ import pytest
 from lab_procedure import ProcedureRunner, RunStarted, Sequence, Status, Step, Sweep, Wait, WithParameter
 from lab_wizard.lib.data import DatabaseRecorder, DatabaseVersionError, open_database
 from lab_wizard.lib.data.facets import run_facets, write_run_facets
+from lab_wizard.lib.data.setups import SetupError, save_setup
 from lab_wizard.lib.task_adapters.run import database_path, run_procedure
 from lab_wizard.lib.workspace import WORKSPACE_ENV, clean_workspace, initialize_workspace
 
@@ -80,21 +81,10 @@ def _values(db: sqlite3.Connection) -> list[dict[str, Any]]:
 def test_a_new_database_is_stamped_with_its_schema_version(tmp_path: Path):
     open_database(tmp_path / "lab.db").close()
     db = _connect(tmp_path / "lab.db")
-    assert db.execute("select value from meta where key = 'schema_version'").fetchone() == ("1",)
+    assert db.execute("select value from meta where key = 'schema_version'").fetchone() == ("2",)
     assert {r[0] for r in db.execute("select name from sqlite_master where type = 'table'")} == {
-        "meta", "devices", "runs", "steps", "points", "run_facets", "plot_views",
+        "meta", "devices", "setups", "runs", "steps", "points", "run_facets", "plot_views",
     }
-
-
-def test_a_database_from_before_plot_views_gains_it_when_opened(tmp_path: Path):
-    open_database(tmp_path / "lab.db").close()
-    db = _connect(tmp_path / "lab.db")
-    db.execute("drop table plot_views")
-    db.commit()
-    db.close()
-    open_database(tmp_path / "lab.db").close()
-    db = _connect(tmp_path / "lab.db")
-    assert db.execute("select name from sqlite_master where name = 'plot_views'").fetchone() == ("plot_views",)
 
 
 def test_a_database_from_another_schema_version_is_refused_and_left_alone(tmp_path: Path):
@@ -202,7 +192,13 @@ def test_facets_flatten_a_runs_facts_into_filters():
         "operator": "andrew",
         "project": None,
         "started_at": "2026-09-22T14:30:00+00:00",
-        "metadata": {"cryostat": "BlueFors1", "tags": ["a", "b"]},
+        "setup": "cryo-A",
+        "setup_fields": {
+            "cryostat": "BlueFors1",
+            "tags": ["a", "b"],
+            "wiring": {"image": "3f9a.jpg"},
+            "bias_resistor": {"value": 4.7, "unit": "kΩ"},
+        },
         "params": {"readout": {"gate_time_s": 1.0, "enabled": True}},
         "instruments": {"laser": {"class": "Qcl", "type": "daylight_qcl", "params": {"wavelength_um": 4.5}}},
         "columns": {"attenuation_db": {"unit": "dB"}, "counts": {"unit": None}},
@@ -213,8 +209,9 @@ def test_facets_flatten_a_runs_facts_into_filters():
     assert as_dict[("procedure", "mcr_curve")] is None
     assert ("device", "A7") in as_dict and ("device.type", "SNSPD-A") in as_dict
     assert as_dict[("device.width_nm", "80")] == 80.0
-    assert ("run.cryostat", "BlueFors1") in as_dict
-    assert not any(key == "run.tags" for key, _ in as_dict)  # lists are not filters
+    assert ("setup", "cryo-A") in as_dict and ("setup.cryostat", "BlueFors1") in as_dict
+    assert not any(key in ("setup.tags", "setup.wiring") for key, _ in as_dict)  # lists and pictures are not filters
+    assert as_dict[("setup.bias_resistor", "4700.0")] == 4700.0  # a quantity, in its base unit
     assert as_dict[("param.readout.gate_time_s", "1.0")] == 1.0
     assert ("param.readout.enabled", "true") in as_dict
     assert ("instrument.laser.type", "daylight_qcl") in as_dict
@@ -277,23 +274,63 @@ def test_a_run_outside_a_project_records_nothing(tmp_path: Path, monkeypatch):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_project_run_records_its_run_block(tmp_path: Path):
+def _project_on_setup(tmp_path: Path, setup_block: str) -> Path:
     project_dir = tmp_path / "probe_1"
     project_dir.mkdir()
     (project_dir / "probe_1.yaml").write_text(
         "project: {measurement_type: probe}\n"
-        "run: {device: A7, operator: andrew, notes: first cooldown, metadata: {cryostat: BlueFors1}}\n",
+        "run: {operator: andrew, notes: first cooldown}\n"
+        f"setup: {setup_block}\n",
         encoding="utf-8",
     )
+    lab = open_database(project_dir / "data" / "lab.db")
+    lab.execute("insert into devices (name) values ('A7')")
+    lab.commit()
+    save_setup(lab, "cryo-A", {"cryostat": "BlueFors1", "bias_resistor": {"value": 100, "unit": "kΩ"}}, device="A7")
+    lab.close()
+    return project_dir
+
+
+def test_a_project_run_records_its_run_block_and_a_copy_of_its_setup(tmp_path: Path):
+    project_dir = _project_on_setup(tmp_path, "{name: cryo-A}")
     tree = WithParameter("phase", "signal", Record(counts=1))
     assert run_procedure(tree, _Resources(), procedure="probe", project_dir=project_dir) is Status.SUCCESS
 
     db = _connect(project_dir / "data" / "lab.db")
     db.row_factory = sqlite3.Row
-    run = db.execute("select * from runs").fetchone()
+    run = db.execute("select r.*, d.name as device from runs r join devices d on d.id = r.device_id").fetchone()
     assert (run["operator"], run["notes"], run["project"]) == ("andrew", "first cooldown", "probe_1")
-    assert json.loads(run["metadata"]) == {"cryostat": "BlueFors1"}
+    # The device is the one mounted in the setup; the fields are copied as they were.
+    assert (run["device"], run["setup"]) == ("A7", "cryo-A")
+    assert json.loads(run["setup_fields"])["cryostat"] == "BlueFors1"
     assert run["definition"] is None  # a step tree with no definition behind it
+
+    # Changing the setup later changes no run.
+    lab = open_database(project_dir / "data" / "lab.db")
+    save_setup(lab, "cryo-A", {"cryostat": "BlueFors2"}, device="A7")
+    assert json.loads(lab.execute("select setup_fields from runs").fetchone()[0])["cryostat"] == "BlueFors1"
+    lab.close()
+
+
+NEEDS_DEFINITION = {"name": "probe", "needs": {"bias_resistance": {"unit": "ohm"}}}
+
+
+def test_a_run_whose_needs_its_setup_cannot_fill_never_starts(tmp_path: Path):
+    project_dir = _project_on_setup(tmp_path, "{name: cryo-A, needs: {bias_resistance: cryostat}}")
+    with pytest.raises(SetupError, match="cryostat is not a number"):
+        run_procedure(Record(counts=1), _Resources(), procedure="probe", definition=NEEDS_DEFINITION,
+                      project_dir=project_dir)
+    db = _connect(project_dir / "data" / "lab.db")
+    assert db.execute("select count(*) from runs").fetchone()[0] == 0
+
+
+def test_a_run_records_which_field_filled_each_need(tmp_path: Path):
+    project_dir = _project_on_setup(tmp_path, "{name: cryo-A, needs: {bias_resistance: bias_resistor}}")
+    assert run_procedure(Record(counts=1), _Resources(), procedure="probe", definition=NEEDS_DEFINITION,
+                         project_dir=project_dir) is Status.SUCCESS
+    db = _connect(project_dir / "data" / "lab.db")
+    (needs,) = db.execute("select setup_needs from runs").fetchone()
+    assert json.loads(needs) == {"bias_resistance": "bias_resistor"}
 
 
 # --------------------------------------------------------------------------

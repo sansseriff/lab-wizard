@@ -1,8 +1,14 @@
 """The lab database: one SQLite file per workspace.
 
-Six tables. Only what every run or row has is a typed column; everything a
-procedure records lives in one JSON ``values`` object per row, so no procedure
-ever changes the schema. See ``plans/semantic_data_plan.md`` §3.
+Only what every run or row has is a typed column; everything a procedure
+records lives in one JSON ``values`` object per row, so no procedure ever
+changes the schema. See ``plans/semantic_data_plan.md`` §3.
+
+``setups`` holds each setup's current facts and the device mounted in it
+(``plans/setup_plan.md``). A run copies its setup's fields when it starts, into
+``runs.setup_fields``, with the measurement's bindings of its procedure's needs
+to those fields in ``runs.setup_needs``; nothing reads a setup again for a past
+run.
 
 ``plot_views`` is what part of a run's plot someone chose to look at (a
 zoom kept on the Data page), by the plot's name; every view of the run draws
@@ -20,7 +26,7 @@ from pathlib import Path
 __all__ = ["DATABASE_NAME", "SCHEMA_VERSION", "DatabaseVersionError", "open_database"]
 
 DATABASE_NAME = "lab.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _TABLES = """
 CREATE TABLE meta (
@@ -35,6 +41,14 @@ CREATE TABLE devices (
     notes      TEXT
 );
 
+CREATE TABLE setups (
+    id        INTEGER PRIMARY KEY,
+    name      TEXT NOT NULL UNIQUE,
+    notes     TEXT,
+    fields    TEXT NOT NULL DEFAULT '{}',
+    device_id INTEGER REFERENCES devices(id)
+);
+
 CREATE TABLE runs (
     id          INTEGER PRIMARY KEY,
     procedure   TEXT NOT NULL,
@@ -45,7 +59,9 @@ CREATE TABLE runs (
     operator    TEXT,
     notes       TEXT,
     project     TEXT,
-    metadata    TEXT NOT NULL DEFAULT '{}',
+    setup        TEXT,
+    setup_fields TEXT NOT NULL DEFAULT '{}',
+    setup_needs  TEXT NOT NULL DEFAULT '{}',
     definition  TEXT,
     params      TEXT NOT NULL DEFAULT '{}',
     instruments TEXT NOT NULL DEFAULT '{}',
@@ -83,12 +99,8 @@ CREATE TABLE run_facets (
 );
 CREATE INDEX idx_facets_value ON run_facets(key, value);
 CREATE INDEX idx_facets_num ON run_facets(key, num);
-"""
 
-# Added after version 1 without changing what it means: a database from before
-# gains it when opened.
-_PLOT_VIEWS = """
-CREATE TABLE IF NOT EXISTS plot_views (
+CREATE TABLE plot_views (
     run_id  INTEGER NOT NULL REFERENCES runs(id),
     plot    TEXT NOT NULL,
     x_range TEXT,
@@ -123,7 +135,7 @@ def open_database(path: str | Path) -> sqlite3.Connection:
     tables = {row["name"] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     if not tables:
         with connection:
-            connection.executescript(_TABLES + _PLOT_VIEWS)
+            connection.executescript(_TABLES)
             connection.execute("INSERT INTO meta (key, value) VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
         return connection
 
@@ -138,9 +150,4 @@ def open_database(path: str | Path) -> sqlite3.Connection:
             f"{path} has {found}; this lab_wizard writes version {SCHEMA_VERSION}. "
             "It was not changed. Move it aside to start a new database."
         )
-    if "plot_views" not in tables:
-        try:
-            connection.executescript(_PLOT_VIEWS)
-        except sqlite3.OperationalError:
-            pass  # read-only: it reads as having no views
     return connection

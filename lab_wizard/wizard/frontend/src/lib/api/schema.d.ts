@@ -916,6 +916,9 @@ export interface paths {
         /**
          * Api Project Launch
          * @description Run the project's setup file, as its own process.
+         *
+         *     Refused (409) if its setup is missing or cannot fill the procedure's
+         *     needs: the run would refuse to start anyway, after claiming instruments.
          */
         post: operations["api_project_launch_api_projects__name__launch_post"];
         delete?: never;
@@ -938,7 +941,7 @@ export interface paths {
         get: operations["api_project_settings_api_projects__name__settings_get"];
         /**
          * Api Project Settings Save
-         * @description Save ``{"yaml"}``, or any of ``{"run", "params", "outputs"}``; 422 lists every problem.
+         * @description Save ``{"yaml"}``, or any of ``{"run", "setup", "params", "outputs"}``; 422 lists every problem.
          */
         put: operations["api_project_settings_save_api_projects__name__settings_put"];
         post?: never;
@@ -1374,6 +1377,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/setup-images": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Api Setup Image Save
+         * @description Keep a picture sent as the request body; returns what a field refers to it by.
+         */
+        put: operations["api_setup_image_save_api_setup_images_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setup-images/{image}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Setup Image */
+        get: operations["api_setup_image_api_setup_images__image__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Api Setups
+         * @description Every setup, with its current fields and mounted device.
+         */
+        get: operations["api_setups_api_setups_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/setups/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Api Setup */
+        get: operations["api_setup_api_setups__name__get"];
+        /**
+         * Api Setup Save
+         * @description Create a setup, or replace its fields, device and notes. Past runs keep their copies.
+         */
+        put: operations["api_setup_save_api_setups__name__put"];
+        post?: never;
+        /**
+         * Api Setup Delete
+         * @description Forget a setup. Its runs keep their copies; projects naming it cannot run until they name another.
+         */
+        delete: operations["api_setup_delete_api_setups__name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/transport-status": {
         parameters: {
             query?: never;
@@ -1482,7 +1567,7 @@ export interface components {
         "FileSettings-Input": {
             /**
              * Path
-             * @description Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {run.<metadata>} {param.<path>} {run_id}
+             * @description Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {setup} {setup.<field>} {param.<path>} {run_id}
              * @default {date}/{procedure}_{device}_{time}
              */
             path: string;
@@ -1506,7 +1591,7 @@ export interface components {
         "FileSettings-Output": {
             /**
              * Path
-             * @description Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {run.<metadata>} {param.<path>} {run_id}
+             * @description Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {setup} {setup.<field>} {param.<path>} {run_id}
              * @default {date}/{procedure}_{device}_{time}
              */
             path: string;
@@ -1586,11 +1671,17 @@ export interface components {
             project_prefix?: string | null;
             /** Selected Resources */
             selected_resources?: components["schemas"]["SelectedResource"][];
+            setup?: components["schemas"]["SetupBinding-Input"];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** ImageSaved */
+        ImageSaved: {
+            /** Image */
+            image: string;
         };
         /**
          * LaunchStatus
@@ -1616,6 +1707,23 @@ export interface components {
              * @enum {string}
              */
             state: "idle" | "starting" | "running" | "ended";
+        };
+        /**
+         * NeedDecl
+         * @description A fact about the setup a procedure needs: ``bias_resistance: {unit: ohm}``.
+         *
+         *     It is read in ``unit``, from whichever setup field a measurement binds it
+         *     to; a field in kΩ reads as ohms. A need has no default: an unbound need
+         *     stops a run before it starts, rather than scaling its data wrongly.
+         */
+        NeedDecl: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Unit */
+            unit?: string | null;
         };
         /**
          * OutputsConfig
@@ -1675,6 +1783,10 @@ export interface components {
             measurement: string;
             /** Name */
             name: string;
+            /** Needs */
+            needs: {
+                [key: string]: components["schemas"]["NeedDecl"];
+            };
             outputs: components["schemas"]["OutputsConfig-Output"];
             /** Params */
             params: {
@@ -1687,6 +1799,7 @@ export interface components {
             /** Path */
             path: string;
             run: components["schemas"]["RunConfig"];
+            setup: components["schemas"]["SetupBinding-Output"];
             /** Setup File */
             setup_file: string | null;
             /**
@@ -1702,15 +1815,6 @@ export interface components {
          * @description Who and what a run is about. Read at the start of every run and recorded with it.
          */
         RunConfig: {
-            /**
-             * Device
-             * @description The device under test, by its name in the lab database
-             */
-            device: string | null;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
             /** Notes */
             notes: string | null;
             /** Operator */
@@ -1769,8 +1873,82 @@ export interface components {
             run?: {
                 [key: string]: unknown;
             } | null;
+            /** Setup */
+            setup?: {
+                [key: string]: unknown;
+            } | null;
             /** Yaml */
             yaml?: string | null;
+        };
+        /** Setup */
+        Setup: {
+            /** Device */
+            device: string | null;
+            /** Fields */
+            fields: {
+                [key: string]: unknown;
+            };
+            /** Last Run */
+            last_run: string | null;
+            /** Name */
+            name: string;
+            /** Notes */
+            notes: string | null;
+            /** Projects */
+            projects: string[];
+            /** Runs */
+            runs: number;
+        };
+        /**
+         * SetupBinding
+         * @description The setup a measurement runs on, and which of its fields fills each need.
+         *
+         *     The setup is named, not copied: its fields, and the device mounted in it,
+         *     live in the lab database and are copied into each run when it starts. So
+         *     changing the setup never means editing a project, and a run always
+         *     records what the setup said at the time (``plans/setup_plan.md``).
+         */
+        "SetupBinding-Input": {
+            /**
+             * Name
+             * @description The setup, by its name on the Setups page
+             */
+            name?: string | null;
+            /** Needs */
+            needs?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * SetupBinding
+         * @description The setup a measurement runs on, and which of its fields fills each need.
+         *
+         *     The setup is named, not copied: its fields, and the device mounted in it,
+         *     live in the lab database and are copied into each run when it starts. So
+         *     changing the setup never means editing a project, and a run always
+         *     records what the setup said at the time (``plans/setup_plan.md``).
+         */
+        "SetupBinding-Output": {
+            /**
+             * Name
+             * @description The setup, by its name on the Setups page
+             */
+            name: string | null;
+            /** Needs */
+            needs: {
+                [key: string]: string;
+            };
+        };
+        /** SetupBody */
+        SetupBody: {
+            /** Device */
+            device?: string | null;
+            /** Fields */
+            fields?: {
+                [key: string]: unknown;
+            };
+            /** Notes */
+            notes?: string | null;
         };
         /** TemplateCheck */
         TemplateCheck: {
@@ -4287,6 +4465,185 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspacePaths"];
+                };
+            };
+        };
+    };
+    api_setup_image_save_api_setup_images_put: {
+        parameters: {
+            query: {
+                suffix: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImageSaved"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_setup_image_api_setup_images__image__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                image: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_setups_api_setups_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Setup"][];
+                };
+            };
+        };
+    };
+    api_setup_api_setups__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Setup"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_setup_save_api_setups__name__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Setup"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    api_setup_delete_api_setups__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

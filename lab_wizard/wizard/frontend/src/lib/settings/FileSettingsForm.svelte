@@ -154,7 +154,7 @@
 				</div>
 			{:else}
 				<p class="mt-1 text-fine text-muted">
-					Device properties (<code>device.wafer</code>), run metadata (<code>run.cryostat</code>)
+					Device properties (<code>device.wafer</code>), setup fields (<code>setup.cryostat</code>)
 					and params (<code>param.…</code>) appear here once a run records them.
 				</p>
 			{/if}

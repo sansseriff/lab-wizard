@@ -173,16 +173,23 @@ subtracted by its own background.
 A **derived column** is computed whenever a run is read and never stored, so
 fixing an expression fixes every past run. The language is small: column names,
 numbers, `+ - * / **`, `abs sqrt exp log log10`, the per-run reductions
-`mean min max sum count first last` (each optionally with a condition), and
-`param("path")` for a value from the run's own params:
+`mean min max sum count first last` (each optionally with a condition),
+`param("path")` for a value from the run's own params, and `setup("name")` for
+one of the procedure's **needs**: a fact about the bench it reads from its
+setup, in the unit it declares:
 
 ```yaml
+needs:
+  bias_resistance: {unit: ohm, description: the bias resistor the current is inferred through}
 derived:
-  current: (bias_voltage - sense_voltage) / param("readout.bias_resistance_ohm")
+  current: (bias_voltage - sense_voltage) / setup("bias_resistance")
 ```
 
-That is how `iv_curve` gets its current: the resistance each run used is in
-its params, so a run taken with a different resistor is still right.
+That is how `iv_curve` gets its current. The resistor is not something the
+procedure does, so it is not a param: each measurement binds the need to a
+field of its setup (`channel2.bias_resistor`, `100 kΩ`), and each run reads
+the value from its own copy of the setup. A run taken with a different
+resistor is still right, and a need left unbound stops a run before it starts.
 
 ## Writing one
 

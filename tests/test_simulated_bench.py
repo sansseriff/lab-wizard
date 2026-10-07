@@ -1,6 +1,6 @@
-"""The simulated bench (lab_sim): physics, wire protocol, and driver stack.
+"""The simulated bench (lab_wizard.sim): physics, wire protocol, and driver stack.
 
-lab_sim exists to be trusted by other tests, so it is checked from three
+lab_wizard.sim exists to be trusted by other tests, so it is checked from three
 angles:
 
 * the detector model on its own — switching, latching, retrapping;
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.sim import SnspdModel, SnspdParams
 from lab_wizard.lib.instruments.general.discovery import NoParams
 from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIB
 from lab_wizard.lib.instruments.general.vsense import VSense
@@ -383,3 +383,49 @@ def test_config_tree_round_trips_and_still_sweeps(tmp_path: Path, rig) -> None:
     source.turn_on()
     source.set_voltage(1.0)
     assert meter.channels[0].get_voltage() > 0.0
+
+
+def test_nothing_outside_the_simulator_imports_it() -> None:
+    """The drivers never know the instruments are simulated.
+
+    Only the ``wizard sim`` command reaches into lab_wizard.sim; everything a
+    measurement runs on talks to it over a serial port or TCP, as to hardware.
+    """
+    package = Path(__file__).resolve().parents[1] / "lab_wizard"
+    allowed = {package / "sim", package / "wizard" / "cli.py"}
+    importers = [
+        path.relative_to(package)
+        for path in package.rglob("*.py")
+        if not any(path == a or a in path.parents for a in allowed)
+        and ".venv" not in path.parts
+        and "lab_wizard.sim" in path.read_text(encoding="utf-8")
+    ]
+    assert importers == []
+
+
+def test_wizard_sim_runs_the_bench_in_the_background(tmp_path: Path, monkeypatch) -> None:
+    """``wizard sim`` starts a bench that outlives it; ``wizard sim stop`` ends it."""
+    from lab_wizard.sim import background
+
+    # The bench is a separate process, so it learns its home from the environment.
+    monkeypatch.setenv("LAB_WIZARD_SIM_HOME", str(tmp_path))
+    monkeypatch.setattr(background, "HOME", tmp_path)
+    monkeypatch.setattr(background, "STATE", tmp_path / "bench.json")
+    monkeypatch.setattr(background, "LOG", tmp_path / "bench.log")
+    link = tmp_path / "prologix"
+    config = tmp_path / "bench.yaml"
+    config.write_text(f"prologix:\n  link: {link}\ncounter:\n  port: 0\nattenuator:\n  port: 0\n", encoding="utf-8")
+
+    bench = background.start(config)
+    try:
+        assert str(link) in bench.description
+        assert link.is_symlink()
+        assert background.start(config) == bench, "starting again finds the running bench"
+        with pytest.raises(background.SimError, match="already running"):
+            background.start(None)
+    finally:
+        assert background.stop() == bench.pid
+
+    assert background.running() is None
+    assert not link.exists(), "the bench removes its link when it stops"
+    assert background.stop() is None

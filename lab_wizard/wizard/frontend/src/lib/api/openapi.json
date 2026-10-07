@@ -82,7 +82,7 @@
     "properties": {
      "path": {
       "default": "{date}/{procedure}_{device}_{time}",
-      "description": "Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {run.<metadata>} {param.<path>} {run_id}",
+      "description": "Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {setup} {setup.<field>} {param.<path>} {run_id}",
       "title": "Path",
       "type": "string"
      },
@@ -108,7 +108,7 @@
     "properties": {
      "path": {
       "default": "{date}/{procedure}_{device}_{time}",
-      "description": "Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {run.<metadata>} {param.<path>} {run_id}",
+      "description": "Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {setup} {setup.<field>} {param.<path>} {run_id}",
       "title": "Path",
       "type": "string"
      },
@@ -274,6 +274,9 @@
       },
       "title": "Selected Resources",
       "type": "array"
+     },
+     "setup": {
+      "$ref": "#/components/schemas/SetupBinding-Input"
      }
     },
     "required": [
@@ -293,6 +296,19 @@
      }
     },
     "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "ImageSaved": {
+    "properties": {
+     "image": {
+      "title": "Image",
+      "type": "string"
+     }
+    },
+    "required": [
+     "image"
+    ],
+    "title": "ImageSaved",
     "type": "object"
    },
    "LaunchStatus": {
@@ -399,6 +415,30 @@
     "title": "LaunchStatus",
     "type": "object"
    },
+   "NeedDecl": {
+    "additionalProperties": false,
+    "description": "A fact about the setup a procedure needs: ``bias_resistance: {unit: ohm}``.\n\nIt is read in ``unit``, from whichever setup field a measurement binds it\nto; a field in k\u03a9 reads as ohms. A need has no default: an unbound need\nstops a run before it starts, rather than scaling its data wrongly.",
+    "properties": {
+     "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+     },
+     "unit": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Unit"
+     }
+    },
+    "title": "NeedDecl",
+    "type": "object"
+   },
    "OutputsConfig-Input": {
     "description": "What a run produces besides its record in the lab database, which is always written.",
     "properties": {
@@ -477,6 +517,13 @@
       "title": "Name",
       "type": "string"
      },
+     "needs": {
+      "additionalProperties": {
+       "$ref": "#/components/schemas/NeedDecl"
+      },
+      "title": "Needs",
+      "type": "object"
+     },
      "outputs": {
       "$ref": "#/components/schemas/OutputsConfig-Output"
      },
@@ -503,6 +550,9 @@
      },
      "run": {
       "$ref": "#/components/schemas/RunConfig"
+     },
+     "setup": {
+      "$ref": "#/components/schemas/SetupBinding-Output"
      },
      "setup_file": {
       "anyOf": [
@@ -537,6 +587,8 @@
      "setup_file",
      "yaml",
      "run",
+     "setup",
+     "needs",
      "params",
      "outputs",
      "params_schema"
@@ -547,23 +599,6 @@
    "RunConfig": {
     "description": "Who and what a run is about. Read at the start of every run and recorded with it.",
     "properties": {
-     "device": {
-      "anyOf": [
-       {
-        "type": "string"
-       },
-       {
-        "type": "null"
-       }
-      ],
-      "description": "The device under test, by its name in the lab database",
-      "title": "Device"
-     },
-     "metadata": {
-      "additionalProperties": true,
-      "title": "Metadata",
-      "type": "object"
-     },
      "notes": {
       "anyOf": [
        {
@@ -588,10 +623,8 @@
      }
     },
     "required": [
-     "device",
      "operator",
-     "notes",
-     "metadata"
+     "notes"
     ],
     "title": "RunConfig",
     "type": "object"
@@ -718,6 +751,18 @@
       ],
       "title": "Run"
      },
+     "setup": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Setup"
+     },
      "yaml": {
       "anyOf": [
        {
@@ -731,6 +776,163 @@
      }
     },
     "title": "SettingsBody",
+    "type": "object"
+   },
+   "Setup": {
+    "properties": {
+     "device": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Device"
+     },
+     "fields": {
+      "additionalProperties": true,
+      "title": "Fields",
+      "type": "object"
+     },
+     "last_run": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Run"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "notes": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notes"
+     },
+     "projects": {
+      "items": {
+       "type": "string"
+      },
+      "title": "Projects",
+      "type": "array"
+     },
+     "runs": {
+      "title": "Runs",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "name",
+     "notes",
+     "fields",
+     "device",
+     "runs",
+     "last_run",
+     "projects"
+    ],
+    "title": "Setup",
+    "type": "object"
+   },
+   "SetupBinding-Input": {
+    "description": "The setup a measurement runs on, and which of its fields fills each need.\n\nThe setup is named, not copied: its fields, and the device mounted in it,\nlive in the lab database and are copied into each run when it starts. So\nchanging the setup never means editing a project, and a run always\nrecords what the setup said at the time (``plans/setup_plan.md``).",
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "The setup, by its name on the Setups page",
+      "title": "Name"
+     },
+     "needs": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "title": "Needs",
+      "type": "object"
+     }
+    },
+    "title": "SetupBinding",
+    "type": "object"
+   },
+   "SetupBinding-Output": {
+    "description": "The setup a measurement runs on, and which of its fields fills each need.\n\nThe setup is named, not copied: its fields, and the device mounted in it,\nlive in the lab database and are copied into each run when it starts. So\nchanging the setup never means editing a project, and a run always\nrecords what the setup said at the time (``plans/setup_plan.md``).",
+    "properties": {
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "The setup, by its name on the Setups page",
+      "title": "Name"
+     },
+     "needs": {
+      "additionalProperties": {
+       "type": "string"
+      },
+      "title": "Needs",
+      "type": "object"
+     }
+    },
+    "required": [
+     "name",
+     "needs"
+    ],
+    "title": "SetupBinding",
+    "type": "object"
+   },
+   "SetupBody": {
+    "properties": {
+     "device": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Device"
+     },
+     "fields": {
+      "additionalProperties": true,
+      "title": "Fields",
+      "type": "object"
+     },
+     "notes": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Notes"
+     }
+    },
+    "title": "SetupBody",
     "type": "object"
    },
    "TemplateCheck": {
@@ -3270,7 +3472,7 @@
     "summary": "Api Project Launch Status"
    },
    "post": {
-    "description": "Run the project's setup file, as its own process.",
+    "description": "Run the project's setup file, as its own process.\n\nRefused (409) if its setup is missing or cannot fill the procedure's\nneeds: the run would refuse to start anyway, after claiming instruments.",
     "operationId": "api_project_launch_api_projects__name__launch_post",
     "parameters": [
      {
@@ -3348,7 +3550,7 @@
     "summary": "Api Project Settings"
    },
    "put": {
-    "description": "Save ``{\"yaml\"}``, or any of ``{\"run\", \"params\", \"outputs\"}``; 422 lists every problem.",
+    "description": "Save ``{\"yaml\"}``, or any of ``{\"run\", \"setup\", \"params\", \"outputs\"}``; 422 lists every problem.",
     "operationId": "api_project_settings_save_api_projects__name__settings_put",
     "parameters": [
      {
@@ -4079,6 +4281,229 @@
      }
     },
     "summary": "Api Settings Workspace"
+   }
+  },
+  "/api/setup-images": {
+   "put": {
+    "description": "Keep a picture sent as the request body; returns what a field refers to it by.",
+    "operationId": "api_setup_image_save_api_setup_images_put",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "suffix",
+      "required": true,
+      "schema": {
+       "title": "Suffix",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ImageSaved"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Setup Image Save"
+   }
+  },
+  "/api/setup-images/{image}": {
+   "get": {
+    "operationId": "api_setup_image_api_setup_images__image__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "image",
+      "required": true,
+      "schema": {
+       "title": "Image",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Setup Image"
+   }
+  },
+  "/api/setups": {
+   "get": {
+    "description": "Every setup, with its current fields and mounted device.",
+    "operationId": "api_setups_api_setups_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/Setup"
+         },
+         "title": "Response Api Setups Api Setups Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Api Setups"
+   }
+  },
+  "/api/setups/{name}": {
+   "delete": {
+    "description": "Forget a setup. Its runs keep their copies; projects naming it cannot run until they name another.",
+    "operationId": "api_setup_delete_api_setups__name__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Setup Delete"
+   },
+   "get": {
+    "operationId": "api_setup_api_setups__name__get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Setup"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Setup"
+   },
+   "put": {
+    "description": "Create a setup, or replace its fields, device and notes. Past runs keep their copies.",
+    "operationId": "api_setup_save_api_setups__name__put",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "name",
+      "required": true,
+      "schema": {
+       "title": "Name",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SetupBody"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Setup"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Api Setup Save"
    }
   },
   "/api/transport-status": {

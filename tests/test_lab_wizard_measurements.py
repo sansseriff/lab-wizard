@@ -11,6 +11,7 @@ from __future__ import annotations
 import sys
 import time
 import types
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,8 @@ import pytest
 from lab_procedure import ProcedureRunner, Status
 
 from lab_wizard.lib.project_module import module_path
-from lab_wizard.lib.data import find
+from lab_wizard.lib.data import find, open_database
+from lab_wizard.lib.data.setups import save_setup
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.instruments.general.vsense import StandInVSense
 from lab_wizard.lib.instruments.general.vsource import StandInVSource
@@ -34,7 +36,7 @@ class StubCounter(Counter):
 
     A stub, not a simulation: it exists to check what the procedure does with a
     count. The simulated counter that produces counts from detector physics is
-    the ``keysight53220A`` driver against ``lab_sim``'s simulated bench.
+    the ``keysight53220A`` driver against ``lab_wizard.sim``'s simulated bench.
     """
 
     def __init__(self, counts: int) -> None:
@@ -97,7 +99,6 @@ def _iv_resources(points: list[float], *, settle_s: float = 0.0) -> Resources:
         voltage_sense=sense,
         params=_params("iv_curve", {
             "bias": {"sweep": {"mode": "explicit", "values": points}, "settle_s": settle_s},
-            "readout": {"bias_resistance_ohm": 100_000.0},
         }),
     )
 
@@ -106,6 +107,15 @@ def test_iv_curve_records_one_row_per_point_and_shuts_down(tmp_path: Path) -> No
     points = [0.0, 0.1, 0.2]
     resources = _iv_resources(points)
     module = _module("iv_curve", tmp_path)
+    # The bias resistor is the setup's: a 100 kΩ resistor, bound to the
+    # procedure's need in the project's setup: block.
+    (tmp_path / f"{tmp_path.name}.yaml").write_text(
+        "project: {measurement_type: iv_curve}\n"
+        "setup: {name: bench, needs: {bias_resistance: bias_resistor}}\n",
+        encoding="utf-8",
+    )
+    with closing(open_database(tmp_path / "data" / "lab.db")) as db:
+        save_setup(db, "bench", {"bias_resistor": {"value": 100, "unit": "kΩ"}})
 
     status = _run(module, "iv_curve", resources, tmp_path)
 
@@ -115,7 +125,7 @@ def test_iv_curve_records_one_row_per_point_and_shuts_down(tmp_path: Path) -> No
     rows = runs.points(runs.derived())
     assert list(zip(rows["bias_voltage"], rows["sense_voltage"])) == [(bias, 0.05) for bias in points]
 
-    # The current is derived when the run is read, from its own bias resistance.
+    # The current is derived when the run is read, from its own copy of the setup.
     assert rows["current"].to_list() == pytest.approx([(bias - 0.05) / 100_000.0 for bias in points])
 
     # Source returned to zero and turned off in cleanup.

@@ -39,9 +39,9 @@ import logging
 import re
 from typing import Optional
 
-from lab_sim.snspd import SnspdModel
+from lab_wizard.sim.snspd import SnspdModel
 
-logger = logging.getLogger("lab_sim.keysight53220a")
+logger = logging.getLogger("lab_wizard.sim.keysight53220a")
 
 # ``CONF:TOT:TIM <gate>,(@2)`` / ``CONF:TOT:CONT (@1)`` / ``CONF:FREQ (@1)``
 _CHANNEL_RE = re.compile(r"\(@(\d)\)")

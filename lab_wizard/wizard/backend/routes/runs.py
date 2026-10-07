@@ -9,9 +9,12 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from lab_wizard.lib.utilities.model_tree import OutputsConfig, RunConfig
+from lab_wizard.lib.data.schema import open_database
+from lab_wizard.lib.data.setups import SetupError, list_setups
+from lab_wizard.lib.procedures.definition import NeedDecl
+from lab_wizard.lib.utilities.model_tree import OutputsConfig, RunConfig, SetupBinding
 
-from lab_wizard.wizard.backend import data_api, launcher, project_config
+from lab_wizard.wizard.backend import launcher, project_config
 from lab_wizard.wizard.backend.deps import (
     get_env,
     workspace_config_dir,
@@ -44,6 +47,9 @@ class ProjectSettings(ResponseModel):
     setup_file: str | None
     yaml: str
     run: RunConfig
+    setup: SetupBinding
+    # The procedure's needs, for the setup's fields to be bound to.
+    needs: dict[str, NeedDecl]
     params: dict[str, Any]
     outputs: OutputsConfig
     # The params' JSON schema, when the measurement's params model can be loaded.
@@ -68,6 +74,7 @@ class SettingsBody(BaseModel):
 
     yaml: str | None = None
     run: dict[str, Any] | None = None
+    setup: dict[str, Any] | None = None
     params: dict[str, Any] | None = None
     outputs: dict[str, Any] | None = None
 
@@ -81,15 +88,20 @@ def api_project_settings(name: str, env: Env = Depends(get_env)):
 
 @router.put("/api/projects/{name}/settings", response_model=ProjectSettings)
 def api_project_settings_save(name: str, body: SettingsBody, env: Env = Depends(get_env)):
-    """Save ``{"yaml"}``, or any of ``{"run", "params", "outputs"}``; 422 lists every problem."""
+    """Save ``{"yaml"}``, or any of ``{"run", "setup", "params", "outputs"}``; 422 lists every problem."""
     _project_dir(env, name)
+    connection = open_database(workspace_database(env))
+    try:
+        known_setups = {s["name"] for s in list_setups(connection)}
+    finally:
+        connection.close()
     try:
         return project_config.save_project(
             workspace_projects_dir(env),
             Path(workspace_config_dir(env)),
             name,
             body.model_dump(exclude_none=True),
-            known_devices={d["name"] for d in data_api.device_list(workspace_database(env))},
+            known_setups=known_setups,
         )
     except project_config.ProjectConfigError as e:
         raise RequestProblem(422, str(e), e.problems)
@@ -102,9 +114,18 @@ def api_project_launch_status(name: str, env: Env = Depends(get_env)):
 
 @router.post("/api/projects/{name}/launch", response_model=LaunchStatus)
 def api_project_launch(name: str, env: Env = Depends(get_env)):
-    """Run the project's setup file, as its own process."""
+    """Run the project's setup file, as its own process.
+
+    Refused (409) if its setup is missing or cannot fill the procedure's
+    needs: the run would refuse to start anyway, after claiming instruments.
+    """
+    project_dir = _project_dir(env, name)
     try:
-        return launcher.launch(_project_dir(env, name))
+        project_config.check_setup(project_dir, workspace_database(env))
+    except SetupError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    try:
+        return launcher.launch(project_dir)
     except launcher.LaunchError as e:
         raise HTTPException(status_code=409, detail=str(e))
 

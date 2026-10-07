@@ -133,9 +133,9 @@ class DatabaseRecorder:
         self._steps = {}
         with self.connection:
             cursor = self.connection.execute(
-                """INSERT INTO runs (procedure, status, started_at, device_id, operator, notes,
-                                     project, metadata, definition, params, instruments, columns)
-                   VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO runs (procedure, status, started_at, device_id, operator, notes, project,
+                                     setup, setup_fields, setup_needs, definition, params, instruments, columns)
+                   VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     message.procedure,
                     message.t.isoformat(),
@@ -143,7 +143,9 @@ class DatabaseRecorder:
                     message.operator or None,
                     message.notes or None,
                     message.project,
-                    to_json(message.metadata),
+                    message.setup,
+                    to_json(message.setup_fields),
+                    to_json(message.setup_needs),
                     to_json(message.definition) if message.definition is not None else None,
                     to_json(message.params),
                     to_json(message.instruments),
@@ -215,6 +217,6 @@ class DatabaseRecorder:
         if self.run_id is None:
             return None
         row = dict(self.connection.execute("SELECT * FROM runs WHERE id = ?", (self.run_id,)).fetchone())
-        for key in ("metadata", "definition", "params", "instruments", "columns"):
+        for key in ("setup_fields", "setup_needs", "definition", "params", "instruments", "columns"):
             row[key] = json.loads(row[key]) if row[key] else None
         return row

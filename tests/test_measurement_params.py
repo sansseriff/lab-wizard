@@ -65,7 +65,6 @@ def test_sweep_discriminator_selects_linear():
 
 def test_partial_params_fill_defaults():
     params = IVCurveParams.model_validate({})
-    assert params.readout.bias_resistance_ohm == 100_000.0
     assert params.safety.return_to_zero is True
     # The IV curve's default is the loop: up, back, down, back.
     assert isinstance(params.bias.sweep, WaypointSweepParams)

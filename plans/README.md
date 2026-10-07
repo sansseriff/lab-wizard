@@ -10,6 +10,7 @@ plan carries a status block at the top; this table is the summary.
 | [procedure_plan.md](procedure_plan.md) | **In progress** | Phases 0-5, 6.1-6.5 and 7 built (5.6 included). Next: 6.6 (port `AgilentN7764A`) |
 | [semantic_data_plan.md](semantic_data_plan.md) | **Proposed** | How a run records what it *means* — coordinates vs readings, one row per point, the run type and device gaps. Decisions needed before building |
 | [setup_plan.md](setup_plan.md) | **Proposed** | A dated record of the apparatus (resistors, lasers, shunts, …) that every run links to; replaces the Run page's free-form metadata. Six open questions in §9 |
+| [guard_plan.md](guard_plan.md) | **Proposed** | Long-lived holds by a client that defines "safe": a lapsed guard freezes instead of resetting, guards are kept across restarts, unknown state denies. Eight phases; open questions in §6 |
 | [runner_plan.md](runner_plan.md) | **First version built** | Cases A–D work, with the lab database as the live bus (see its As built block). Left: step progress in the live view, tabs in the plot window |
 
 ## Relationship to `docs/roadmap.md`

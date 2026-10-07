@@ -54,6 +54,7 @@ packages = [
     "lab_wizard.lib.server",
     "lab_wizard.lib.task_adapters",
     "lab_wizard.lib.utilities",
+    "lab_wizard.sim",
     "lab_wizard.wizard",
     "lab_wizard.wizard.backend",
     "lab_wizard.wizard.backend.routes",

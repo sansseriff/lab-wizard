@@ -36,7 +36,7 @@ Settings, in `config/data.yaml` under `files:`:
 
 - **`path`** — where each run goes, from the same keys the Data page filters
   by: `{date}`, `{time}`, `{procedure}`, `{device}`, `{device.<property>}`,
-  `{operator}`, `{run.<metadata key>}`, `{param.<path>}`, `{run_id}`. The
+  `{operator}`, `{setup}`, `{setup.<field>}`, `{param.<path>}`, `{run_id}`. The
   default is `{date}/{procedure}_{device}_{time}`; a lab that thinks by device
   might use `{device.wafer}/{device}/{date}_{procedure}`. A folder tree can
   only be ordered one way, which is exactly what the Data page's filters are
@@ -72,8 +72,10 @@ and how to read it from Python.
 The page has three panes.
 
 **Filters**, on the left. Every fact a run recorded is a filter: its
-procedure, device, and the device's properties; the run's metadata (the
-project's `run:` block, such as `cryostat`); every instrument's type and
+procedure, device, and the device's properties; its setup and the setup's
+fields as the run copied them (such as `setup.cryostat`; a quantity is
+compared in its base unit, so 100 kΩ and 100000 Ω are one value); every
+instrument's type and
 settings; every param; the operator, date and status; and the columns it
 recorded. Nothing is configured: a filter appears the first time a run records
 the fact behind it. Each value shows how many runs it would leave, and a key's
@@ -107,8 +109,9 @@ overlay on one plot, a line each. A run still being recorded is marked
 - **Timeline** shows every step the run executed, as a bar on the run's time
   axis, nested as the procedure nests them. The steps behind a clicked point
   are highlighted.
-- **Details** lists the run's metadata, params, each instrument's settings as
-  the run started, and its columns with their units.
+- **Details** lists the run's setup as it was when the run started (pictures
+  included) and what its procedure read from it, its params, each
+  instrument's settings as the run started, and its columns with their units.
 
 **Export run** downloads the run as a zipped folder, laid out exactly as the
 [file saver](#saving-files) writes one.

@@ -1,16 +1,17 @@
 <script lang="ts">
-	/** A run's metadata as a tree of fields and groups, like a layers panel.
+	/** A setup's fields as a tree of fields and groups, like a layers panel.
 	 *
 	 * One row per field: its name, its value, a unit if it has one, and its kind.
 	 * A group's row folds its fields away, and its fields hang off a guide line,
 	 * as the procedure composer's outline does; right-click a row for its
-	 * actions, which also show on hover. Each
-	 * field is a filter on the Data page: `cryostat` is `run.cryostat`, a field
-	 * `fiber` in a group `optics` is `run.optics.fiber`, and a value with a unit
-	 * — written `{value: 0.8, unit: K}` in the YAML, because the unit is recorded
-	 * with the run — is filtered by its value and shown with its unit. Names and
-	 * values this lab has recorded before are suggested, so the same thing keeps
-	 * the same name.
+	 * actions, which also show on hover. Every run on the setup copies its
+	 * fields, and each is a filter on the Data page: `cryostat` is
+	 * `setup.cryostat`, a field `fiber` in a group `optics` is
+	 * `setup.optics.fiber`, and a value with a unit — `{value: 100, unit: kΩ}`,
+	 * because the unit is recorded with the run — is filtered by its value in
+	 * its base unit. A picture is a field too, so a run keeps the picture of
+	 * the bench it was taken on. Names and values this lab has recorded before
+	 * are suggested, so the same thing keeps the same name.
 	 */
 	import { onDestroy, untrack } from 'svelte';
 	import CaretDownIcon from 'phosphor-svelte/lib/CaretDown';
@@ -21,9 +22,13 @@
 	import Select from '$lib/components/Select.svelte';
 	import RowContextMenu from '$lib/components/menu/RowContextMenu.svelte';
 	import type { MenuAction } from '$lib/components/menu/items';
+	import { errorMessage } from '$lib/api';
 	import { isQuantity } from '$lib/data/model';
+	import { setupsApi } from './api';
+	import { isImage, isImages } from './model';
+	import UnitInput from './UnitInput.svelte';
 
-	type Kind = 'text' | 'number' | 'bool' | 'group';
+	type Kind = 'text' | 'number' | 'bool' | 'image' | 'group';
 	type Node = {
 		id: number;
 		key: string;
@@ -31,6 +36,8 @@
 		text: string;
 		flag: boolean;
 		unit: string;
+		/** A picture field's pictures, by the names the backend keeps them under. */
+		images: string[];
 		children: Node[];
 		open: boolean;
 	};
@@ -45,15 +52,21 @@
 		onchange: (value: Record<string, unknown>) => void;
 		/** The tree's first problem, or null; keeps Save disabled while there is one. */
 		onproblem: (key: string, message: string | null) => void;
-		/** Every run.* key this lab has recorded, with the values seen. */
+		/** Every setup.* key this lab has recorded, with the values seen. */
 		recorded: Record<string, string[]>;
 	} = $props();
 
-	const PROBLEM_KEY = 'run.metadata';
+	const PROBLEM_KEY = 'setup.fields';
 	let next = 0;
 
+	function blank(key: string, kind: Kind): Node {
+		return { id: next++, key, kind, text: '', flag: false, unit: '', images: [], children: [], open: true };
+	}
+
 	function node(key: string, v: unknown): Node {
-		const base: Node = { id: next++, key, kind: 'text', text: '', flag: false, unit: '', children: [], open: true };
+		const base = blank(key, 'text');
+		if (isImage(v)) return { ...base, kind: 'image', images: [v.image] };
+		if (isImages(v)) return { ...base, kind: 'image', images: v.map((i) => i.image) };
 		if (isQuantity(v)) {
 			return { ...base, kind: typeof v.value === 'number' ? 'number' : 'text', text: String(v.value ?? ''), unit: v.unit };
 		}
@@ -91,6 +104,8 @@
 			if (!n.key.trim()) continue;
 			if (n.kind === 'group') out[n.key] = toValue(n.children);
 			else if (n.kind === 'bool') out[n.key] = n.flag;
+			else if (n.kind === 'image')
+				out[n.key] = n.images.length === 1 ? { image: n.images[0] } : n.images.length ? n.images.map((image) => ({ image })) : null;
 			else {
 				const v = n.kind === 'number' ? Number(n.text) : n.text;
 				out[n.key] = n.unit.trim() ? { value: v, unit: n.unit.trim() } : v;
@@ -106,8 +121,25 @@
 	onDestroy(() => onproblem(PROBLEM_KEY, null));
 
 	function add(list: Node[], kind: Kind) {
-		list.push({ id: next++, key: '', kind, text: '', flag: false, unit: '', children: [], open: true });
+		list.push(blank('', kind));
 		emit();
+	}
+
+	let uploading = $state<number | null>(null);
+	let uploadError = $state('');
+
+	async function addPictures(n: Node, files: FileList | null) {
+		if (!files?.length) return;
+		uploading = n.id;
+		uploadError = '';
+		try {
+			for (const file of files) n.images.push(await setupsApi.uploadImage(file));
+			emit();
+		} catch (e) {
+			uploadError = errorMessage(e);
+		} finally {
+			uploading = null;
+		}
 	}
 
 	function remove(list: Node[], n: Node) {
@@ -123,17 +155,18 @@
 
 	/** Names this lab has recorded at a depth of the tree. */
 	function keysAt(path: string[]): string[] {
-		const here = ['run', ...path].join('.') + '.';
+		const here = ['setup', ...path].join('.') + '.';
 		return [
 			...new Set(Object.keys(recorded).filter((k) => k.startsWith(here)).map((k) => k.slice(here.length).split('.')[0]))
 		].sort();
 	}
-	const listId = (path: string[]) => `meta-keys-${path.join('-') || 'root'}`;
+	const listId = (path: string[]) => `setup-keys-${path.join('-') || 'root'}`;
 
 	const KINDS = [
 		{ value: 'text', label: 'text' },
 		{ value: 'number', label: 'number' },
 		{ value: 'bool', label: 'yes/no' },
+		{ value: 'image', label: 'picture' },
 		{ value: 'group', label: 'group' }
 	];
 
@@ -152,7 +185,7 @@
 					]
 				: []),
 			{ label: 'Add a field after', onselect: () => {
-				siblings.splice(siblings.indexOf(n) + 1, 0, { id: next++, key: '', kind: 'text', text: '', flag: false, unit: '', children: [], open: true });
+				siblings.splice(siblings.indexOf(n) + 1, 0, blank('', 'text'));
 				emit();
 			} },
 			{ label: `Remove ${n.key || 'this field'}`, danger: true, onselect: () => remove(siblings, n) }
@@ -160,8 +193,10 @@
 	}
 
 	// A cell reads as text until it is hovered or focused, as in a layers panel.
+	// Every control in a row is one height and reads as text until the row is
+	// hovered or the control has focus (the .quiet rule below).
 	const cell =
-		'min-w-0 rounded border border-transparent bg-transparent px-1.5 py-[3px] text-xs outline-none hover:border-line focus:border-accent focus:bg-surface';
+		'quiet min-w-0 h-[var(--control-h-sm)] rounded border px-1.5 py-0 text-xs outline-none focus:border-accent';
 </script>
 
 {#snippet rows(nodes: Node[], path: string[])}
@@ -172,7 +207,7 @@
 		{@const problem = problemFor(n, nodes)}
 		{@const full = [...path, n.key].join('.')}
 		<RowContextMenu items={actions(n, nodes)}>
-		<div class="group/row flex items-center gap-1 rounded py-px pr-0.5 hover:bg-surface-2 focus-within:bg-accent-wash/60">
+		<div class="field-row group/row flex items-center gap-1 rounded py-1 pr-0.5 hover:bg-surface-2 focus-within:bg-accent-wash/60">
 			{#if n.kind === 'group'}
 				<button
 					type="button"
@@ -199,6 +234,35 @@
 				<span class="flex-[1.6] truncate px-1.5 text-fine text-muted">
 					{n.children.length} field{n.children.length === 1 ? '' : 's'}
 				</span>
+			{:else if n.kind === 'image'}
+				<div class="flex flex-[1.6] flex-wrap items-center gap-1.5 px-1.5 py-0.5">
+					{#each n.images as image, i (image + i)}
+						<span class="group/pic relative">
+							<a href={setupsApi.imageUrl(image)} target="_blank" rel="noreferrer">
+								<img class="h-12 rounded border border-line object-cover" src={setupsApi.imageUrl(image)} alt="{n.key} {i + 1}" />
+							</a>
+							<button
+								type="button"
+								class="absolute -top-1.5 -right-1.5 hidden rounded-full border border-line bg-surface p-0.5 text-muted group-hover/pic:block hover:text-crit"
+								onclick={() => {
+									n.images.splice(i, 1);
+									emit();
+								}}
+								aria-label="Remove this picture"><XIcon size={10} /></button
+							>
+						</span>
+					{/each}
+					<label class="cursor-pointer rounded border border-dashed border-line px-2 py-1 text-fine text-accent hover:bg-accent-wash">
+						{uploading === n.id ? 'Adding…' : n.images.length ? 'Add' : 'Add a picture'}
+						<input
+							class="sr-only"
+							type="file"
+							accept="image/*"
+							multiple
+							onchange={(e) => addPictures(n, e.currentTarget.files)}
+						/>
+					</label>
+				</div>
 			{:else if n.kind === 'bool'}
 				<label class="flex flex-[1.6] items-center gap-1.5 px-1.5 text-xs">
 					<input type="checkbox" bind:checked={n.flag} onchange={emit} aria-label="Value of {n.key}" />
@@ -209,18 +273,32 @@
 					class="{cell} flex-1 {n.kind === 'number' ? 'mono' : ''} {problem && n.kind === 'number' ? 'border-crit' : ''}"
 					placeholder="value"
 					inputmode={n.kind === 'number' ? 'decimal' : undefined}
-					list={`meta-values-${full}`}
+					list={`setup-values-${full}`}
 					bind:value={n.text}
 					oninput={emit}
 					aria-label="Value of {n.key}"
 				/>
-				<datalist id={`meta-values-${full}`}>
-					{#each recorded[`run.${full}`] ?? [] as v (v)}<option value={v}></option>{/each}
+				<datalist id={`setup-values-${full}`}>
+					{#each recorded[`setup.${full}`] ?? [] as v (v)}<option value={v}></option>{/each}
 				</datalist>
-				<input class="{cell} mono w-12 shrink-0" placeholder="unit" bind:value={n.unit} oninput={emit} aria-label="Unit of {n.key}" />
+				{#if n.kind === 'number' || n.unit}
+				<UnitInput
+					class="w-[4.75rem]"
+					small
+					quiet
+					value={n.unit}
+					onchange={(unit) => {
+						n.unit = unit;
+						emit();
+					}}
+					aria-label="Unit of {n.key}"
+				/>
+				{:else}
+					<span class="w-[4.75rem] shrink-0"></span>
+				{/if}
 			{/if}
 			<Select
-				class="lw-select-sm w-[5.5rem] shrink-0"
+				class="lw-select-sm quiet w-[5.5rem] shrink-0 text-xs"
 				value={n.kind}
 				onValueChange={(v) => setKind(n, v as Kind)}
 				options={KINDS}
@@ -242,7 +320,7 @@
 			<p class="pl-7 text-fine text-crit">{problem}</p>
 		{/if}
 		{#if n.kind === 'group' && n.open}
-			<div class="ml-3 border-l border-line-2 pl-2">
+			<div class="my-1 ml-3 border-l border-line-2 pl-2">
 				{#if n.children.length}
 					{@render rows(n.children, [...path, n.key])}
 				{:else}
@@ -255,6 +333,7 @@
 
 <div class="-mx-1">
 	{@render rows(root, [])}
+	{#if uploadError}<p class="pl-7 text-fine text-crit" role="alert">{uploadError}</p>{/if}
 	<!-- As the composer's "Add step": quiet, in the accent colour. -->
 	<div class="mt-0.5 flex flex-wrap gap-1 pl-6">
 		<button type="button" class="flex items-center gap-[5px] rounded px-2 py-[5px] text-xs text-accent hover:bg-accent-wash" onclick={() => add(root, 'text')}>
@@ -265,3 +344,31 @@
 		</button>
 	</div>
 </div>
+
+<style>
+	/* Controls read as plain text until their row is hovered or one is used. */
+	.field-row :global(.quiet) {
+		border-color: transparent;
+		background: transparent;
+	}
+	.field-row:hover :global(.quiet),
+	.field-row :global(.quiet:focus),
+	.field-row :global(.quiet:focus-within),
+	.field-row :global(.quiet[data-state='open']) {
+		border-color: var(--line-2);
+		background: var(--surface);
+	}
+	.field-row :global(.quiet:focus) {
+		border-color: var(--accent);
+	}
+	.field-row :global(.quiet svg),
+	.field-row :global(.quiet-reveal) {
+		opacity: 0;
+	}
+	.field-row:hover :global(.quiet svg),
+	.field-row:hover :global(.quiet-reveal),
+	.field-row :global(.quiet:focus-within svg),
+	.field-row :global(.quiet[data-state='open'] svg) {
+		opacity: 1;
+	}
+</style>

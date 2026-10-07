@@ -2,6 +2,7 @@
 import { api, unwrap, type Schemas } from '$lib/api';
 
 export type RunDetails = Schemas['RunConfig'];
+export type SetupBinding = Schemas['SetupBinding-Output'];
 export type Outputs = Schemas['OutputsConfig-Output'];
 export type ProjectSettings = Omit<Schemas['ProjectSettings'], 'params_schema'> & {
 	params_schema: import('./schema').JsonSchema | null;
@@ -17,7 +18,9 @@ export const runApi = {
 	/** Save; a refusal throws an `ApiError` whose `problems` say where. */
 	save: async (
 		name: string,
-		body: { yaml: string } | Partial<{ run: RunDetails; params: Record<string, unknown>; outputs: Outputs }>
+		body:
+			| { yaml: string }
+			| Partial<{ run: RunDetails; setup: SetupBinding; params: Record<string, unknown>; outputs: Outputs }>
 	) => (await unwrap(api.PUT('/api/projects/{name}/settings', { ...project(name), body }))) as ProjectSettings,
 	status: (name: string) => unwrap(api.GET('/api/projects/{name}/launch', project(name))),
 	launch: (name: string) => unwrap(api.POST('/api/projects/{name}/launch', project(name))),

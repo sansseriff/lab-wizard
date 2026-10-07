@@ -9,6 +9,7 @@ from lab_wizard.wizard.backend.routes import (
     runs,
     servers,
     settings,
+    setups,
 )
 
 ROUTERS = [
@@ -17,6 +18,7 @@ ROUTERS = [
     runs.router,
     instruments.router,
     servers.router,
+    setups.router,
     data.router,
     live.router,
     settings.router,

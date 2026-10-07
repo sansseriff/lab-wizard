@@ -5,18 +5,20 @@ icon: lucide/flask-conical
 # Simulated instruments
 
 A measurement can only be trusted end to end if something can run it end to end
-without a cryostat. `lab-sim` is that something: a small program, separate from
-the wizard, that serves a simulated SNSPD test bench on this computer. The
-wizard talks to it with its ordinary drivers, exactly as it talks to the lab's
-real instruments, and nothing in lab_wizard knows that the instruments are
-simulated.
+without a cryostat. The simulated bench is that something: a small program,
+run in its own process apart from the wizard, that serves a simulated SNSPD test
+bench on this computer. The wizard talks to it with its ordinary drivers,
+exactly as it talks to the lab's real instruments, and nothing in lab_wizard
+knows that the instruments are simulated.
 
 ```bash
-uv run lab-sim              # the standard bench
-uv run lab-sim bench.yaml   # your own detector and ports
+wizard sim              # start the standard bench in the background
+wizard sim bench.yaml   # your own detector and ports
+wizard sim stop
 ```
 
-It prints where each instrument can be found:
+`wizard sim` starts the bench, waits until it is serving, prints where each
+instrument can be found, and gives you the terminal back:
 
 ```text
 Simulated bench running. Add these instruments in lab_wizard:
@@ -27,11 +29,24 @@ Simulated bench running. Add these instruments in lab_wizard:
   keysight53220A   ip_address: 127.0.0.1  ip_port: 5025
   yokogawa_aq2212  ip_address: 127.0.0.1  ip_port: 50000
     yoko_attenuator  slot: 1
+
+Running in the background (pid 4242, log /Users/you/.lab_sim/bench.log). Stop it with: wizard sim stop
 ```
 
 Add those under [Instruments](../wizard/instruments.md) as you would the real
-ones, and a generated project runs on any machine. The code lives in
-`simulator/` at the top of the repository, as its own package (`lab_sim`).
+ones, and a generated project runs on any machine.
+
+The bench keeps running after the terminal closes and between wizard sessions,
+until `wizard sim stop`. There is one per computer, because its ports and its
+link are fixed. Running `wizard sim` again while it is up just prints the table
+again. Asking for a different bench file while one is running is refused until
+you stop it. If the bench can't start, for example because something else holds
+port 5025, `wizard sim` says why and exits. `-v` logs every command the bench
+doesn't recognise to `~/.lab_sim/bench.log`, and `python -m lab_wizard.sim`
+runs the same bench in the foreground.
+
+The code lives in `lab_wizard/sim/`, and only the `wizard sim` command imports
+it. A test fails if anything else in lab_wizard does.
 
 ## The bench
 
@@ -134,8 +149,9 @@ latched until the current falls below `retrapping_current_a`, which is *lower*
 than the critical current. That is why a real IV curve is hysteretic and the
 downward sweep does not retrace the upward one.
 
-`bias_resistance_ohm` defaults to 100 kΩ, matching the IV procedure's default,
-so the standard detector switches at 0.03 V applied.
+`bias_resistance_ohm` defaults to 100 kΩ, the bias resistor an IV measurement
+on it should bind its `bias_resistance` need to, so the standard detector
+switches at 0.03 V applied.
 
 The counter sees what the detector would put out. Detection efficiency turns on
 with bias as an error function, dark counts double every

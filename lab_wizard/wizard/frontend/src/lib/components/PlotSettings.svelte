@@ -7,11 +7,16 @@
 	 */
 	import { describePlot, splitWithin, type LineShape } from '$lib/data/model';
 	import { PER_RUN, whereValue, type AxisRange, type PlotDecl } from '$lib/procedures/model';
+	import Combobox from '$lib/components/Combobox.svelte';
 	import Select from '$lib/components/Select.svelte';
+	import ExpressionInput from '$lib/expressions/ExpressionInput.svelte';
+	import { expressionCandidates, splitTopLevel, type Candidate } from '$lib/expressions/refs';
 
 	let {
 		plot,
 		columns,
+		candidates = undefined,
+		ondeclare = undefined,
 		labelKeys = ['device', 'operator', 'date', 'procedure'],
 		shape = null,
 		swept = []
@@ -19,6 +24,10 @@
 		plot: PlotDecl;
 		/** Every name an axis can use: recorded columns, then derived ones. */
 		columns: string[];
+		/** What an axis can refer to, offered while typing; the columns if not given. */
+		candidates?: Candidate[];
+		/** Declare a setup need, from an axis being typed (the composer offers it). */
+		ondeclare?: (name: string) => void;
 		/** Filters a run's legend text can come from. */
 		labelKeys?: string[];
 		/** How the drawn rows fell into lines, where something has been drawn. */
@@ -30,17 +39,15 @@
 	// Said where the plot is chosen, before anything is measured.
 	const within = $derived(splitWithin(plot, swept, columns));
 
-	const id = $props.id();
+	const offered = $derived(candidates ?? expressionCandidates({ columns }));
 
 	function update(change: Partial<PlotDecl>) {
 		Object.assign(plot, change);
 	}
 
 	function setList(field: 'y' | 'y2', text: string) {
-		const names = text
-			.split(',')
-			.map((n) => n.trim())
-			.filter(Boolean);
+		// Split where a comma separates two expressions, not inside mean(x, phase == "a").
+		const names = splitTopLevel(text);
 		if (field === 'y2' && !names.length) delete plot.y2;
 		else update({ [field]: names });
 	}
@@ -92,13 +99,6 @@
 	}
 </script>
 
-<datalist id="{id}-columns">
-	{#each columns as column (column)}<option value={column}></option>{/each}
-</datalist>
-<datalist id="{id}-labels">
-	{#each labelKeys as key (key)}<option value={key}></option>{/each}
-</datalist>
-
 <label class="editor-field"
 	><span>Name</span><input
 		class="lw-input"
@@ -106,31 +106,34 @@
 		onchange={(e) => update({ name: e.currentTarget.value || null })}
 	/></label
 >
-<label class="editor-field"
-	><span>x</span><input
-		class="lw-input mono"
-		list="{id}-columns"
+<div class="editor-field">
+	<span>x</span><ExpressionInput
 		value={plot.x}
-		onchange={(e) => update({ x: e.currentTarget.value.trim() })}
-	/></label
->
-<label class="editor-field"
-	><span>y (comma separated)</span><input
-		class="lw-input mono"
-		list="{id}-columns"
+		candidates={offered}
+		{ondeclare}
+		onchange={(text) => update({ x: text })}
+		aria-label="x"
+	/>
+</div>
+<div class="editor-field">
+	<span>y <span class="text-muted">(several: separate with commas)</span></span><ExpressionInput
 		value={plot.y.join(', ')}
-		onchange={(e) => setList('y', e.currentTarget.value)}
-	/></label
->
-<label class="editor-field"
-	><span>Second y axis</span><input
-		class="lw-input mono"
-		list="{id}-columns"
+		candidates={offered}
+		{ondeclare}
+		onchange={(text) => setList('y', text)}
+		aria-label="y"
+	/>
+</div>
+<div class="editor-field">
+	<span>Second y axis</span><ExpressionInput
 		value={(plot.y2 ?? []).join(', ')}
-		onchange={(e) => setList('y2', e.currentTarget.value)}
+		candidates={offered}
+		{ondeclare}
+		onchange={(text) => setList('y2', text)}
 		placeholder="none"
-	/></label
->
+		aria-label="Second y axis"
+	/>
+</div>
 <div>
 	<label class="editor-field"
 		><span>One line per <span class="mono text-muted">(series)</span></span><Select
@@ -146,25 +149,26 @@
 	<p class="mt-1.5 text-xs text-ink-2">{describePlot(plot, shape, within)}</p>
 </div>
 {#if plot.series === undefined || plot.series === 'run'}
-	<label class="editor-field"
-		><span>Name each run's line by</span><input
-			class="lw-input mono"
-			list="{id}-labels"
-			value={plot.label ?? ''}
-			onchange={(e) => update({ label: e.currentTarget.value.trim() || null })}
-			placeholder="its run number"
-		/></label
-	>
+	<div class="editor-field">
+		<span>Name each run's line by</span><Combobox
+			mono
+			value={plot.label ?? null}
+			options={[...new Set([...labelKeys, ...(plot.label ? [plot.label] : [])])].map((key) => ({ value: key, label: key }))}
+			onValueChange={(key) => update({ label: key })}
+			noneLabel="its run number"
+			aria-label="Name each run's line by"
+		/>
+	</div>
 {/if}
 <div class="editor-field">
 	<span>Only rows where</span>
 	{#each whereRows as [column, value] (column)}
 		<div class="mt-1 flex flex-wrap items-center gap-1">
-			<input
-				class="lw-input mono w-32"
-				list="{id}-columns"
+			<ExpressionInput
+				class="w-40"
 				value={column}
-				onchange={(e) => renameWhere(column, e.currentTarget.value.trim())}
+				candidates={offered}
+				onchange={(text) => renameWhere(column, text)}
 				aria-label="Filter column"
 			/>
 			{#if whereMode(value) === 'yaml'}

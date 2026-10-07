@@ -174,8 +174,8 @@ class TestFileSettings:
         check = client.post("/api/settings/files/check", json={"path": "{date}/{devce}"}).json()
         assert [(p["level"], p["key"]) for p in check["problems"]] == [("error", "devce")]
         # A family key no run has recorded yet may still be recorded later.
-        check = client.post("/api/settings/files/check", json={"path": "{run.cryostat}/{device}"}).json()
-        assert [(p["level"], p["key"]) for p in check["problems"]] == [("warning", "run.cryostat")]
+        check = client.post("/api/settings/files/check", json={"path": "{setup.cryostat}/{device}"}).json()
+        assert [(p["level"], p["key"]) for p in check["problems"]] == [("warning", "setup.cryostat")]
         assert check["example"] == "none/A7"
 
     def test_a_template_with_an_unknown_key_is_not_saved(self, client: TestClient):

@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import json
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,8 +22,10 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from lab_procedure import Sequence, Status, Step, Sweep, WithParameter
+from lab_wizard.lib.data import open_database
+from lab_wizard.lib.data.setups import save_setup
 from lab_wizard.lib.procedures.storage import load_procedure, save_procedure
-from lab_wizard.lib.task_adapters.run import run_procedure
+from lab_wizard.lib.task_adapters.run import database_path, run_procedure
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 from lab_wizard.wizard.backend import data_api
 from lab_wizard.wizard.backend.main import app
@@ -65,14 +68,25 @@ class Resources:
     plotters: list = field(default_factory=list)
 
 
+def _setup(project_dir: Path, name: str, fields: dict, device: str | None = None) -> None:
+    """Make setup ``name`` in the lab database ``project_dir`` records into."""
+    with closing(open_database(database_path(project_dir))) as db:
+        if device:
+            with db:
+                db.execute("insert or ignore into devices (name) values (?)", (device,))
+        save_setup(db, name, fields, device=device)
+
+
 def _record(projects: Path, name: str, device: str, procedure: str, tree: Step, definition: dict, gate: float) -> None:
     project_dir = projects / name
     project_dir.mkdir(parents=True)
     (project_dir / f"{name}.yaml").write_text(
         f"project: {{measurement_type: {procedure}}}\n"
-        f"run: {{device: {device}, operator: andrew, metadata: {{cryostat: BF1}}}}\n",
+        f"run: {{operator: andrew}}\n"
+        f"setup: {{name: bench-{device}}}\n",
         encoding="utf-8",
     )
+    _setup(project_dir, f"bench-{device}", {"cryostat": "BF1"}, device)
     status = run_procedure(
         tree, Resources(params=Params(gate_time_s=gate)), procedure=procedure,
         definition=definition, project_dir=project_dir,
@@ -128,7 +142,8 @@ def test_the_sidebar_lists_every_filter_with_its_run_counts(client):
     # Sections come in the sidebar's order.
     groups = list(dict.fromkeys(f["group"] for f in body["facets"]))
     assert groups[:2] == ["Procedure", "Device"]
-    assert _facet(body, "run.cryostat")["group"] == "Run"
+    assert _facet(body, "setup.cryostat")["group"] == "Setup"
+    assert _facet(body, "setup")["group"] == "Setup"
 
 
 def test_a_chosen_filter_still_shows_its_alternatives(client):
@@ -188,7 +203,8 @@ def test_a_run_is_shown_with_the_plots_and_derived_columns_it_recorded(client):
     assert all(p["runs"] == [_ids(client)["mcr_a"]] for p in detail["plots"])
     assert "rate_above_dark" in detail["derived"]
     assert detail["run"]["device"] == "A7"
-    assert detail["run"]["metadata"] == {"cryostat": "BF1"}
+    assert detail["setup"]["name"] == "bench-A7"
+    assert detail["setup"]["fields"] == {"cryostat": "BF1"}
     assert detail["params"] == {"gate_time_s": 0.1}
     assert set(detail["columns"]) >= {"phase", "count_rate", "attenuation_db"}
 
@@ -419,35 +435,36 @@ def test_a_device_property_is_one_named_value(client):
 
 def test_a_folder_template_is_checked_against_what_the_lab_has_recorded(client):
     settings = client.get("/api/settings/files").json()
-    # The fixed keys, then what these runs recorded: their metadata and params.
+    # The fixed keys, then what these runs recorded: their setups' fields and params.
     assert settings["keys"][:3] == ["date", "time", "procedure"]
-    assert "run.cryostat" in settings["keys"] and "param.gate_time_s" in settings["keys"]
+    assert "setup.cryostat" in settings["keys"] and "param.gate_time_s" in settings["keys"]
 
     # A recorded key is fine; the example is the latest run's folder.
-    check = client.post("/api/settings/files/check", json={"path": "{run.cryostat}/{procedure}_{device}"}).json()
+    check = client.post("/api/settings/files/check", json={"path": "{setup.cryostat}/{procedure}_{device}"}).json()
     assert check == {"example": "BF1/probe_A7", "problems": []}
 
     check = client.post("/api/settings/files/check", json={"path": "{device.wafer}"}).json()
     assert [(p["level"], p["key"]) for p in check["problems"]] == [("warning", "device.wafer")]
 
 
-def test_a_metadata_quantity_is_filtered_by_its_value_and_shown_with_its_unit(workspace):
+def test_a_setup_quantity_is_filtered_by_its_value_in_its_base_unit(workspace):
     project_dir = workspace.projects_dir / "cold"
     project_dir.mkdir(parents=True)
     (project_dir / "cold.yaml").write_text(
         "project: {measurement_type: probe}\n"
-        "run: {device: A7, metadata: {temperature: {value: 0.8, unit: K}, optics: {fiber: SM28}}}\n"
+        "setup: {name: cryo}\n"
         "outputs: {files: false}\n",
         encoding="utf-8",
     )
+    _setup(project_dir, "cryo", {"temperature": {"value": 800, "unit": "mK"}, "optics": {"fiber": "SM28"}})
     probe = Sweep("bias", [0.1], lambda b: Measure(counts=lambda p: 1.0))
     assert run_procedure(probe, Resources(params=Params(gate_time_s=0.1)), procedure="probe", definition=PROBE_DEFINITION,
                          project_dir=project_dir) is Status.SUCCESS
 
     facets = {f["key"]: f for f in TestClient(app).get("/api/data/facets").json()["facets"]}
-    temperature = facets["run.temperature"]
+    temperature = facets["setup.temperature"]
     assert (temperature["numeric"], temperature["unit"], temperature["values"][0]["value"]) == (True, "K", "0.8")
-    assert facets["run.optics.fiber"]["unit"] is None
+    assert facets["setup.optics.fiber"]["unit"] is None
     # The run keeps the quantity as written.
     detail = TestClient(app).get("/api/data/runs/1").json()
-    assert detail["run"]["metadata"]["temperature"] == {"value": 0.8, "unit": "K"}
+    assert detail["setup"]["fields"]["temperature"] == {"value": 800, "unit": "mK"}

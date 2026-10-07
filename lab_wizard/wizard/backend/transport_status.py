@@ -39,6 +39,7 @@ logger = logging.getLogger("lab_wizard.wizard.backend.transport_status")
 __all__ = [
     "transport_overview",
     "conflicts_for_selection",
+    "servers_holding",
     "duplicate_transport_check",
 ]
 
@@ -152,6 +153,9 @@ def transport_overview(config_dir: str | Path) -> dict[str, Any]:
             "transport_key": key,
             "held_by_server": root in held_roots or elsewhere is not None,
             "held_by": (elsewhere or {}).get("url"),
+            # The root's path on that server, which differs from ours when the
+            # same device is configured in another workspace.
+            "held_root": (elsewhere or {}).get("root"),
             # Servers that could serve this rack instead of opening it locally.
             "served_by": serves_keys.get(key, []) if key else [],
         }
@@ -278,3 +282,45 @@ def conflicts_for_selection(
         "configured_conflicts": configured if any_server else [],
         "duplicate_transports": overview["duplicate_transports"],
     }
+
+
+def servers_holding(config_dir: str | Path, root_paths: list[str]) -> list[dict[str, Any]]:
+    """The servers holding hardware that a just-generated file opens itself.
+
+    Asked after generation, not instead of it: a file that opens its instruments
+    directly (the embedded style always does) is still the file that was asked
+    for, but running it now would fail on an exclusive-port error. One entry per
+    server, each root given by its path *on that server*, so the UI can ask it to
+    release them.
+    """
+    if not root_paths:
+        return []
+    check = conflicts_for_selection(config_dir, root_paths)
+    servers = check["local_servers"]
+    own = str(Path(config_dir).expanduser().resolve())
+
+    out: dict[str, dict[str, Any]] = {}
+    for conflict in check["held_conflicts"]:
+        url = conflict["held_by"] or next(
+            (s["url"] for s in servers if conflict["root"] in s["held_roots"]), None
+        )
+        server = next((s for s in servers if s["url"] == url), None)
+        if server is None:
+            continue
+        entry = out.setdefault(
+            url,
+            {
+                "url": url,
+                "workspace_path": server.get("workspace_path"),
+                "own": bool(server.get("config_dir"))
+                and str(Path(server["config_dir"]).resolve()) == own,
+                "roots": [],
+            },
+        )
+        entry["roots"].append(
+            {
+                "path": conflict.get("held_root") or conflict["root"],
+                "transport_key": conflict["transport_key"],
+            }
+        )
+    return list(out.values())

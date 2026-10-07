@@ -17,7 +17,7 @@ The file's shape::
     the measurement's code        from <name>_measurement.py, loaded by its path, with
                                   its params classes
     Resources                     one field per role, typed by its concrete class
-    PARAMS, RUN, DATABASE, SINKS  the run's values
+    PARAMS, RUN, SETUP, DATABASE, SINKS  the run's values
     <INSTRUMENT> = <X>Params(...) each instrument's settings, root first
     build_instruments()           construct them, parent to child
     run()                         run once, recorded
@@ -42,7 +42,7 @@ from lab_procedure.sweep import SWEEP_ADAPTER
 from lab_wizard.lib.custom_measurements import CustomMeasurement
 from lab_wizard.lib.procedures.codegen import class_prefix, definition_block
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.utilities.model_tree import OutputsConfig
+from lab_wizard.lib.utilities.model_tree import OutputsConfig, SetupBinding
 from lab_wizard.wizard.backend._generation_common import (
     _NodeRef,
     _node_lineage_leaf_to_root,
@@ -205,8 +205,10 @@ def embedded_setup_source(
     params: dict[str, Any],
     outputs: OutputsConfig,
     database: Path,
+    setup: SetupBinding | None = None,
 ) -> str:
     """The whole setup file of an embedded-style project (unformatted; black it)."""
+    setup = setup or SetupBinding()
     imports: Imports = {
         ("dataclasses", "dataclass"),
         ("pathlib", "Path"),
@@ -218,6 +220,7 @@ def embedded_setup_source(
         ("lab_wizard.lib.task_adapters.lifecycle", "RunLifecycle"),
         ("lab_wizard.lib.task_adapters.run", "run_procedure"),
         ("lab_wizard.lib.utilities.model_tree", "RunConfig"),
+        ("lab_wizard.lib.utilities.model_tree", "SetupBinding"),
     }
     local: set[str] = set()
     name = measurement.name
@@ -347,8 +350,12 @@ else:
 
 {definition_source}PARAMS = {params_value}
 
-# Who and what the run is about; recorded with it, and filters on the Data page.
-RUN = RunConfig(device=None, operator=None, notes=None, metadata={{}})
+# Who ran it, and why; recorded with it.
+RUN = RunConfig(operator=None, notes=None)
+
+# The setup it runs on, and which of its fields fills each need. The setup's
+# fields and mounted device are read from DATABASE when the run starts.
+SETUP = SetupBinding(name={setup.name!r}, needs={dict(setup.needs)!r})
 
 # The lab database the run is recorded in.
 DATABASE = Path({str(database)!r})
@@ -382,6 +389,7 @@ def run(resources: {resources_class}) -> Status:
         definition={definition_expr},
         project_dir=Path(__file__).resolve().parent,
         run=RUN,
+        setup=SETUP,
         database=DATABASE,
         sinks=SINKS,
     )

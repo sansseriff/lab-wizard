@@ -8,6 +8,7 @@
 	import Trash from 'phosphor-svelte/lib/Trash';
 	import Plus from 'phosphor-svelte/lib/Plus';
 	import { api, errorMessage, unwrap } from '$lib/api';
+	import HeldHardwareWarning, { type HoldingServer } from '$lib/components/HeldHardwareWarning.svelte';
 
 	type AttributeEntry = {
 		attribute_name: string;
@@ -95,10 +96,14 @@
 
 	let creating = $state(false);
 	let createError: string | null = $state(null);
-	let createResult:
-		| null
-		| { project_name: string; project_dir: string; yaml_file: string; setup_file: string } =
-		$state(null);
+	type CreateResult = {
+		project_name: string;
+		project_dir: string;
+		yaml_file: string;
+		setup_file: string;
+		held_by_servers: HoldingServer[];
+	};
+	let createResult: CreateResult | null = $state(null);
 
 	let selectionCounter = 0;
 	function nextId(): string {
@@ -287,14 +292,15 @@
 				resource_class_name: resourceClassName.trim() || 'CustomResources',
 				persist_attribute_names: generationStyle === 'production' && persistAttributeNames
 			};
-			const res = await unwrap<{ project_name: string; project_dir: string; yaml_file: string; setup_file: string }>(
+			const res = await unwrap<CreateResult>(
 				api.POST('/api/create-custom-resource-project', { body })
 			);
 			createResult = {
 				project_name: res.project_name,
 				project_dir: res.project_dir,
 				yaml_file: res.yaml_file,
-				setup_file: res.setup_file
+				setup_file: res.setup_file,
+				held_by_servers: res.held_by_servers ?? []
 			};
 		} catch (err) {
 			createError = errorMessage(err) || 'Failed to create custom resource project';
@@ -680,6 +686,7 @@
 				<div>{createResult.setup_file}</div>
 			</div>
 		</div>
+		<HeldHardwareWarning servers={createResult.held_by_servers} />
 	{/if}
 
 	{#if createError}

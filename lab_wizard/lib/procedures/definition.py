@@ -6,6 +6,9 @@ adds what its data layer reads:
 
 * ``plots`` — what a run of this procedure is usually looked at as;
 * ``derived`` — columns computed from the recorded ones when read;
+* ``needs`` — facts about the setup its derived columns read, such as the bias
+  resistor a current is inferred through. A measurement binds each to a field
+  of its setup (``plans/setup_plan.md``), and ``setup("name")`` reads it;
 
 and checks roles against the registered instrument behaviors.
 """
@@ -14,7 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from pydantic import Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lab_procedure import ProcedureDefinition as BaseProcedureDefinition
 from lab_procedure import ProcedureError
@@ -25,14 +28,29 @@ from lab_wizard.lib.data.expressions import (
     compile_expression,
     expression_names,
     expression_params,
+    expression_setup,
 )
 from lab_wizard.lib.data.plot import PlotSpec
 
 
-__all__ = ["ProcedureDefinition"]
+__all__ = ["NeedDecl", "ProcedureDefinition"]
 
 # Names a role cannot take, because the generated code already uses them.
 _RESERVED_ROLES = {"resources", "project"}
+
+
+class NeedDecl(BaseModel):
+    """A fact about the setup a procedure needs: ``bias_resistance: {unit: ohm}``.
+
+    It is read in ``unit``, from whichever setup field a measurement binds it
+    to; a field in kΩ reads as ohms. A need has no default: an unbound need
+    stops a run before it starts, rather than scaling its data wrongly.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit: str | None = None
+    description: str = ""
 
 
 class ProcedureDefinition(BaseProcedureDefinition):
@@ -44,6 +62,16 @@ class ProcedureDefinition(BaseProcedureDefinition):
     # Columns computed from the recorded ones when read, never stored:
     # {"above_dark": 'count_rate - mean(count_rate, phase == "background")'}.
     derived: dict[str, str] = Field(default_factory=dict)
+    # Facts about the setup the derived columns read with setup("name").
+    needs: dict[str, NeedDecl] = Field(default_factory=dict)
+
+    @field_validator("needs")
+    @classmethod
+    def _need_names(cls, needs: dict) -> dict:
+        for name in needs:
+            if not name.isidentifier():
+                raise ValueError(f"Need {name!r} must be a name, like bias_resistance")
+        return needs
 
     @field_validator("roles")
     @classmethod
@@ -121,6 +149,9 @@ class ProcedureDefinition(BaseProcedureDefinition):
 
     def _expression_problems(self, text: str, columns: list[str]) -> list[str]:
         problems = []
+        for name in sorted(_setup_of(text)):
+            if name not in self.needs:
+                problems.append(f"{text!r} reads setup({name!r}), which is not declared under needs")
         tree = self.param_tree
         for path in sorted(_params_of(text)):
             decl = tree.find(path)
@@ -129,7 +160,7 @@ class ProcedureDefinition(BaseProcedureDefinition):
             elif decl.type not in ("float", "int"):
                 problems.append(f"{text!r} reads param({path!r}), which is a {decl.type}, not a number")
         try:
-            compile_expression(text, columns, {0: self.param_defaults()})
+            compile_expression(text, columns, {0: self.param_defaults()}, {0: {name: 1.0 for name in self.needs}})
         except ExpressionError as exc:
             if not problems:
                 problems.append(str(exc))
@@ -146,6 +177,13 @@ def _names(text: str) -> set[str]:
 def _params_of(text: str) -> set[str]:
     try:
         return expression_params(text)
+    except ExpressionError:
+        return set()
+
+
+def _setup_of(text: str) -> set[str]:
+    try:
+        return expression_setup(text)
     except ExpressionError:
         return set()
 

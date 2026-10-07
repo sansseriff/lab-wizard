@@ -23,7 +23,11 @@ def _run_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wizard",
         description="Launch the Lab Wizard UI",
-        epilog="Workspace commands: wizard init [PATH], wizard clean [PATH]. Project commands: wizard regenerate [PROJECT]",
+        epilog=(
+            "Workspace commands: wizard init [PATH], wizard clean [PATH]. "
+            "Project commands: wizard regenerate [PROJECT]. "
+            "Simulated bench: wizard sim [BENCH_YAML], wizard sim stop"
+        ),
     )
     parser.add_argument(
         "--workspace",
@@ -94,6 +98,10 @@ def main(argv: list[str] | None = None) -> None:
         print("\n".join(done) if done else "Already up to date.")
         return
 
+    if argv and argv[0] == "sim":
+        _sim(argv[1:])
+        return
+
     if argv and argv[0] == "clean":
         parser = argparse.ArgumentParser(prog="wizard clean")
         parser.add_argument("path", nargs="?")
@@ -161,6 +169,36 @@ def main(argv: list[str] | None = None) -> None:
     if args.debug:
         command.append("--debug")
     raise SystemExit(_run_until_stopped(command, environment))
+
+
+def _sim(argv: list[str]) -> None:
+    """``wizard sim``: start the simulated bench in the background, or stop it."""
+    parser = argparse.ArgumentParser(
+        prog="wizard sim",
+        description=(
+            "Start the simulated bench in the background and print where to find its "
+            "instruments. Running it again prints them again."
+        ),
+        epilog="wizard sim stop: stop the running bench",
+    )
+    parser.add_argument(
+        "config", nargs="?", type=Path, help="bench YAML (detector, ports); the standard bench if omitted"
+    )
+    parser.add_argument("-v", "--verbose", action="store_true", help="log every unrecognised command")
+    from lab_wizard.sim.background import LOG, SimError, start, stop
+
+    if argv == ["stop"]:
+        pid = stop()
+        print(f"Stopped the simulated bench (pid {pid})." if pid else "No simulated bench is running.")
+        return
+
+    args = parser.parse_args(argv)
+    try:
+        bench = start(args.config, verbose=args.verbose)
+    except SimError as exc:
+        parser.exit(1, f"wizard sim: {exc}\n")
+    print(bench.description)
+    print(f"\nRunning in the background (pid {bench.pid}, log {LOG}). Stop it with: wizard sim stop")
 
 
 def _run_until_stopped(command: list[str], environment: dict[str, str]) -> int:

@@ -24,7 +24,7 @@ from ruamel.yaml import YAML
 
 from lab_procedure import Point, ProcedureRunner, Status
 
-from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.sim import SnspdModel, SnspdParams
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220AChannelParams
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.procedures.storage import list_presets, load_procedure, save_preset, save_procedure
@@ -235,7 +235,7 @@ def test_the_project_yaml_carries_its_procedure_and_the_module_is_built_from_it(
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
     expected = ProcedureDefinition.model_validate(PCR_DEFINITION).model_dump(mode="json", exclude_none=True)
     assert payload["procedure"] == expected
-    assert list(payload) == ["project", "run", "roles", "procedure", "measurement", "outputs"]
+    assert list(payload) == ["project", "run", "setup", "roles", "procedure", "measurement", "outputs"]
 
     module_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
     assert "DEFINITION" not in module_text  # the YAML is the one copy

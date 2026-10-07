@@ -116,9 +116,10 @@
 		>
 			<Combobox.Viewport class="p-1">
 				{#each shown as option (option.value)}
-					<Combobox.Item value={option.value} label={option.label} class="lw-select-item">
+					<Combobox.Item value={option.value} label={option.label} disabled={option.disabled} class="lw-select-item">
 						{#snippet children({ selected })}
-							<span class="min-w-0 flex-1 {option.value === NONE ? 'text-muted' : ''}">{option.label}</span>
+							<span class="min-w-0 flex-1 truncate {option.value === NONE || option.disabled ? 'text-muted' : ''}">{option.label}</span>
+							{#if option.hint}<span class="shrink-0 text-fine text-muted">{option.hint}</span>{/if}
 							{#if selected}<CheckIcon class="size-3.5 shrink-0 text-accent" />{/if}
 						{/snippet}
 					</Combobox.Item>

@@ -3,10 +3,11 @@
 What a person changes between runs lives in the project YAML and is read
 fresh at the start of every run, so editing it never means regenerating:
 
-``run:``                 the device under test, operator, notes, and metadata —
-                         free-form, nested groups allowed. Every scalar in it
-                         becomes a Data page filter (``run.cryostat``,
-                         ``run.optics.fiber``).
+``run:``                 the operator and notes.
+``setup:``               the setup it runs on, by name, and which of the
+                         setup's fields fills each of the procedure's needs.
+                         The setup itself (its fields, the device mounted in
+                         it) is in the lab database and is edited there.
 ``measurement.params``   the measurement's settings, checked against its
                          params model (``param.bias.settle_s`` on the Data page).
 ``outputs:``             files and the live plot.
@@ -30,13 +31,15 @@ from ruamel.yaml import YAML
 from lab_procedure import ProcedureError
 
 from lab_wizard.lib.custom_measurements import load_custom_measurement
+from lab_wizard.lib.data.schema import open_database
+from lab_wizard.lib.task_adapters.run import resolve_setup
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
 from lab_wizard.lib.project import build_measurement_module
 from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.utilities.model_tree import ProjectConfig
 from lab_wizard.wizard.backend.project_generation import commented_params
 
-__all__ = ["ProjectConfigError", "project_dir_for", "read_project", "save_project"]
+__all__ = ["ProjectConfigError", "check_setup", "project_dir_for", "read_project", "save_project"]
 
 
 class ProjectConfigError(ValueError):
@@ -121,6 +124,10 @@ def read_project(projects_dir: Path, config_dir: Path, name: str) -> dict[str, A
         "setup_file": setup[0].name if setup else None,
         "yaml": text,
         "run": project.run.model_dump(mode="json"),
+        "setup": project.setup.model_dump(mode="json"),
+        # The procedure's needs, {name: {unit, description}}, for the setup's
+        # fields to be bound to.
+        "needs": (project.procedure or {}).get("needs") or {},
         "params": project.measurement.params,
         "outputs": project.outputs.model_dump(mode="json"),
         # For the page to render and check the params form; None if unknown.
@@ -128,16 +135,34 @@ def read_project(projects_dir: Path, config_dir: Path, name: str) -> dict[str, A
     }
 
 
-def _check_device(data: Any, known_devices: Collection[str] | None) -> None:
-    """A run's device must be one the lab has registered, so a typo is not a new device."""
-    if known_devices is None or not isinstance(data, dict):
+def _check_setup_name(data: Any, known_setups: Collection[str] | None) -> None:
+    """The setup must be one the lab has, so a typo does not silently record nothing."""
+    if known_setups is None or not isinstance(data, dict):
         return
-    device = (data.get("run") or {}).get("device")
-    if device and device not in known_devices:
+    name = (data.get("setup") or {}).get("name")
+    if name and name not in known_setups:
         raise ProjectConfigError([{
-            "path": ["run", "device"],
-            "message": f"no device named {device!r}; register it under Data → Devices first",
+            "path": ["setup", "name"],
+            "message": f"no setup named {name!r}; create it on the Setups page first",
         }])
+
+
+def check_setup(project_dir: Path, db: Path) -> None:
+    """Refuse to start a run whose setup is missing, or whose needs it cannot fill.
+
+    The run checks the same when it starts; checking here says so on the Run
+    page before a process is started and instruments are claimed.
+    """
+    project = ProjectConfig.model_validate(yaml.safe_load(_yaml_path(project_dir).read_text(encoding="utf-8")) or {})
+    if project.project.style == "embedded":
+        return  # its setup is in its setup file; the run checks it
+    if not project.setup.name and not (project.procedure or {}).get("needs"):
+        return
+    connection = open_database(db)
+    try:
+        resolve_setup(connection, project.setup, project.procedure)
+    finally:
+        connection.close()
 
 
 def save_project(
@@ -146,15 +171,15 @@ def save_project(
     name: str,
     body: dict[str, Any],
     *,
-    known_devices: Collection[str] | None = None,
+    known_setups: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Write a project's settings, from the whole YAML or from its sections.
 
-    ``{"yaml": text}`` replaces the file as written. ``{"run", "params",
-    "outputs"}`` (any of them) replace those sections and keep everything else
-    in the file — its resources, and comments outside the sections changed.
-    Nothing is written unless the result checks. With ``known_devices``, the
-    run's device must be one of them.
+    ``{"yaml": text}`` replaces the file as written. ``{"run", "setup",
+    "params", "outputs"}`` (any of them) replace those sections and keep
+    everything else in the file — its resources, and comments outside the
+    sections changed. Nothing is written unless the result checks. With
+    ``known_setups``, the setup must be one of them.
     """
     project_dir = project_dir_for(projects_dir, name)
     path = _yaml_path(project_dir)
@@ -172,13 +197,15 @@ def save_project(
         except yaml.YAMLError as e:
             raise ProjectConfigError([{"path": [], "message": f"not valid YAML: {e}"}]) from e
         _check(data, project_dir, config_dir)
-        _check_device(data, known_devices)
+        _check_setup_name(data, known_setups)
     else:
         rt = YAML(typ="rt")
         rt.default_flow_style = False
         document = rt.load(path.read_text(encoding="utf-8"))
         if "run" in body:
             document["run"] = body["run"]
+        if "setup" in body:
+            document["setup"] = body["setup"]
         if "params" in body:
             model = _params_model(project_dir, ProjectConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8"))), config_dir)
             document.setdefault("measurement", {})["params"] = commented_params(body["params"], model)
@@ -189,7 +216,7 @@ def save_project(
         text = buffer.getvalue()
         data = yaml.safe_load(text)
         _check(data, project_dir, config_dir)
-        _check_device(data, known_devices)
+        _check_setup_name(data, known_setups)
     path.write_text(text, encoding="utf-8")
     # An edited procedure: block is built into <name>_measurement.py now, as a run would.
     build_measurement_module(project_dir)

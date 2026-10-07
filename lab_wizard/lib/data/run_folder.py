@@ -3,8 +3,8 @@
 ::
 
     2026-09-22/mcr_curve_A7_143012/
-      run.yaml          everything about the run: procedure, device, times, params,
-                        instruments, columns with units
+      run.yaml          everything about the run: procedure, device, times, its
+                        setup's fields, params, instruments, columns with units
       procedure.yaml    the procedure definition it ran
       points.csv        one line per point: seq, t, a column per value, steps
       steps.csv         every step it executed: path, kind, times, status, error
@@ -41,17 +41,17 @@ __all__ = ["FOLDER_KEYS", "FOLDER_KEY_FAMILIES", "RunFolder", "check_template", 
 # What a run.yaml holds, in order: the runs row, as the database has it.
 RUN_FIELDS = (
     "run_id", "procedure", "status", "started_at", "ended_at", "device", "operator",
-    "notes", "project", "metadata", "params", "instruments", "columns",
+    "notes", "project", "setup", "setup_fields", "setup_needs", "params", "instruments", "columns",
 )
 STEP_FIELDS = ("path", "kind", "started_at", "ended_at", "status", "error")
 
 _FIELD = re.compile(r"\{([^{}]+)\}")
 
 # What a folder template can name: every run has these ...
-FOLDER_KEYS = ("date", "time", "procedure", "device", "operator", "project", "status", "run_id")
+FOLDER_KEYS = ("date", "time", "procedure", "device", "operator", "project", "setup", "status", "run_id")
 # ... and these families hold whatever a lab records: device properties, the
-# run: block's metadata, params, and instrument settings.
-FOLDER_KEY_FAMILIES = ("device.", "run.", "param.", "instrument.")
+# setup's fields, params, and instrument settings.
+FOLDER_KEY_FAMILIES = ("device.", "setup.", "param.", "instrument.")
 _UNSAFE = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
@@ -266,6 +266,7 @@ class RunFolder:
         from matplotlib.figure import Figure
 
         from lab_wizard.lib.data.plot import default_plot, derive_per_run, evaluate_plot, with_views
+        from lab_wizard.lib.data.setups import resolve_needs
         from lab_wizard.lib.plotters.draw import draw_plot
 
         spec = default_plot(self.definition, self._columns())
@@ -278,10 +279,14 @@ class RunFolder:
             strict=False,
         )
         params = {0: self.run.get("params") or {}}
+        needs, _problems = resolve_needs(
+            self.run.get("setup_fields") or {}, self.run.get("setup_needs") or {}, (self.definition or {}).get("needs") or {}
+        )
+        setup = {0: needs}
         derived = {0: (self.definition or {}).get("derived") or {}}
         columns = self.run.get("columns") or {}
         bins = {name: meta["bins"] for name, meta in columns.items() if isinstance(meta, dict) and meta.get("bins")}
-        rows = evaluate_plot(spec, derive_per_run(frame, derived, params), params=params, bins=bins)
+        rows = evaluate_plot(spec, derive_per_run(frame, derived, params, setup), params=params, setup=setup, bins=bins)
         figure = Figure(figsize=(7, 4.5))
         FigureCanvasAgg(figure)
         ax = figure.add_subplot()
@@ -329,7 +334,7 @@ def export_run(
     row = dict(rows[0])
     run = {field: row.get(field) for field in RUN_FIELDS if field != "run_id"}
     run["run_id"] = run_id
-    for key in ("metadata", "params", "instruments", "columns"):
+    for key in ("setup_fields", "setup_needs", "params", "instruments", "columns"):
         run[key] = json.loads(row[key]) if row[key] else {}
     definition = json.loads(row["definition"]) if row["definition"] else None
     device = {"name": row["device"], "properties": json.loads(row["device_properties"] or "{}")} if row["device"] else None

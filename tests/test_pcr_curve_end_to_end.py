@@ -32,7 +32,7 @@ from ruamel.yaml import YAML
 
 from lab_procedure import Point, ProcedureRunner, RunStarted, Status
 
-from lab_sim import SnspdModel, SnspdParams
+from lab_wizard.sim import SnspdModel, SnspdParams
 from lab_wizard.lib.project import Project
 from lab_wizard.lib.instruments.general.counter import Counter
 from lab_wizard.lib.instruments.keysight53220A import Keysight53220A, Keysight53220AChannelParams

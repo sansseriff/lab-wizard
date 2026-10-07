@@ -17,6 +17,7 @@
 	import BokehPlot from '$lib/components/BokehPlot.svelte';
 	import Modal from '$lib/components/Modal.svelte';
 	import PlotSettings from '$lib/components/PlotSettings.svelte';
+	import { expressionCandidates } from '$lib/expressions/refs';
 	import Splitter from '$lib/components/Splitter.svelte';
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { queryChoice } from '$lib/url';
@@ -122,6 +123,18 @@
 	const plotSource = $derived(detail?.plots[plotIndex] ?? null);
 	const edited = $derived(!!spec && !!plotSource && !sameSpec(spec, specForRuns(plotSource, selected)));
 	const columns = $derived(detail ? [...Object.keys(detail.columns), ...Object.keys(detail.derived)] : []);
+	// What a plot's axes can refer to: the run's columns, its numeric params, its procedure's setup needs.
+	const candidates = $derived(
+		expressionCandidates({
+			columns,
+			params: detail
+				? flatten(detail.params)
+						.filter(([, v]) => typeof v === 'number')
+						.map(([name]) => ({ name }))
+				: [],
+			needs: detail?.setup.declared ?? {}
+		})
+	);
 	const labelKeys = $derived([
 		'device',
 		'operator',
@@ -542,7 +555,7 @@
 							{#if editing && spec}
 								<aside class="w-80 shrink-0 border-l border-line" aria-label="Plot settings">
 									<ScrollArea class="h-full" viewportClasses="px-3 pb-4">
-									<PlotSettings plot={spec} {columns} {labelKeys} shape={drawn?.shape} />
+									<PlotSettings plot={spec} {columns} {candidates} {labelKeys} shape={drawn?.shape} />
 									<p class="mt-3 text-fine text-muted">
 										An axis can be any expression of the columns, such as
 										<span class="mono">count_rate / 1000</span> or

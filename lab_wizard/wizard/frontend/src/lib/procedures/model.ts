@@ -102,6 +102,8 @@ export type Definition = {
 	body: Step;
 	plots?: PlotDecl[];
 	derived?: Record<string, string>;
+	/** Facts about the setup its derived columns read with setup("name"), each bound by a measurement. */
+	needs?: Record<string, { unit?: string | null; description?: string }>;
 };
 
 export type Problem = { path: Path; message: string };

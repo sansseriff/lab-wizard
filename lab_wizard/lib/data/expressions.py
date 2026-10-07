@@ -10,9 +10,11 @@ language, completely (``plans/semantic_data_plan.md`` §10):
 - per-run reductions ``mean min max sum count first last``, each ``f(expr)`` or
   ``f(expr, condition)``, where a condition may use ``== != < <= > >=`` and
   ``and``, ``or``, ``not``;
-- ``param("readout.bias_resistance_ohm")``: the value a run's own params gave,
-  so ``(bias_voltage - sense_voltage) / param("readout.bias_resistance_ohm")``
-  is a current in every run, whatever resistor each used.
+- ``param("bias.settle_s")``: the value a run's own params gave;
+- ``setup("bias_resistance")``: one of the procedure's needs, read from the
+  run's own copy of its setup in the need's unit (``plans/setup_plan.md``), so
+  ``(bias_voltage - sense_voltage) / setup("bias_resistance")`` is a current in
+  every run, whatever resistor each was taken with.
 
 Reductions are computed per run (``.over("run_id")``), so an expression means
 the same thing over one run or fifty. The text is parsed with Python's ``ast``
@@ -27,9 +29,18 @@ from typing import Any
 
 import polars as pl
 
-__all__ = ["ExpressionError", "compile_expression", "derive", "expression_names", "expression_params"]
+__all__ = [
+    "ExpressionError",
+    "compile_expression",
+    "derive",
+    "expression_names",
+    "expression_params",
+    "expression_setup",
+]
 
 Params = Mapping[int, Mapping[str, Any]]
+# {run_id: {need: value}}, as ``Runs.setup_values`` reads it.
+SetupValues = Mapping[int, Mapping[str, float]]
 
 RUN = "run_id"
 
@@ -84,14 +95,23 @@ def expression_names(text: str) -> set[str]:
     return {n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and id(n) not in called}
 
 
-def expression_params(text: str) -> set[str]:
-    """The param paths ``text`` reads with ``param("...")``."""
+def _quoted_arguments(text: str, function: str) -> set[str]:
     return {
         n.args[0].value
         for n in ast.walk(_parse(text))
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "param"
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == function
         and len(n.args) == 1 and isinstance(n.args[0], ast.Constant) and isinstance(n.args[0].value, str)
     }
+
+
+def expression_params(text: str) -> set[str]:
+    """The param paths ``text`` reads with ``param("...")``."""
+    return _quoted_arguments(text, "param")
+
+
+def expression_setup(text: str) -> set[str]:
+    """The needs ``text`` reads with ``setup("...")``."""
+    return _quoted_arguments(text, "setup")
 
 
 def _lookup(params: Mapping[str, Any], path: str) -> Any:
@@ -104,10 +124,11 @@ def _lookup(params: Mapping[str, Any], path: str) -> Any:
 
 
 class _Compiler:
-    def __init__(self, text: str, columns: Iterable[str], params: Params | None) -> None:
+    def __init__(self, text: str, columns: Iterable[str], params: Params | None, setup: SetupValues | None) -> None:
         self.text = text
         self.columns = set(columns)
         self.params = params
+        self.setup = setup
 
     def fail(self, what: str) -> ExpressionError:
         return ExpressionError(f"{self.text!r}: {what}")
@@ -152,6 +173,8 @@ class _Compiler:
             raise self.fail(f"{name or 'a function'}() takes no keyword arguments")
         if name == "param":
             return self.param(node)
+        if name == "setup":
+            return self.setup_value(node)
         if name in _ROW_FUNCTIONS:
             if len(node.args) != 1:
                 raise self.fail(f"{name}() takes one argument")
@@ -163,7 +186,7 @@ class _Compiler:
             if len(node.args) == 2:
                 inner = inner.filter(self.condition(node.args[1]))
             return _REDUCTIONS[name](inner).over(RUN)
-        functions = ", ".join(sorted({*_ROW_FUNCTIONS, *_REDUCTIONS, "param"}))
+        functions = ", ".join(sorted({*_ROW_FUNCTIONS, *_REDUCTIONS, "param", "setup"}))
         raise self.fail(f"unknown function {name or ast.unparse(node.func)!r} (functions: {functions})")
 
 
@@ -182,18 +205,36 @@ class _Compiler:
         # Each row takes the value from its own run's params.
         return pl.col(RUN).replace_strict(values, default=None, return_dtype=pl.Float64)
 
+    def setup_value(self, node: ast.Call) -> pl.Expr:
+        if len(node.args) != 1 or not (isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+            raise self.fail('setup() takes one quoted need, e.g. setup("bias_resistance")')
+        name = node.args[0].value
+        if self.setup is None:
+            raise self.fail(f"setup({name!r}) needs the runs' setups, and none were given")
+        values = {run_id: needs.get(name) for run_id, needs in self.setup.items()}
+        # Each row takes the value from its own run's copy of its setup.
+        return pl.col(RUN).replace_strict(values, default=None, return_dtype=pl.Float64)
 
-def compile_expression(text: str, columns: Iterable[str], params: Params | None = None) -> pl.Expr:
+
+def compile_expression(
+    text: str, columns: Iterable[str], params: Params | None = None, setup: SetupValues | None = None
+) -> pl.Expr:
     """``text`` as a polars expression over ``columns``.
 
     Evaluate it on a frame with a ``run_id`` column, sorted by run and
     recording order, so ``first`` and ``last`` mean the first and last row.
-    ``params`` is ``{run_id: params}``, for ``param("...")``.
+    ``params`` is ``{run_id: params}``, for ``param("...")``, and ``setup``
+    ``{run_id: {need: value}}``, for ``setup("...")``.
     """
-    return _Compiler(text, columns, params).value(_parse(text))
+    return _Compiler(text, columns, params, setup).value(_parse(text))
 
 
-def derive(frame: pl.DataFrame, derived: Mapping[str, str], params: Params | None = None) -> pl.DataFrame:
+def derive(
+    frame: pl.DataFrame,
+    derived: Mapping[str, str],
+    params: Params | None = None,
+    setup: SetupValues | None = None,
+) -> pl.DataFrame:
     """``frame`` with a column per ``{name: expression}``, in dependency order.
 
     A derived column may use another; a cycle, or a name that is already a
@@ -208,7 +249,9 @@ def derive(frame: pl.DataFrame, derived: Mapping[str, str], params: Params | Non
         ready = [name for name, text in pending.items() if not expression_names(text) & set(pending)]
         if not ready:
             raise ExpressionError(f"derived columns refer to each other in a cycle: {', '.join(sorted(pending))}")
-        frame = frame.with_columns(compile_expression(pending[name], frame.columns, params).alias(name) for name in ready)
+        frame = frame.with_columns(
+            compile_expression(pending[name], frame.columns, params, setup).alias(name) for name in ready
+        )
         for name in ready:
             del pending[name]
     return frame

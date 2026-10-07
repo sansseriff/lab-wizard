@@ -63,7 +63,9 @@ def test_a_projects_settings_are_its_run_params_and_outputs(workspace, rig):
     project = _create(client, rig)
     settings = client.get(f"/api/projects/{project}/settings").json()
     assert (settings["measurement"], settings["kind"]) == ("bias_sweep", "custom")
-    assert settings["run"] == {"device": None, "operator": None, "notes": None, "metadata": {}}
+    assert settings["run"] == {"operator": None, "notes": None}
+    assert settings["setup"] == {"name": None, "needs": {}}
+    assert settings["needs"] == {}  # a custom measurement reads nothing from its setup
     assert settings["params"]["settle_s"] == 0.05
     assert settings["outputs"]["files"] is False
     assert settings["params_schema"]["properties"]["settle_s"]["type"] == "number"
@@ -74,11 +76,11 @@ def test_a_projects_settings_are_its_run_params_and_outputs(workspace, rig):
 def test_saving_sections_keeps_the_rest_of_the_file(workspace, rig):
     _ws, client = workspace
     project = _create(client, rig)
-    run = {"device": "A7", "operator": "andrew", "notes": "after rewiring",
-           "metadata": {"cryostat": "BF1", "optics": {"fiber": "SM28", "attenuation_db": 30}}}
-    client.put("/api/data/devices/A7", json={"properties": {}})
-    saved = client.put(f"/api/projects/{project}/settings", json={"run": run}).json()
+    run = {"operator": "andrew", "notes": "after rewiring"}
+    client.put("/api/setups/bench", json={"fields": {"cryostat": "BF1"}})
+    saved = client.put(f"/api/projects/{project}/settings", json={"run": run, "setup": {"name": "bench"}}).json()
     assert saved["run"] == run
+    assert saved["setup"] == {"name": "bench", "needs": {}}
     assert "roles:" in saved["yaml"]  # the roles were not touched
 
 
@@ -95,10 +97,10 @@ def test_a_bad_setting_is_refused_with_where_it_is(workspace, rig):
     response = client.put(f"/api/projects/{project}/settings", json={"outputs": {"live_plot": "hologram"}})
     assert response.json()["problems"][0]["path"] == ["outputs", "live_plot"]
 
-    # A device the lab has not registered is a typo until it is registered.
-    response = client.put(f"/api/projects/{project}/settings", json={"run": {"device": "A7x"}})
+    # A setup the lab does not have is a typo until it is created.
+    response = client.put(f"/api/projects/{project}/settings", json={"setup": {"name": "bench-x"}})
     assert response.status_code == 422
-    assert response.json()["problems"][0]["path"] == ["run", "device"]
+    assert response.json()["problems"][0]["path"] == ["setup", "name"]
 
     response = client.put(f"/api/projects/{project}/settings", json={"yaml": "run: [unclosed"})
     assert "not valid YAML" in response.json()["detail"]
@@ -112,9 +114,10 @@ def test_a_launched_run_is_followed_to_its_record(workspace, rig):
     ws, client = workspace
     project = _create(client, rig)
     client.put("/api/data/devices/A7", json={"properties": {}})
+    client.put("/api/setups/bench", json={"fields": {"cryostat": "BF1", "optics": {"fiber": "SM28"}}, "device": "A7"})
     saved = client.put(f"/api/projects/{project}/settings", json={
         "params": {"bias": {"mode": "explicit", "values": [0.0, 0.01, 0.02]}, "settle_s": 0.0},
-        "run": {"device": "A7", "metadata": {"cryostat": "BF1", "optics": {"fiber": "SM28"}}},
+        "setup": {"name": "bench"},
     })
     assert saved.status_code == 200, saved.text
     assert client.get(f"/api/projects/{project}/launch").json()["state"] == "idle"
@@ -127,9 +130,11 @@ def test_a_launched_run_is_followed_to_its_record(workspace, rig):
 
     runs = find(db=ws.data_dir / "lab.db", procedure="bias_sweep")
     assert runs.table()["status"].to_list() == ["success"]
-    # The metadata's groups are filters on the Data page.
+    # The setup's fields, groups and all, are filters on the Data page, and
+    # its mounted device is the run's.
     facets = {f["key"] for f in client.get("/api/data/facets").json()["facets"]}
-    assert {"run.cryostat", "run.optics.fiber", "device"} <= facets
+    assert {"setup", "setup.cryostat", "setup.optics.fiber", "device"} <= facets
+    assert runs.table()["device"].to_list() == ["A7"]
 
 
 def test_a_run_is_stopped_like_a_ctrl_c(workspace, rig):

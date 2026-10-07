@@ -42,7 +42,7 @@ class FileSettings(BaseModel):
     )
     path: str = Field(
         default=DEFAULT_TEMPLATE,
-        description="Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {run.<metadata>} {param.<path>} {run_id}",
+        description="Where each run goes under the root, from filter keys: {date} {time} {procedure} {device} {device.<property>} {operator} {setup} {setup.<field>} {param.<path>} {run_id}",
     )
     plot_png: bool = Field(default=True, description="Also save the run's default plot as plot.png")
 

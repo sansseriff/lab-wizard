@@ -33,7 +33,7 @@ import tty
 from pathlib import Path
 from typing import Callable, Optional
 
-logger = logging.getLogger("lab_sim.transports")
+logger = logging.getLogger("lab_wizard.sim.transports")
 
 Feed = Callable[[bytes], bytes]
 
@@ -143,7 +143,7 @@ class Hub:
         self._streams: dict[int, _Stream] = {}
         self._ports: list[PtySerial | TcpPort] = []
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._serve, name="lab_sim hub", daemon=True)
+        self._thread = threading.Thread(target=self._serve, name="lab_wizard sim hub", daemon=True)
 
     def add_serial(self, port: PtySerial) -> None:
         self._ports.append(port)

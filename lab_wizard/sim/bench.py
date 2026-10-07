@@ -24,11 +24,11 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-from lab_sim.aq2212 import AQ2212, Attenuator
-from lab_sim.keysight53220a import Keysight53220A
-from lab_sim.sim900 import GpibBus, PrologixController, Sim900, Sim928, Sim970
-from lab_sim.snspd import SnspdModel, SnspdParams
-from lab_sim.transports import Hub, PtySerial, TcpPort, line_feed
+from lab_wizard.sim.aq2212 import AQ2212, Attenuator
+from lab_wizard.sim.keysight53220a import Keysight53220A
+from lab_wizard.sim.sim900 import GpibBus, PrologixController, Sim900, Sim928, Sim970
+from lab_wizard.sim.snspd import SnspdModel, SnspdParams
+from lab_wizard.sim.transports import Hub, PtySerial, TcpPort, line_feed
 
 DEFAULT_LINK = "~/.lab_sim/prologix"
 

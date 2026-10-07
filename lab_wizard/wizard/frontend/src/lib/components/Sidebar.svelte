@@ -1,7 +1,7 @@
 <script lang="ts">
 	/** The persistent navigation rail.
 	 *
-	 * Seven top-level sections, each a noun rather than a task, and nothing
+	 * Eight top-level sections, each a noun rather than a task, and nothing
 	 * under them. Each goes to its section's most useful page; a section with
 	 * more than one page shows them as tabs across the top (SectionTabs).
 	 */
@@ -14,6 +14,7 @@
 	import PulseIcon from 'phosphor-svelte/lib/Pulse';
 	import TreeStructureIcon from 'phosphor-svelte/lib/TreeStructure';
 	import CircuitryIcon from 'phosphor-svelte/lib/Circuitry';
+	import FlaskIcon from 'phosphor-svelte/lib/Flask';
 	import HardDrivesIcon from 'phosphor-svelte/lib/HardDrives';
 	import DatabaseIcon from 'phosphor-svelte/lib/Database';
 	import GearSixIcon from 'phosphor-svelte/lib/GearSix';
@@ -43,6 +44,7 @@
 		// Beside Measurements: a procedure is what a measurement is created from.
 		{ href: '/procedures', label: 'Procedures', icon: TreeStructureIcon },
 		{ href: '/instruments', label: 'Instruments', icon: CircuitryIcon },
+		{ href: '/setups', label: 'Setups', icon: FlaskIcon },
 		{ href: '/servers', label: 'Servers', icon: HardDrivesIcon },
 		{ href: '/data', label: 'Data', icon: DatabaseIcon },
 		{ href: '/settings', label: 'Settings', icon: GearSixIcon }

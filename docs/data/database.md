@@ -13,9 +13,10 @@ Code: [`lib/data/`](../../lab_wizard/lib/data/).
 
 - **The run**: its procedure, status (`running`, `success`, `failed`,
   `aborted`, or `interrupted` if its process died without ending it — killed,
-  crashed, or a power cut), start and end times, and what the project's `run:`
-  block said: the device under test, the operator, notes, and any other
-  metadata.
+  crashed, or a power cut), start and end times, the operator and notes, and
+  the setup it was taken on: a copy of the setup's fields and its mounted
+  device (the device under test) as they were when the run started, and which
+  field filled each of its procedure's needs.
 - **One row per point.** A row is everything recorded while the same parameter
   values were in force (see
   [How readings become rows](../concepts/procedures.md#how-readings-become-rows)),
@@ -33,7 +34,8 @@ Code: [`lib/data/`](../../lab_wizard/lib/data/).
 
 | Table | One row per | Holds |
 |---|---|---|
-| `runs` | run | `procedure`, `status`, `started_at`, `ended_at`, `device_id`, `operator`, `notes`, `project`, and JSON `metadata`, `definition`, `params`, `instruments`, `columns` |
+| `setups` | setup | `name`, `notes`, `device_id` (what is mounted), and JSON `fields` (its current facts) |
+| `runs` | run | `procedure`, `status`, `started_at`, `ended_at`, `device_id`, `operator`, `notes`, `project`, `setup`, and JSON `setup_fields`, `setup_needs`, `definition`, `params`, `instruments`, `columns` |
 | `points` | point of a run | `run_id`, `seq` (recording order), `t`, the `steps` that recorded it, and JSON `values`: the parameters in force and every reading |
 | `steps` | step execution | `run_id`, `path`, `kind`, `started_at`, `ended_at`, `status`, `error` |
 | `devices` | device | `name`, and JSON `properties` (type, wafer, width …) that apply to every run on it |
@@ -45,10 +47,10 @@ Code: [`lib/data/`](../../lab_wizard/lib/data/).
 cannot outlive the runs that recorded it.
 
 `run_facets` flattens each run's facts into filters when it ends: `procedure`,
-`device`, `device.<property>`, `operator`, `date`, `run.<metadata key>`,
+`device`, `device.<property>`, `operator`, `date`, `setup`, `setup.<field>`,
 `instrument.<role>.type`, `instrument.<role>.<param>`, `param.<path>`, and
 `column` for each column it recorded. A filter finds only what was recorded, so
-name the device in the `run:` block before a run.
+mount the device in the setup before a run.
 
 ## Reading runs back
 
@@ -60,7 +62,7 @@ Runs in the lab database are read with
 from lab_wizard.lib.data import find, facets, load_plot
 
 runs = find(procedure="mcr_curve", device="A7")          # newest first
-runs = find({"device.type": "SNSPD-A", "run.cryostat": "BlueFors1"})
+runs = find({"device.type": "SNSPD-A", "setup.cryostat": "BlueFors1"})
 runs = find({"param.readout.gate_time_s": {"range": [0.1, 1.0]}})
 
 runs.table()     # one row per run: date, procedure, device, operator, points
@@ -71,7 +73,7 @@ facets()         # every filter there is, with how many runs each leaves
 
 `find` and `facets` use the workspace you are in (or `LAB_WIZARD_WORKSPACE`);
 pass `db=` to name a `lab.db` directly. A filter is any facet: `procedure`,
-`device`, `device.<property>`, `operator`, `date`, `run.<metadata key>`,
+`device`, `device.<property>`, `operator`, `date`, `setup`, `setup.<field>`,
 `instrument.<role>.type`, `instrument.<role>.<param>`, `param.<path>`, or
 `column` (runs that recorded a column).
 

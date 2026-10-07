@@ -26,11 +26,24 @@ class RunConfig(BaseModel):
     # Every field is present in what the wizard's API returns (its OpenAPI schema).
     model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
-    device: str | None = Field(default=None, description="The device under test, by its name in the lab database")
     operator: str | None = None
     notes: str | None = None
-    # Anything else worth filtering runs by later: {"cryostat": "BlueFors1"}.
-    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SetupBinding(BaseModel):
+    """The setup a measurement runs on, and which of its fields fills each need.
+
+    The setup is named, not copied: its fields, and the device mounted in it,
+    live in the lab database and are copied into each run when it starts. So
+    changing the setup never means editing a project, and a run always
+    records what the setup said at the time (``plans/setup_plan.md``).
+    """
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
+
+    name: str | None = Field(default=None, description="The setup, by its name on the Setups page")
+    # {need: field path}: {"bias_resistance": "channel2.bias_resistor"}.
+    needs: dict[str, str] = Field(default_factory=dict)
 
 
 class MeasurementConfig(BaseModel):
@@ -102,6 +115,7 @@ class RoleBinding(BaseModel):
 class ProjectConfig(BaseModel):
     project: ProjectInfo
     run: RunConfig = Field(default_factory=RunConfig)
+    setup: SetupBinding = Field(default_factory=SetupBinding)
     measurement: MeasurementConfig = Field(default_factory=MeasurementConfig)
     outputs: OutputsConfig = Field(default_factory=OutputsConfig)
     # Which instrument fills each of the measurement's roles; a list for a role

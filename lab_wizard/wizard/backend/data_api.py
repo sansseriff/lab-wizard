@@ -33,7 +33,7 @@ import polars as pl
 from lab_procedure import ProcedureError
 from lab_procedure.sweep import SWEEP_ADAPTER
 
-from lab_wizard.lib.data.facets import metadata_units, write_run_facets
+from lab_wizard.lib.data.facets import quantity_units, write_run_facets
 from lab_wizard.lib.data.plot import (
     PlotSpec,
     RunsContext,
@@ -94,7 +94,7 @@ FACET_GROUPS: list[tuple[str, tuple[str, ...]]] = [
     ("Procedure", ("procedure",)),
     ("Device", ("device",)),
     ("Device properties", ("device.",)),
-    ("Run", ("run.",)),
+    ("Setup", ("setup", "setup.")),
     ("Instruments", ("instrument.",)),
     ("Params", ("param.",)),
     ("Operator", ("operator",)),
@@ -155,11 +155,11 @@ def facet_list(db: Path, filters: Mapping[str, Any]) -> dict[str, Any]:
         total = len(lab.find(filters))
     except ValueError as e:
         raise DataRequestError(str(e)) from e
-    # The units a run's metadata gives its quantities ({value, unit}); the
-    # latest run's unit wins if two runs disagree.
+    # The units a run's setup gives its quantities ({value, unit}), each in
+    # the base unit its facet compares in; the latest run's wins if two disagree.
     units: dict[str, str] = {}
-    for (text,) in lab.query("SELECT metadata FROM runs WHERE metadata IS NOT NULL ORDER BY id"):
-        units.update(metadata_units(json.loads(text or "{}")))
+    for (text,) in lab.query("SELECT setup_fields FROM runs ORDER BY id"):
+        units.update(quantity_units(json.loads(text or "{}")))
     out = []
     for (key,), part in frame.group_by("key", maintain_order=True):
         order, group = _group(str(key))
@@ -210,7 +210,15 @@ def run_detail(db: Path, config_dir: str | Path, run_id: int) -> dict[str, Any]:
     columns = info["columns"] or {}
     plots = with_views(run_plots(definition, list(columns)), saved_views(lab, run_id))
     return {
-        "run": {**summary, "metadata": info["metadata"] or {}},
+        "run": summary,
+        "setup": {
+            "name": info["setup"],
+            "fields": info["setup_fields"] or {},
+            "needs": info["setup_needs"] or {},
+            # What each need read as, in the unit the procedure declared it in.
+            "values": runs.setup_values().get(run_id, {}),
+            "declared": (definition or {}).get("needs") or {},
+        },
         "params": info["params"] or {},
         "instruments": info["instruments"] or {},
         "columns": columns,
@@ -423,13 +431,14 @@ _EXAMPLE_FACETS = {
     "procedure": "mcr_curve",
     "device": "A7",
     "device.wafer": "W12",
+    "setup": "cryostat-A",
     "operator": "andrew",
     "run_id": "41",
 }
 
 
 def _recorded_keys(db: Path) -> list[str]:
-    """Keys in the open families (``device.wafer``, ``run.cryostat``, ...) some run has."""
+    """Keys in the open families (``device.wafer``, ``setup.cryostat``, ...) some run has."""
     lab = _lab(db)
     if lab is None:
         return []

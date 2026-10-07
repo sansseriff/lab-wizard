@@ -2,8 +2,8 @@
 	/** Run a project: set it up, run it, watch it.
 	 *
 	 * One page, because setting up and watching are one loop — change a param,
-	 * run, look, change it again. Left, what the next run will be (its device and
-	 * metadata, params, and outputs), as fields or as the project's YAML. Right,
+	 * run, look, change it again. Left, what the next run will be (the setup it
+	 * runs on, params, and outputs), as fields or as the project's YAML. Right,
 	 * the run: its plots and its timeline, live while it goes, and the project's
 	 * last run when nothing is going.
 	 *
@@ -13,6 +13,8 @@
 	 */
 	import '$lib/procedures/composer.css';
 	import { onDestroy, untrack } from 'svelte';
+	import { guardNavigation } from '$lib/confirm.svelte';
+	import DevicePicker from '$lib/setups/DevicePicker.svelte';
 	import { fly } from 'svelte/transition';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -27,10 +29,12 @@
 	import Tabs from '$lib/components/Tabs.svelte';
 	import { dataApi } from '$lib/data/api';
 	import LiveRunView from '$lib/live/LiveRunView.svelte';
-	import MetadataEditor from '$lib/run/MetadataEditor.svelte';
 	import SchemaField from '$lib/run/SchemaField.svelte';
-	import { runApi, type LaunchStatus, type Outputs, type ProjectSettings, type RunDetails } from '$lib/run/api';
+	import { runApi, type LaunchStatus, type Outputs, type ProjectSettings, type RunDetails, type SetupBinding } from '$lib/run/api';
 	import { pathKey } from '$lib/run/schema';
+	import NeedBindings from '$lib/setups/NeedBindings.svelte';
+	import { setupsApi, type Setup } from '$lib/setups/api';
+	import { isImage, isImages, leaves, sameNameBindings, withField } from '$lib/setups/model';
 
 	// Width of the settings column; the run takes the rest.
 	let setupWidth = $state(528);
@@ -41,7 +45,8 @@
 	// ---- the project's settings, and the draft the form edits ----
 	let settings = $state<ProjectSettings | null>(null);
 	let loadError = $state('');
-	let run = $state<RunDetails>({ device: null, operator: null, notes: null, metadata: {} });
+	let run = $state<RunDetails>({ operator: null, notes: null });
+	let binding = $state<SetupBinding>({ name: null, needs: {} });
 	let params = $state<Record<string, unknown>>({});
 	let outputs = $state<Outputs>({ files: true, live_plot: 'none', plot: '' });
 	let yamlText = $state('');
@@ -59,15 +64,53 @@
 		if (!settings) return false;
 		if (mode === 'yaml') return yamlText !== settings.yaml;
 		return (
+			setupDirty ||
 			JSON.stringify(run) !== JSON.stringify(settings.run) ||
+			JSON.stringify(binding) !== JSON.stringify(settings.setup) ||
 			JSON.stringify(params) !== JSON.stringify(settings.params) ||
 			JSON.stringify(outputs) !== JSON.stringify(settings.outputs)
 		);
 	});
 
+	// ---- the setup: the lab's, edited here as a draft and saved with the project ----
+	let setups = $state<Setup[]>([]);
+	// The chosen setup's fields and mounted device as edited here; saving writes
+	// them to the setup, because the bench changed, not just this project.
+	let setupDraft = $state<{ fields: Record<string, unknown>; device: string | null } | null>(null);
+	const savedSetup = $derived(setups.find((s) => s.name === binding.name) ?? null);
+	const setupDirty = $derived(
+		savedSetup !== null &&
+			setupDraft !== null &&
+			(JSON.stringify(setupDraft.fields) !== JSON.stringify(savedSetup.fields) || setupDraft.device !== savedSetup.device)
+	);
+	const needs = $derived(settings?.needs ?? {});
+	const boundPaths = $derived(new Set(Object.values(binding.needs)));
+	const otherFields = $derived(setupDraft ? leaves(setupDraft.fields).filter((l) => !boundPaths.has(l.path)) : []);
+
+	async function loadSetups() {
+		try {
+			setups = await setupsApi.list();
+		} catch {
+			setups = [];
+		}
+	}
+
+	function draftFrom(name: string | null) {
+		const setup = setups.find((s) => s.name === name);
+		setupDraft = setup ? { fields: $state.snapshot(setup.fields), device: setup.device } : null;
+	}
+
+	function chooseSetup(name: string | null) {
+		const setup = setups.find((s) => s.name === name);
+		binding = { name, needs: setup ? sameNameBindings(needs, setup.fields) : {} };
+		draftFrom(name);
+	}
+
 	function show(next: ProjectSettings) {
 		settings = next;
 		run = structuredClone(next.run);
+		binding = structuredClone(next.setup);
+		draftFrom(next.setup.name);
 		params = structuredClone(next.params);
 		outputs = structuredClone(next.outputs);
 		yamlText = next.yaml;
@@ -75,6 +118,14 @@
 		serverProblems = {};
 		generation++;
 	}
+
+	// Unsaved settings, the setup's fields among them, are not lost to a click elsewhere.
+	guardNavigation(() => dirty && !saving, {
+		title: 'Discard your unsaved settings?',
+		description: 'Nothing here, including changes to the setup, is saved until you press Save.',
+		confirmLabel: 'Discard',
+		tone: 'danger'
+	});
 
 	function problem(key: string, message: string | null) {
 		if (message) clientProblems[key] = message;
@@ -95,7 +146,11 @@
 		saveMessage = '';
 		serverProblems = {};
 		try {
-			show(await runApi.save(project, mode === 'yaml' ? { yaml: yamlText } : { run, params, outputs }));
+			if (mode === 'form' && setupDirty && savedSetup && setupDraft) {
+				const saved = await setupsApi.save(savedSetup.name, { ...setupDraft, notes: savedSetup.notes });
+				setups = setups.map((s) => (s.name === saved.name ? saved : s));
+			}
+			show(await runApi.save(project, mode === 'yaml' ? { yaml: yamlText } : { run, setup: binding, params, outputs }));
 			return true;
 		} catch (e) {
 			saveMessage = errorMessage(e);
@@ -116,24 +171,15 @@
 	}
 
 	// ---- suggestions: what this lab has already recorded ----
-	let recorded = $state<Record<string, string[]>>({});
-	let devices = $state<string[]>([]);
 	let operators = $state<string[]>([]);
 
 	async function loadSuggestions() {
 		try {
 			const { facets } = await dataApi.facets({});
 			const values = (key: string) => facets.find((f) => f.key === key)?.values.map((v) => v.value) ?? [];
-			recorded = Object.fromEntries(facets.filter((f) => f.key.startsWith('run.')).map((f) => [f.key, f.values.map((v) => v.value)]));
 			operators = values('operator');
 		} catch {
 			// No runs yet: nothing to suggest.
-		}
-		try {
-			// Every device the lab has registered, measured yet or not.
-			devices = (await dataApi.devices()).devices.map((d) => d.name);
-		} catch {
-			devices = [];
 		}
 	}
 
@@ -274,6 +320,8 @@
 			goto('/measurements', { replaceState: true });
 			return;
 		}
+		// The setups first: showing the settings drafts the chosen one.
+		await loadSetups();
 		await Promise.all([load(), findLastRun(), loadSuggestions()]);
 		if (name === project) poll();
 	}
@@ -379,24 +427,73 @@
 							{#key generation}
 								<div class="space-y-5">
 									<div class="space-y-2">
-										<h3 class="text-2xs font-semibold uppercase tracking-[0.09em] text-muted">This run</h3>
+										<h3 class="text-2xs font-semibold uppercase tracking-[0.09em] text-muted">Setup</h3>
 										<div>
-											<label class="lw-label" for="run-device">Device under test</label>
+											<label class="lw-label" for="run-setup">The setup it runs on</label>
 											<Combobox
-												id="run-device"
+												id="run-setup"
 												mono
-												value={run.device}
-												options={devices.map((d) => ({ value: d, label: d }))}
-												onValueChange={(d) => (run.device = d)}
-												noneLabel="No device"
+												value={binding.name}
+												options={setups.map((s) => ({ value: s.name, label: s.name, hint: s.device ?? undefined }))}
+												onValueChange={chooseSetup}
+												noneLabel="No setup"
 											>
 												{#snippet empty(search)}
-													No device named “{search}”. Register it under
-													<a class="underline" href="/data">Data → Devices</a>.
+													No setup named “{search}”. Create it on the
+													<a class="underline" href="/setups">Setups page</a>.
 												{/snippet}
 											</Combobox>
 										</div>
-										{#if serverProblems['run.device']}<p class="text-fine text-crit">{serverProblems['run.device']}</p>{/if}
+										{#if serverProblems['setup.name']}<p class="text-fine text-crit">{serverProblems['setup.name']}</p>{/if}
+										{#if setupDraft}
+											<div>
+												<label class="lw-label" for="run-device">Mounted device</label>
+												<DevicePicker
+													id="run-device"
+													value={setupDraft.device}
+													onchange={(d) => setupDraft && (setupDraft.device = d)}
+												/>
+											</div>
+										{/if}
+										{#if Object.keys(needs).length}
+											<p class="text-fine text-muted">
+												What {settings.measurement} reads from the setup to draw its plots. Changing a value here
+												changes the setup, for every measurement on it.
+											</p>
+											<NeedBindings
+												{needs}
+												fields={setupDraft?.fields ?? null}
+												bindings={binding.needs}
+												editable
+												onchange={(b) => (binding = { ...binding, needs: b })}
+												onsetfield={(path, value) => {
+													if (setupDraft) setupDraft.fields = withField(setupDraft.fields, path, value);
+												}}
+											/>
+										{/if}
+										{#if setupDraft && otherFields.length}
+											<details class="rounded border border-line px-2.5 py-1.5">
+												<summary class="cursor-pointer text-xs text-ink-2">
+													Its other fields ({otherFields.length}), recorded with every run
+												</summary>
+												<dl class="mt-1.5 grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-3 gap-y-0.5 text-xs">
+													{#each otherFields as leaf (leaf.path)}
+														<dt class="mono text-muted">{leaf.path}</dt>
+														<dd class="mono truncate">{isImage(leaf.value) || isImages(leaf.value) ? 'picture' : leaf.shown}</dd>
+													{/each}
+												</dl>
+												<a class="mt-1 inline-block text-fine text-accent hover:underline" href="/setups?name={encodeURIComponent(binding.name ?? '')}"
+													>Edit on the Setups page →</a
+												>
+											</details>
+										{/if}
+										{#if setupDirty}
+											<p class="text-fine text-warn">Saving also saves {binding.name}: the setup changed, not only this project.</p>
+										{/if}
+									</div>
+
+									<div class="space-y-2">
+										<h3 class="text-2xs font-semibold uppercase tracking-[0.09em] text-muted">This run</h3>
 										<div>
 											<label class="lw-label" for="run-operator">Operator</label>
 											<input id="run-operator" class="lw-input" list="known-operators" bind:value={() => run.operator ?? '', (v) => (run.operator = v.trim() ? v : null)} />
@@ -406,16 +503,6 @@
 											<label class="lw-label" for="run-notes">Notes</label>
 											<textarea id="run-notes" class="lw-input" rows="2" bind:value={() => run.notes ?? '', (v) => (run.notes = v.trim() ? v : null)}></textarea>
 										</div>
-									</div>
-
-									<div class="space-y-2">
-										<h3 class="text-2xs font-semibold uppercase tracking-[0.09em] text-muted">Metadata</h3>
-										<p class="text-fine text-muted">
-											Anything worth finding this run by later. Each field is a filter on the Data page:
-											<code>cryostat</code> is <code>run.cryostat</code>; a field in a group
-											<code>optics</code> is <code>run.optics.…</code>.
-										</p>
-										<MetadataEditor value={run.metadata} {recorded} onproblem={problem} onchange={(v) => (run.metadata = v)} />
 									</div>
 
 									<div class="space-y-2">
