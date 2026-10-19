@@ -381,6 +381,9 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
             storage_path=storage_dir,
             debug=debug,
             icon=icon_path,
+            # Linux installs only the Qt backend, but pywebview tries GTK first
+            # and logs a traceback when it is missing. PYWEBVIEW_GUI still wins.
+            gui="qt" if sys.platform == "linux" and "PYWEBVIEW_GUI" not in os.environ else None,
         )
         _win.evaluate_js("window.special = 3")  # type: ignore[attr-defined]
 
@@ -429,8 +432,15 @@ if __name__ == "__main__":
     # user 1 worker for easier data sharing
     # Use an import string so the child process can import the app without pickling it
     app_import_str = "lab_wizard.wizard.backend.main:app"
+    # Per-request access lines only in --debug: loading the UI alone fetches
+    # dozens of assets, which buried the startup messages and any errors.
     config = Config(
-        app_import_str, host=server_ip, port=server_port, log_level=log_level, workers=1
+        app_import_str,
+        host=server_ip,
+        port=server_port,
+        log_level=log_level,
+        workers=1,
+        access_log=args.debug,
     )
     instance = UvicornServer(config=config)
     instance.start()
