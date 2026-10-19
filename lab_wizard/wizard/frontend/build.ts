@@ -2,6 +2,7 @@ import { $ } from "bun";
 import path from "node:path";
 import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
+import { CHROME, checkFiles, formatFindings } from "./css-compat";
 
 
 const current_directory = import.meta.dir; // https://bun.sh/docs/api/import-meta
@@ -14,6 +15,17 @@ const output_directory = path.join(current_directory, "../backend/static");
 console.log('\x1b[33m >>>>> Building SvelteKit frontend (adapter-static)... \x1b[0m');
 await $`bun run build`;
 
+
+// Fail on CSS that Qt5 WebEngine (Chrome 87) would silently drop; see css-compat.ts.
+console.log(`\x1b[33m >>>>> Checking CSS against Chrome ${CHROME}... \x1b[0m`);
+const css_files = [...new Bun.Glob("**/*.css").scanSync(build_directory)].map((name) => path.join(build_directory, name));
+const { problems } = checkFiles(css_files);
+if (problems.length) {
+    throw new Error(
+        `CSS that Chrome ${CHROME} can't use. Rewrite it in vite.config.ts, avoid it, ` +
+        `or add it to ALLOWED in css-compat.ts:\n${formatFindings(problems)}`
+    );
+}
 
 console.log('\x1b[33m >>>>> Moving compiled static site to /backend/static/ \x1b[0m');
 

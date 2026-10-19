@@ -30,6 +30,51 @@ const whereToIs: PostcssPlugin = {
 	}
 };
 
+// Tailwind 4's translate-*, rotate-* and scale-* utilities set the individual
+// transform properties (Chrome 104), which Chrome 87 ignores: a dialog centred
+// with left-1/2 -translate-x-1/2 sat with its left edge mid-screen, its right
+// half off the window. Nothing polyfills them, so each becomes a transform.
+// That would clash on an element also given a transform, or more than one of
+// these, but nothing in the app combines them.
+const TRANSFORM_FUNCTIONS: Record<string, string> = { translate: 'translate', rotate: 'rotate', scale: 'scale' };
+
+/** Splits a value on spaces outside parentheses: "var(--a) var(--b)" -> two parts. */
+function splitTopLevel(value: string): string[] {
+	const parts: string[] = [];
+	let depth = 0;
+	let current = '';
+	for (const char of value.trim()) {
+		if (char === '(') depth++;
+		if (char === ')') depth--;
+		if (/\s/.test(char) && depth === 0) {
+			if (current) parts.push(current);
+			current = '';
+		} else {
+			current += char;
+		}
+	}
+	if (current) parts.push(current);
+	return parts;
+}
+
+// Dynamic viewport units (dvh, Chrome 108) make the whole declaration invalid
+// in Chrome 87, so pages sized with h-[calc(100dvh-...)] lost their height.
+// dvh differs from vh only where browser toolbars come and go, which a
+// desktop window doesn't have.
+const DYNAMIC_VIEWPORT_UNIT = /(\d)dv(h|w|min|max)\b/g;
+
+const oldBrowserRewrites: PostcssPlugin = {
+	postcssPlugin: 'old-browser-rewrites',
+	Declaration(decl) {
+		decl.value = decl.value.replace(DYNAMIC_VIEWPORT_UNIT, '$1v$2');
+		const fn = TRANSFORM_FUNCTIONS[decl.prop];
+		if (!fn) return;
+		const value = decl.value.trim();
+		decl.prop = 'transform';
+		decl.value = value === 'none' ? 'none' : `${fn}(${splitTopLevel(value).join(', ')})`;
+	}
+};
+
 function oldBrowserCss(): Plugin {
 	return {
 		name: 'old-browser-css',
@@ -47,7 +92,7 @@ function oldBrowserCss(): Plugin {
 					return marker(i) + (typeof source === 'string' ? source : new TextDecoder().decode(source));
 				})
 				.join('\n');
-			const processor = postcss([whereToIs, postcssPresetEnv({ browsers: OLD_BROWSERS })]);
+			const processor = postcss([whereToIs, oldBrowserRewrites, postcssPresetEnv({ browsers: OLD_BROWSERS })]);
 			const { css } = await processor.process(joined, { from: undefined });
 			const parts = css.split(/\/\*old-browser-css:\d+\*\//);
 			if (parts.length !== files.length + 1 || parts[0].trim() !== '') {

@@ -17,6 +17,7 @@
 		"api": "cd ../../.. && uv run python -m lab_wizard.wizard.backend.openapi > lab_wizard/wizard/frontend/src/lib/api/openapi.json && cd lab_wizard/wizard/frontend && openapi-typescript src/lib/api/openapi.json -o src/lib/api/schema.d.ts"
 	},
 	"devDependencies": {
+		"@mdn/browser-compat-data": "^8.1.6",
 		"@sveltejs/adapter-static": "^3.0.10",
 		"@sveltejs/kit": "^2.70.3",
 		"@sveltejs/vite-plugin-svelte": "^7.3.0",

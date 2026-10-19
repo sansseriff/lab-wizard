@@ -13,6 +13,7 @@
         "phosphor-svelte": "^3.1.0",
       },
       "devDependencies": {
+        "@mdn/browser-compat-data": "^8.1.6",
         "@sveltejs/adapter-static": "^3.0.10",
         "@sveltejs/kit": "^2.70.3",
         "@sveltejs/vite-plugin-svelte": "^7.3.0",
@@ -358,6 +359,8 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.5", "", {}, "sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.30", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-GQ7Nw5G2lTu/BtHTKfXhKHok2WGetd4XYcVKGx00SjAk8GMwgJM3zr6zORiPGuOE+/vkc90KtTosSSvaCjKb2Q=="],
+
+    "@mdn/browser-compat-data": ["@mdn/browser-compat-data@8.1.6", "", {}, "sha512-bTP5c58cBsgMOokwa/ECLcAxTkIwBe9csIts92Nq2wviediIJadh9iHI4Ezn2q6RiZhy7b54SNRn/tZpPKtTsA=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.149.0", "", {}, "sha512-Efcc+iF0j3Bf67YjEqIqWXbX5XddXoK/Mw4K1/JuXwRCZ8N16VR7iT23nlCc9XrveFVh/E5Rqs2StT0V8v9LdA=="],
 
