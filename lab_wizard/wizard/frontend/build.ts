@@ -1,6 +1,6 @@
 import { $ } from "bun";
 import path from "node:path";
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
 
@@ -20,6 +20,27 @@ console.log('\x1b[33m >>>>> Moving compiled static site to /backend/static/ \x1b
 // Ensure build output exists before copying
 if (!existsSync(build_directory)) {
     throw new Error(`Build directory not found: ${build_directory}`);
+}
+
+// On Linux the wizard's window is Qt5 WebEngine (Chrome 87), which lacks
+// Array.prototype.at, structuredClone and the like. @vitejs/plugin-legacy
+// builds a polyfills chunk for them but only links it from a Vite index.html,
+// which SvelteKit doesn't use, so link it from every prerendered page. It's a
+// plain script, and placed first in <head> it runs before SvelteKit's inline
+// boot script starts loading the app.
+const immutable_directory = path.join(build_directory, "_app/immutable");
+const polyfills = readdirSync(immutable_directory).find((name) => /^polyfills\..*\.js$/.test(name));
+if (!polyfills) {
+    throw new Error(`Polyfills chunk not found in ${immutable_directory}`);
+}
+console.log(`\x1b[33m >>>>> Linking ${polyfills} from every page... \x1b[0m`);
+for (const page of new Bun.Glob("**/*.html").scanSync(build_directory)) {
+    const file = path.join(build_directory, page);
+    const html = readFileSync(file, "utf8");
+    if (!html.includes("<head>")) {
+        throw new Error(`No <head> in ${file}`);
+    }
+    writeFileSync(file, html.replace("<head>", `<head>\n\t\t<script src="/_app/immutable/${polyfills}"></script>`));
 }
 
 // Check if output directory exists and remove it first

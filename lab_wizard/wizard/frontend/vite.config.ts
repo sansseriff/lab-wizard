@@ -66,6 +66,10 @@ export default defineConfig({
 		sveltekit(),
 		legacy({
 			targets: ['chrome >= 64', 'safari >= 12'],
+			// The default modern target is Chrome 105, which would leave out
+			// polyfills (Array.prototype.at, Chrome 92) and syntax lowering that
+			// Qt5 WebEngine needs. build.ts links the polyfill chunk into each page.
+			modernTargets: OLD_BROWSERS,
 			modernPolyfills: true,
 			renderLegacyChunks: false
 		}),
