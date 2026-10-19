@@ -27,6 +27,16 @@ if (problems.length) {
     );
 }
 
+// Selectors in scripts (querySelector, closest, matches) escape that check, and
+// Chrome 87 throws on these pseudo-classes rather than skipping them.
+const new_selector = /:(is|where|has)\(/;
+for (const name of new Bun.Glob("**/*.js").scanSync(build_directory)) {
+    const match = readFileSync(path.join(build_directory, name), "utf8").match(new RegExp(`.{0,60}${new_selector.source}.{0,60}`));
+    if (match) {
+        throw new Error(`${name} uses a selector Chrome ${CHROME} can't parse:\n  ${match[0]}`);
+    }
+}
+
 console.log('\x1b[33m >>>>> Moving compiled static site to /backend/static/ \x1b[0m');
 
 // Ensure build output exists before copying

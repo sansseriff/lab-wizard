@@ -33,10 +33,13 @@
 	 *  immediately — the type picker's search field is the first thing in the
 	 *  dialog for exactly this reason. */
 	let content = $state<HTMLElement | null>(null);
+	/** Spelled out rather than `[data-modal-body] :is(...)`: Qt5 WebEngine
+	 *  (Chrome 87) has no :is(), and querySelector throws on it. */
+	const FIRST_FIELD = ['input:not([type=checkbox])', 'select', 'textarea', 'button']
+		.map((field) => `[data-modal-body] ${field}`)
+		.join(', ');
 	function focusFirstField(event: Event) {
-		const field = content?.querySelector<HTMLElement>(
-			'[data-modal-body] :is(input:not([type=checkbox]), select, textarea, button)'
-		);
+		const field = content?.querySelector<HTMLElement>(FIRST_FIELD);
 		if (field) {
 			event.preventDefault();
 			field.focus();
