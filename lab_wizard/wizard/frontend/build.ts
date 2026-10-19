@@ -33,6 +33,14 @@ const polyfills = readdirSync(immutable_directory).find((name) => /^polyfills\..
 if (!polyfills) {
     throw new Error(`Polyfills chunk not found in ${immutable_directory}`);
 }
+// The chunk is meant to be a module, so its minified top-level vars would
+// become globals in a plain script. One is named `qt`, which replaced the
+// window.qt object Qt injects, so pywebview's bridge found no
+// qt.webChannelTransport ("Cannot read property 'send' of undefined").
+// A function scope keeps them local; core-js installs the polyfills on
+// globalThis explicitly.
+const polyfills_file = path.join(immutable_directory, polyfills);
+writeFileSync(polyfills_file, `(function () {\n${readFileSync(polyfills_file, "utf8")}\n})();\n`);
 console.log(`\x1b[33m >>>>> Linking ${polyfills} from every page... \x1b[0m`);
 for (const page of new Bun.Glob("**/*.html").scanSync(build_directory)) {
     const file = path.join(build_directory, page);
