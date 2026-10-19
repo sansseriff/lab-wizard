@@ -40,20 +40,6 @@ cd "$REPO_ROOT"
 # Compiled now, not on the wizard's first start (uv leaves it to first import).
 uv sync --compile-bytecode
 
-# The first load of each freshly installed native library is slow (on macOS it
-# is checked once, ~1 s for polars alone), so take that hit here: unwarmed, the
-# wizard's first start took ~4.7 s to show the app, against ~1.2 s after.
-echo "Preparing the wizard for its first start..."
-uv run python -c "
-import importlib, lab_wizard.wizard.backend.app, lab_wizard.lib.server.server, webview
-for gui in ('cocoa', 'qt', 'gtk', 'winforms'):
-    try:
-        importlib.import_module('webview.platforms.' + gui)
-        break
-    except Exception:
-        pass
-"
-
 # --- 2. Bun + frontend build ---
 
 echo ""
@@ -88,6 +74,23 @@ bun install
 echo ""
 echo "Building frontend (output -> lab_wizard/wizard/backend/static/)..."
 bun run ./build.ts
+
+# The first load of each freshly installed native library is slow (on macOS it
+# is checked once, ~1 s for polars alone), so take that hit here: unwarmed, the
+# wizard's first start took ~4.7 s to show the app, against ~1.2 s after.
+# Runs after the frontend build: importing the app mounts backend/static/.
+echo ""
+echo "Preparing the wizard for its first start..."
+cd "$REPO_ROOT"
+uv run python -c "
+import importlib, lab_wizard.wizard.backend.app, lab_wizard.lib.server.server, webview
+for gui in ('cocoa', 'qt', 'gtk', 'winforms'):
+    try:
+        importlib.import_module('webview.platforms.' + gui)
+        break
+    except Exception:
+        pass
+"
 
 # --- 3. macOS: app bundle for the Dock icon ---
 
