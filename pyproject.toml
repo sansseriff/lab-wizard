@@ -2,7 +2,7 @@
 name = "lab-wizard-repo"
 version = "0.1.0"
 description = "Main SNSPD wizard app"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = ["lab-wizard", "lab-procedure", "ruamel-yaml>=0.18.16"]
 
 
@@ -15,6 +15,10 @@ packages = ["lab_wizard"]
 
 [tool.uv]
 package = true
+# Older Linux (glibc 2.17, e.g. RHEL/CentOS 7) has no prebuilt wheels for these
+# packages' newer releases, so uv would try to compile them from source. These
+# caps keep them at releases that ship manylinux2014 wheels for Python 3.13.
+constraint-dependencies = ["numpy<2.3", "contourpy<1.3.3", "matplotlib<3.12", "pyzmq<27"]
 
 [project.scripts]
 wizard = "lab_wizard.wizard.cli:main"

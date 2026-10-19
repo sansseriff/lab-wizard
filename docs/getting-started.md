@@ -19,7 +19,7 @@ This will:
 3. Install [Bun](https://bun.sh/) (the JavaScript runtime) if not present.
 4. Install frontend dependencies and build the static SvelteKit assets the GUI serves.
 
-The project requires **Python ≥ 3.14**. The repo is a uv workspace: the root
+The project requires **Python ≥ 3.13**. The repo is a uv workspace: the root
 package (`lab-wizard-repo`) depends on the `lab_wizard` member package, installed
 editable. Initialize the repository root after setup so instrument-code edits
 and the local workspace share the same checkout:
