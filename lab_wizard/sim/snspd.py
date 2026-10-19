@@ -96,7 +96,7 @@ class SnspdParams(BaseModel):
     """Device and circuit constants for one simulated detector."""
 
     bias_resistance_ohm: float = Field(
-        default=1.0e6,
+        default=1.0e5,
         description="(ohm) series resistor between the voltage source and the detector",
     )
     critical_current_a: float = Field(
