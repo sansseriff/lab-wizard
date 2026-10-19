@@ -188,7 +188,7 @@ def test_server_reload_and_audit_after_edit(config):
 
 
 def test_http_update_delegates_to_server(config, monkeypatch):
-    from lab_wizard.wizard.backend import deps, hardware_access, main
+    from lab_wizard.wizard.backend import app as backend_app, deps, hardware_access
     from lab_wizard.wizard.backend.models import Env
 
     path, node = selection(config)
@@ -206,9 +206,9 @@ def test_http_update_delegates_to_server(config, monkeypatch):
         yield Session()
 
     monkeypatch.setattr(hardware_access, "server_session", session)
-    main.app.dependency_overrides[deps.get_env] = lambda: Env(config_dir=config)
+    backend_app.app.dependency_overrides[deps.get_env] = lambda: Env(config_dir=config)
     try:
-        client = TestClient(main.app, raise_server_exceptions=False)
+        client = TestClient(backend_app.app, raise_server_exceptions=False)
         result = client.post(
             "/api/manage-instruments/update",
             json={
@@ -221,7 +221,7 @@ def test_http_update_delegates_to_server(config, monkeypatch):
         assert calls[0][0] == "tree_update"
         assert calls[0][1]["path"] == path
     finally:
-        main.app.dependency_overrides.clear()
+        backend_app.app.dependency_overrides.clear()
 
 
 def test_duplicate_attribute_names_are_rejected_before_persistence(config):

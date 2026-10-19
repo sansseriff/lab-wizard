@@ -16,7 +16,7 @@ __all__ = ["schema"]
 
 
 def schema() -> dict[str, Any]:
-    from lab_wizard.wizard.backend.main import app
+    from lab_wizard.wizard.backend.app import app
 
     return app.openapi()
 

@@ -1,47 +1,32 @@
-"""The wizard's process: the FastAPI app, its startup, and the window it opens.
+"""The wizard's process: it serves the app (``app.py``) and opens its window.
 
-The HTTP API itself lives in ``routes/``, one router per section of the GUI;
-what every route needs to find its workspace is in ``deps.py``.
+Three processes: this launcher, the server child, and the window child. The
+launcher imports only what launching needs — the app, with FastAPI, polars and
+every route, is imported by the server child alone — so the window can start
+alongside the server and show a loading page within a fraction of a second.
 """
 
-import asyncio
+import argparse
+import json
 import logging
 import multiprocessing
 import multiprocessing.spawn
 import os
 import signal
 import sys
+import tempfile
 import time
 import urllib.request
-from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-
-try:
-    import webview  # type: ignore
-except Exception:  # ImportError or runtime issues shouldn't block headless mode
-    webview = None  # type: ignore
-import argparse
-import tempfile
 from multiprocessing.connection import Connection
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from uvicorn import Config, Server
 
-from lab_wizard.lib.data.network import warn_if_networked
-from lab_wizard.lib.utilities.resource_catalog import get_instrument_metadata
-from lab_wizard.wizard.backend.errors import install_error_handlers
+from lab_wizard.lib.workspace import require_workspace
 from lab_wizard.wizard.backend.location import WEB_DIR
 from lab_wizard.wizard.backend.logging_config import configure_wizard_logging
 from lab_wizard.wizard.backend.macos_app import window_executable
-from lab_wizard.wizard.backend.models import Env
-from lab_wizard.wizard.backend.server_control import (
-    ensure_server,
-    stop_managed_children,
-)
 from lab_wizard.wizard.backend.utils_runtime import (
     get_ipv4_addresses,
     green,
@@ -51,89 +36,8 @@ from lab_wizard.wizard.backend.utils_runtime import (
 
 FRAMELESS = False
 ICON_PATH = Path(WEB_DIR) / "icon.png"
+LOADING_PAGE = Path(__file__).with_name("loading.html")
 logger = logging.getLogger("lab_wizard.wizard.backend.main")
-
-
-# Define the lifespan context manager
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    env = Env.from_current_workspace()
-    if env.logs_dir is None:
-        raise RuntimeError("Workspace logs directory was not resolved")
-    log_file = configure_wizard_logging(logs_dir=env.logs_dir)
-    logger.info("Wizard logging initialized at %s", log_file)
-    app.state.env = env
-
-    # Pre-warm the instrument metadata cache in a thread so the first
-    # /api/manage-instruments request is instant.  We do this BEFORE yielding
-    # so the server only starts accepting connections once the cache is hot —
-    # the health-poll in start_window therefore returns OK at exactly the
-    # right moment.
-    await asyncio.to_thread(get_instrument_metadata)
-    if env.data_dir is not None:
-        await asyncio.to_thread(warn_if_networked, env.data_dir)
-
-    # Find-or-start this workspace's instrument server, so hardware has exactly
-    # one owner and the wizard is a client of it. Off the event loop because
-    # start_server waits briefly to confirm the child survived. Started
-    # detached, so the daemon outlives this window and other workspaces on the
-    # machine keep their instruments when the host's GUI is closed.
-    try:
-        status = await asyncio.to_thread(ensure_server, str(env.config_dir))
-        if status.get("running"):
-            logger.info(
-                "Instrument server owns hardware for this workspace (pid=%s, bind=%s)",
-                status.get("pid"),
-                status.get("bind"),
-            )
-        else:
-            logger.info(
-                "No instrument server for this workspace; the wizard will open "
-                "hardware in-process"
-            )
-    except Exception:
-        logger.exception("Could not reconcile the instrument server; continuing")
-
-    yield
-    # Code to run on shutdown (if any)
-    try:
-        # Stop any instrument server we launched in managed mode; detached
-        # (daemon) servers are intentionally left running.
-        stop_managed_children()
-    except Exception as e:
-        logger.exception("Unhandled shutdown error: %s", e)
-
-
-# Pass the lifespan manager to the FastAPI app
-app = FastAPI(lifespan=lifespan)
-install_error_handlers(app)
-
-
-@app.middleware("http")
-async def request_logging_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
-    request_id = uuid4().hex[:12]
-    start = time.perf_counter()
-    logger.debug(
-        "request.start id=%s %s %s", request_id, request.method, request.url.path
-    )
-    try:
-        response = await call_next(request)
-    except Exception:
-        logger.exception(
-            "request.error id=%s %s %s", request_id, request.method, request.url.path
-        )
-        raise
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
-    logger.info(
-        "request.done id=%s status=%s %s %s %.1fms",
-        request_id,
-        response.status_code,
-        request.method,
-        request.url.path,
-        elapsed_ms,
-    )
-    response.headers["X-Request-ID"] = request_id
-    return response
 
 
 # ---- stopping cleanly ----
@@ -181,34 +85,6 @@ class UvicornServer(multiprocessing.Process):
 
     def run(self):
         self.server.run()
-
-
-# NOTE: Mount StaticFiles AFTER declaring API routes so it doesn't intercept /api/*
-
-
-@app.get("/api/health")
-def health(request: Request):
-    """Liveness probe, and proof of *which* wizard is answering.
-
-    The workspace is included because several wizards can run on one machine.
-    Without it, a second instance whose port was taken would happily open a
-    window onto the first instance's server and show the wrong workspace's
-    instruments — which looks like a working app, not a failure.
-    """
-    env = getattr(request.app.state, "env", None)
-    return {
-        "status": "ok",
-        "workspace": str(getattr(env, "workspace_dir", "") or ""),
-        "pid": os.getpid(),
-    }
-
-
-from lab_wizard.wizard.backend.routes import ROUTERS  # noqa: E402
-
-for _router in ROUTERS:
-    app.include_router(_router)
-
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="frontend")
 
 
 def _port_is_free(port: int, host: str = "0.0.0.0") -> bool:
@@ -265,45 +141,36 @@ def _verify_own_server(port: int, workspace: str, timeout: float = 15.0) -> None
     workspace's instruments with no indication anything was wrong.
     """
     deadline = time.monotonic() + timeout
-    last: dict[str, Any] = {}
     while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(
-                f"http://localhost:{port}/api/health", timeout=1
-            ) as r:
-                if r.status == 200:
-                    import json as _json
-
-                    last = _json.loads(r.read().decode())
-                    if not workspace or last.get("workspace") == workspace:
-                        return
-                    raise SystemExit(
-                        f"Port {port} is served by a different Lab Wizard "
-                        f"(workspace {last.get('workspace')!r}), not this one "
-                        f"({workspace!r}). This workspace's server failed to "
-                        "start — check the log above for the reason."
-                    )
-        except SystemExit:
-            raise
-        except Exception:
+        serving = _serving_workspace(port)
+        if serving is None:
             time.sleep(0.05)
+        elif not workspace or serving == workspace:
+            return
+        else:
+            raise SystemExit(
+                f"Port {port} is served by a different Lab Wizard "
+                f"(workspace {serving!r}), not this one "
+                f"({workspace!r}). This workspace's server failed to "
+                "start — check the log above for the reason."
+            )
     raise SystemExit(
         f"This workspace's wizard did not come up on port {port} within "
         f"{timeout:.0f}s. Check the log above for the reason."
     )
 
 
-def _wait_for_server(url: str, timeout: float = 15.0) -> bool:
-    """Poll a health URL until it returns 200 or the timeout expires."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=1) as r:
-                if r.status == 200:
-                    return True
-        except Exception:
-            time.sleep(0.05)
-    return False
+def _serving_workspace(port: int) -> str | None:
+    """The workspace of the wizard answering on ``port``, or None if none is yet."""
+    try:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/api/health", timeout=1
+        ) as r:
+            if r.status == 200:
+                return str(json.loads(r.read().decode()).get("workspace", ""))
+    except Exception:
+        pass
+    return None
 
 
 def _resolve_webview_icon_path(icon_path: Path, temp_dir: str) -> str | None:
@@ -342,15 +209,31 @@ def _resolve_webview_icon_path(icon_path: Path, temp_dir: str) -> str | None:
     return str(ico_path)
 
 
-def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
-    if webview is None:
-        raise RuntimeError("pywebview is not available; cannot start UI window")
+def _load_when_ready(window: Any, url: str, port: int, workspace: str) -> None:
+    """Swap the loading page for the app once this workspace's server answers.
+
+    Only *our* server: should another wizard hold the port, the launcher reports
+    it and closes this window, which keeps the loading page until then.
+    """
+    while True:
+        serving = _serving_workspace(port)
+        if serving is not None and (not workspace or serving == workspace):
+            break
+        time.sleep(0.05)
+    window.load_url(url)
+
+
+def start_window(
+    pipe_send: Connection, url_to_load: str, port: int, workspace: str, debug: bool = False
+):
+    """Open the window at once on a loading page; the app replaces it when ready."""
+    try:
+        import webview  # type: ignore
+    except Exception as exc:
+        raise RuntimeError("pywebview is not available; cannot start UI window") from exc
     # The launcher decides when the window goes; a Ctrl-C here would only
     # print a traceback.
     _set_signals(("SIGINT",), signal.SIG_IGN)
-
-    health_url = url_to_load.rstrip("/") + "/api/health"
-    _wait_for_server(health_url)
 
     def on_closed():
         pipe_send.send("closed")
@@ -361,7 +244,7 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
 
     _win: Any = webview.create_window(  # type: ignore
         "Lab Wizard",
-        url=url_to_load,
+        html=LOADING_PAGE.read_text(encoding="utf-8"),
         resizable=True,
         width=1300,
         height=900,
@@ -378,6 +261,8 @@ def start_window(pipe_send: Connection, url_to_load: str, debug: bool = False):
     with tempfile.TemporaryDirectory(prefix="lab-wizard-webview-") as storage_dir:
         icon_path = _resolve_webview_icon_path(ICON_PATH, storage_dir)
         webview.start(
+            _load_when_ready,
+            (_win, url_to_load, port, workspace),
             storage_path=storage_dir,
             debug=debug,
             icon=icon_path,
@@ -410,10 +295,8 @@ def parse_arguments():
 if __name__ == "__main__":
     args = parse_arguments()
     os.environ["LAB_WIZARD_LOG_LEVEL"] = "DEBUG" if args.debug else "INFO"
-    runtime_env = Env.from_current_workspace()
-    if runtime_env.logs_dir is None:
-        raise RuntimeError("Workspace logs directory was not resolved")
-    configure_wizard_logging(logs_dir=runtime_env.logs_dir, debug=args.debug)
+    workspace = require_workspace()
+    configure_wizard_logging(logs_dir=workspace.logs_dir, debug=args.debug)
     log_level = "debug" if args.debug else "info"
 
     server_ip = "0.0.0.0"
@@ -428,7 +311,7 @@ if __name__ == "__main__":
     # Start server first
     # user 1 worker for easier data sharing
     # Use an import string so the child process can import the app without pickling it
-    app_import_str = "lab_wizard.wizard.backend.main:app"
+    app_import_str = "lab_wizard.wizard.backend.app:app"
     config = Config(
         app_import_str, host=server_ip, port=server_port, log_level=log_level, workers=1
     )
@@ -443,17 +326,12 @@ if __name__ == "__main__":
         url = f"http://{webview_ip}:{server_port}/"
         should_spawn_ui = (not args.no_ui) and has_gui_context()
 
-        # Refuse to show a window until the server answering is demonstrably ours.
-        _verify_own_server(server_port, str(runtime_env.workspace_dir or ""))
-        logger.info(
-            "Wizard serving %s on port %d", runtime_env.workspace_dir, server_port
-        )
-
         if should_spawn_ui:
-            # Then start window
+            # Alongside the server, not after it: the window shows a loading
+            # page straight away and loads the app once the server is ours.
             windowsp = multiprocessing.Process(
                 target=start_window,
-                args=(conn_send, url, args.debug),
+                args=(conn_send, url, server_port, str(workspace.root), args.debug),
             )
 
             # On macOS the window runs from Lab Wizard.app so the Dock shows
@@ -467,14 +345,17 @@ if __name__ == "__main__":
             finally:
                 multiprocessing.set_executable(default_executable)
 
+        # The window will not show the app until the server answering is
+        # demonstrably ours; if it is not, this stops with the reason.
+        _verify_own_server(server_port, str(workspace.root))
+        logger.info("Wizard serving %s on port %d", workspace.root, server_port)
+
+        if windowsp is not None:
             window_status = ""
             while "closed" not in window_status:
                 window_status = conn_recv.recv()
                 logger.debug("Window status event: %s", window_status)
         else:
-            # Headless/SSH/no-UI: wait until the server is actually ready, then print URLs.
-            health_url = f"http://localhost:{server_port}/api/health"
-            _wait_for_server(health_url)
             print("\nNo UI context detected or --no-ui set.")
             # Enumerate all non-loopback IPv4s and print URLs
             ips = get_ipv4_addresses()

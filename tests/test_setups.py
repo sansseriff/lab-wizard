@@ -17,7 +17,7 @@ from lab_wizard.lib.data import open_database
 from lab_wizard.lib.data.setups import SetupError, field_leaves, need_value, resolve_needs, save_setup
 from lab_wizard.lib.data.units import UnitError, base_unit, convert, in_base
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
-from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.backend.app import app
 
 # --------------------------- units ---------------------------
 

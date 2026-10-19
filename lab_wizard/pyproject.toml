@@ -64,6 +64,7 @@ lab_wizard = [
     "wizard/backend/static/*",
     "wizard/backend/static/**/*",
     "wizard/backend/icon.icns",
+    "wizard/backend/loading.html",
     "lib/procedures/library/*.yml",
     "lib/examples/measurements/*.py",
 ]

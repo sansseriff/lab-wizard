@@ -26,7 +26,7 @@ from ruamel.yaml import YAML
 from lab_wizard.lib.client.session import Session
 from lab_wizard.lib.procedures.storage import load_procedure, save_preset
 from lab_wizard.lib.data.settings import DataSettings, FileSettings, save_data_settings
-from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.backend.app import app
 from lab_wizard.wizard.backend.server_control import set_server_bind, start_server, stop_server
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 

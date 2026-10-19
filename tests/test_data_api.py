@@ -28,7 +28,7 @@ from lab_wizard.lib.procedures.storage import load_procedure, save_procedure
 from lab_wizard.lib.task_adapters.run import database_path, run_procedure
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 from lab_wizard.wizard.backend import data_api
-from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.backend.app import app
 
 ATTENUATIONS = [10.0, 0.0]
 

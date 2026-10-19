@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.backend.app import app
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 
 

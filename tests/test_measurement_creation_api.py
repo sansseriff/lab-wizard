@@ -17,7 +17,7 @@ from ruamel.yaml import YAML
 
 from lab_wizard.lib.procedures.storage import load_procedure, save_preset
 from lab_wizard.lib.utilities.config_io import load_instruments
-from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.backend.app import app
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
 
 

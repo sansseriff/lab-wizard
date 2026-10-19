@@ -229,7 +229,7 @@ def test_the_wizard_lists_claims_and_force_releases_only_from_this_machine(live:
     from fastapi.testclient import TestClient
 
     import lab_wizard.lib.client.server_registry as server_registry
-    from lab_wizard.wizard.backend.main import app
+    from lab_wizard.wizard.backend.app import app
 
     entry = {"pid": 4242, "workspace_path": "/labs/cryo-a", "bind": live.url, "ipc": None}
     monkeypatch.setattr(server_registry, "list_local_servers", lambda: [entry])

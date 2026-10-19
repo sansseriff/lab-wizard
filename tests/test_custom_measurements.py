@@ -21,7 +21,7 @@ from lab_wizard.lib.data import find
 from lab_wizard.lib.instruments.general.vsense import VSense
 from lab_wizard.lib.instruments.general.vsource import VSource
 from lab_wizard.lib.workspace import WORKSPACE_ENV, initialize_workspace
-from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.backend.app import app
 
 EXAMPLES = {"bias_sweep", "find_switching_voltage"}
 

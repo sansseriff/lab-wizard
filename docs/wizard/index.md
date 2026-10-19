@@ -13,7 +13,7 @@ read.
 
 ```mermaid
 graph LR
-    CLI["wizard (cli.py)"] -->|subprocess| BE["FastAPI backend<br/>backend/main.py :8884"]
+    CLI["wizard (cli.py)"] -->|subprocess| BE["FastAPI backend<br/>backend/app.py :8884"]
     BE -->|serves static build| FE["SvelteKit frontend"]
     BE -->|pywebview window| WIN["Desktop window"]
     FE -->|/api/*| BE
@@ -22,9 +22,15 @@ graph LR
 - [`cli.py`](../../lab_wizard/wizard/cli.py) implements `wizard init` and the
   bare `wizard` launcher. The launcher resolves `lab-wizard.toml`, passes the
   workspace root to the backend, and launches it as a subprocess.
-- [`backend/main.py`](../../lab_wizard/wizard/backend/main.py) is a FastAPI app.
+- [`backend/app.py`](../../lab_wizard/wizard/backend/app.py) is a FastAPI app.
   It includes the `/api/*` routers from `backend/routes/` and then mounts the pre-built SvelteKit static
-  site at `/`. A `pywebview` window points at `http://localhost:8884/`.
+  site at `/`.
+- [`backend/main.py`](../../lab_wizard/wizard/backend/main.py) starts the app's
+  server and the `pywebview` window side by side. The window shows a loading page
+  ([`backend/loading.html`](../../lab_wizard/wizard/backend/loading.html)) until
+  the server answers for this workspace, then loads `http://localhost:8884/`.
+  The launcher and window never import the app (FastAPI, polars, every route),
+  so the window appears in a fraction of a second.
 - The frontend ([`wizard/frontend`](../../lab_wizard/wizard/frontend/)) is built
   with Bun + Vite during `setup.sh`; the backend serves the static output.
 - On startup the backend pre-warms the instrument-metadata cache in a thread so
@@ -53,8 +59,8 @@ across the top. These docs mirror them.
 Endpoints are declared in
 [`backend/routes/`](../../lab_wizard/wizard/backend/routes/), one module per
 section of the GUI (`measurements`, `runs`, `procedures`, `instruments`,
-`servers`, `data`, `live`, `settings`); [`backend/main.py`](../../lab_wizard/wizard/backend/main.py)
-builds the app and opens the window. The ones worth knowing:
+`servers`, `data`, `live`, `settings`); [`backend/app.py`](../../lab_wizard/wizard/backend/app.py)
+builds the app. The ones worth knowing:
 
 | Endpoint | Does |
 |---|---|

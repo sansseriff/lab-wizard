@@ -221,7 +221,7 @@ def test_health_reports_the_workspace_the_launcher_compares_against() -> None:
     """
     from fastapi.testclient import TestClient
 
-    from lab_wizard.wizard.backend.main import app
+    from lab_wizard.wizard.backend.app import app
     from lab_wizard.wizard.backend.models import Env
 
     with TestClient(app) as client:

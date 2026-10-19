@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from lab_wizard.lib.data.settings import load_data_settings
-from lab_wizard.wizard.backend.main import app
+from lab_wizard.wizard.backend.app import app
 from lab_wizard.wizard.backend.deps import get_env
 from lab_wizard.wizard.backend.models import Env
 from lab_wizard.lib.instruments.general.prologix_gpib import PrologixGPIBParams

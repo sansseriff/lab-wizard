@@ -65,7 +65,8 @@
 	class:motion-ready={motionReady}
 	class="sidebar sticky top-0 flex h-screen shrink-0 flex-col overflow-y-auto border-r border-line bg-surface"
 >
-	<div class="sidebar-header border-b border-line pb-3 pt-4">
+	<!-- Same height as the layout's top bar, so their bottom borders line up. -->
+	<div class="sidebar-header flex h-[46px] shrink-0 flex-col justify-center border-b border-line">
 		<a href="/" aria-label="Lab Wizard home" class="brand-link no-underline">
 			<img src={logo} alt="" class="size-6 shrink-0" />
 			<span class="brand-label text-xs font-semibold uppercase tracking-[0.13em] text-ink"

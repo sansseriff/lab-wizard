@@ -14,7 +14,7 @@ between the library and GUI.
   GUI. You can `import` it, build instruments, and run measurements with no web
   server involved. Generated measurement projects depend only on `lib`.
 - `lab_wizard/wizard` is the GUI. Its backend is a FastAPI app
-  ([`backend/main.py`](../../lab_wizard/wizard/backend/main.py)); its frontend is
+  ([`backend/app.py`](../../lab_wizard/wizard/backend/app.py)); its frontend is
   a pre-built SvelteKit static site served by that same app. The backend is a
   thin orchestration layer — almost every endpoint delegates to functions in
   `lib/utilities` or `wizard/backend`.
