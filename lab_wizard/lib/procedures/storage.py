@@ -104,7 +104,7 @@ def save_procedure(config_dir: str | Path, definition: ProcedureDefinition) -> P
     definition.check()
     path = procedures_dir(config_dir) / f"{definition.name}.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = definition.model_dump(mode="json", exclude_none=True)
+    payload = definition.to_yaml()
     with path.open("w", encoding="utf-8") as handle:
         _yaml().dump(payload, handle)
     return path

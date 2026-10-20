@@ -61,8 +61,9 @@ visited once, and every point records the leg it was taken on
 (`bias_voltage_leg`: 0, 1, 2, 3), so a hysteretic curve's branches can be
 filtered, or drawn one line per leg (`series: bias_voltage_leg`, as the
 `iv_curve`'s *IV by leg* plot does).
-Params become the project's `measurement.params` and a pydantic model in the
-generated setup file.
+In a project, each param's `default` is the value its runs use: the project
+copies the procedure, params and all, and is edited there. The params also
+become a pydantic model in the generated measurement module.
 
 **The body** is the step tree. A step's fields hold one of:
 
@@ -239,8 +240,10 @@ preset afterwards changes no existing project.
 ## Generated code, and editing it
 
 A project carries its procedure in the **`procedure:` block of its YAML**, in
-the same form as a procedure file, beside `measurement.params`, the values of
-the params it declares. That block is the one copy the project edits.
+the same form as a procedure file. Its params' defaults are the project's
+values; there is no other copy of them. That block is the one copy the project
+edits. Taking a newer version of the procedure keeps each value whose param it
+still has, with the same type.
 
 `<name>_measurement.py` is built from it: the params classes (typed fields,
 no defaults), `<Name>Resources`, and `build_<name>_procedure()` with the step

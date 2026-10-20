@@ -143,7 +143,7 @@ def procedure_detail(config_dir: str | Path, name: str) -> dict[str, Any]:
         "name": name,
         "origin": origin,
         "has_builtin": (BUILTIN_DIR / f"{name}.yml").is_file(),
-        "definition": definition.model_dump(mode="json", exclude_none=True),
+        "definition": definition.to_yaml(),
     }
 
 

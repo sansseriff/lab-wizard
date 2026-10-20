@@ -48,7 +48,7 @@ A file declares:
 
 | Name | Is |
 |---|---|
-| `Params` | a pydantic model of its settings, every field with a default. They become the project's `measurement.params` |
+| `Params` | a pydantic model of its settings, every field with a default. They become a custom measurement project's `measurement.params` |
 | `Resources` | a `@dataclass(frozen=True)`: one field per instrument role, typed by the behavior it needs, and a `params` field. Frozen, because a project's setup narrows each role to its instrument's class, which type checkers allow only for a field that cannot be reassigned |
 | `measure(resources, run)` *or* `build_procedure(resources)` | what one run does: plain Python recording rows through `run`, or a step tree |
 | `PLOTS` (optional) | plot specs, as a procedure's `plots:` — what the Data page and the live views draw |
@@ -177,14 +177,16 @@ before anything is built: if the YAML and the setup disagree (a role rebound
 by hand to a different kind of instrument), the run refuses to start and says
 which role.
 
-A composed procedure lives in the YAML too, in a `procedure:` block beside
-`measurement.params`: edit either, and `<name>_measurement.py` is built again
-from them before the next run, or with `wizard regenerate`. See
+A composed procedure lives in the YAML too, in a `procedure:` block, and its
+params' values with it: each param's `default` is what the project's runs use.
+Edit it, and `<name>_measurement.py` is built again from it before the next
+run, or with `wizard regenerate`. See
 [Generated code](../concepts/procedures.md#generated-code-and-editing-it).
 
 So a rack readdressed, or a bench setting changed, in Manage Instruments reaches
 every project that uses it without regenerating. The measurement's own params
-(`measurement.params`) stay frozen in the project. A project must run from inside
+(in `procedure.params`, or a custom measurement's `measurement.params`) stay
+frozen in the project. A project must run from inside
 its workspace, and says so if it is not. Removing an instrument in Manage
 Instruments lists the projects that use it first.
 

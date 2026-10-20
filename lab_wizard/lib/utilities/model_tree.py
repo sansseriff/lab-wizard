@@ -47,6 +47,8 @@ class SetupBinding(BaseModel):
 
 
 class MeasurementConfig(BaseModel):
+    """A custom measurement's settings. A procedure's are in its ``procedure:`` block."""
+
     params: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -122,12 +124,23 @@ class ProjectConfig(BaseModel):
     # that takes several. The setup file says what class each one is.
     roles: dict[str, RoleBinding | list[RoleBinding]] = Field(default_factory=dict)
     # A composed procedure's definition, as a procedure file has it: its roles,
-    # params (types, units, defaults), step tree, derived columns and plots.
-    # The one place a project's procedure is edited; <name>_measurement.py is
+    # params (types, units, values), step tree, derived columns and plots.
+    # The one place a project's procedure and its params are edited: each
+    # param's default is the value its runs use. <name>_measurement.py is
     # built from it (lab_wizard.lib.project). None for a custom measurement.
     procedure: dict[str, Any] | None = None
     # A custom resource file names its instruments here instead of by role.
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _params_in_one_place(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("procedure") is not None and "measurement" in data:
+            raise ValueError(
+                "a procedure's params are set in procedure.params, as each param's default; "
+                "remove the measurement: section"
+            )
+        return data
 
     @property
     def measurement_type(self) -> str:

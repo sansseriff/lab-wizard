@@ -1,7 +1,7 @@
 """A generated project, as its setup file runs it.
 
 A project's YAML says *which* instrument fills each role (``roles:``) and its
-params; its setup file says *what class* each role is, in a ``Resources``
+params (:func:`project_params`); its setup file says *what class* each role is, in a ``Resources``
 dataclass whose fields are typed by the driver behind them — ``Sim928``, or
 ``RemoteCounter`` for an instrument reached through a server. :class:`Project`
 joins the two, one visible step at a time, so the setup's ``__main__`` reads
@@ -52,9 +52,16 @@ from lab_wizard.lib.task_adapters.run import run_procedure
 from lab_wizard.lib.utilities.model_tree import ProjectConfig, RoleBinding, _find_attribute_path, load_project_config
 from lab_wizard.lib.utilities.python_formatting import format_python_code
 
-__all__ = ["Project", "RoleMismatch", "build_measurement_module", "measurement_module"]
+__all__ = ["Project", "RoleMismatch", "build_measurement_module", "measurement_module", "project_params"]
 
 R = TypeVar("R")
+
+
+def project_params(config: ProjectConfig) -> dict[str, Any]:
+    """A project's params' values: its procedure's defaults, or a custom measurement's ``measurement.params``."""
+    if config.procedure is not None:
+        return ProcedureDefinition.model_validate(config.procedure).param_defaults()
+    return config.measurement.params
 
 
 class RoleMismatch(TypeError):
@@ -104,7 +111,7 @@ class Project:
         for field in dataclasses.fields(cls):  # type: ignore[arg-type]
             hint = hints[field.name]
             if field.name == "params":
-                values["params"] = hint.model_validate(self.config.measurement.params)
+                values["params"] = hint.model_validate(project_params(self.config))
                 continue
             binding = self.config.roles.get(field.name)
             if binding is None:

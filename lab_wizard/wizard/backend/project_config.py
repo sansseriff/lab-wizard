@@ -8,8 +8,10 @@ fresh at the start of every run, so editing it never means regenerating:
                          setup's fields fills each of the procedure's needs.
                          The setup itself (its fields, the device mounted in
                          it) is in the lab database and is edited there.
-``measurement.params``   the measurement's settings, checked against its
-                         params model (``param.bias.settle_s`` on the Data page).
+params                   the measurement's settings (``param.bias.settle_s``
+                         on the Data page): a procedure's are its params'
+                         defaults in ``procedure.params``, a custom
+                         measurement's are in ``measurement.params``.
 ``outputs:``             files and the live plot.
 
 The page edits these as fields or as the whole YAML; either way the result is
@@ -34,7 +36,8 @@ from lab_wizard.lib.custom_measurements import load_custom_measurement
 from lab_wizard.lib.data.schema import open_database
 from lab_wizard.lib.task_adapters.run import resolve_setup
 from lab_wizard.lib.procedures.definition import ProcedureDefinition
-from lab_wizard.lib.project import build_measurement_module
+from lab_wizard.lib.procedures.definition import set_param_values
+from lab_wizard.lib.project import build_measurement_module, project_params
 from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.utilities.model_tree import ProjectConfig
 from lab_wizard.wizard.backend.project_generation import commented_params
@@ -65,7 +68,7 @@ def _yaml_path(project_dir: Path) -> Path:
 
 
 def _params_model(project_dir: Path, project: ProjectConfig, config_dir: Path) -> type[BaseModel] | None:
-    """The model ``measurement.params`` must fit, or ``None`` if it cannot be found."""
+    """The model the project's params must fit, or ``None`` if it cannot be found."""
     name = project.project.measurement_type
     try:
         if project.project.kind == "custom":
@@ -99,7 +102,8 @@ def _check(data: Any, project_dir: Path, config_dir: Path) -> ProjectConfig:
         except ProcedureError as e:
             raise ProjectConfigError([{"path": ["procedure"], "message": problem} for problem in e.problems]) from e
     model = _params_model(project_dir, project, config_dir)
-    if model is not None:
+    # A procedure's params are checked with it: each default against its type.
+    if model is not None and project.procedure is None:
         try:
             model.model_validate(project.measurement.params)
         except ValidationError as e:
@@ -128,7 +132,7 @@ def read_project(projects_dir: Path, config_dir: Path, name: str) -> dict[str, A
         # The procedure's needs, {name: {unit, description}}, for the setup's
         # fields to be bound to.
         "needs": (project.procedure or {}).get("needs") or {},
-        "params": project.measurement.params,
+        "params": project_params(project),
         "outputs": project.outputs.model_dump(mode="json"),
         # For the page to render and check the params form; None if unknown.
         "params_schema": model.model_json_schema() if model is not None else None,
@@ -163,6 +167,23 @@ def check_setup(project_dir: Path, db: Path) -> None:
         resolve_setup(connection, project.setup, project.procedure)
     finally:
         connection.close()
+
+
+def _set_params(document: Any, params: dict[str, Any], model: type[BaseModel] | None) -> None:
+    """Write ``params`` where the project keeps them: into its procedure, or ``measurement.params``."""
+    if document.get("procedure") is None:
+        document.setdefault("measurement", {})["params"] = commented_params(params, model)
+        return
+    if model is not None:
+        # Checked whole first, so a wrong value is reported at its own path.
+        try:
+            params = model.model_validate(params).model_dump(mode="json")
+        except ValidationError as e:
+            raise ProjectConfigError(_problems(e, ["procedure", "params"])) from e
+    try:
+        set_param_values(document["procedure"].setdefault("params", {}), params)
+    except ValueError as e:
+        raise ProjectConfigError([{"path": ["procedure", "params"], "message": str(e)}]) from e
 
 
 def save_project(
@@ -207,8 +228,7 @@ def save_project(
         if "setup" in body:
             document["setup"] = body["setup"]
         if "params" in body:
-            model = _params_model(project_dir, ProjectConfig.model_validate(yaml.safe_load(path.read_text(encoding="utf-8"))), config_dir)
-            document.setdefault("measurement", {})["params"] = commented_params(body["params"], model)
+            _set_params(document, body["params"], _params_model(project_dir, current, config_dir))
         if "outputs" in body:
             document["outputs"] = body["outputs"]
         buffer = io.StringIO()

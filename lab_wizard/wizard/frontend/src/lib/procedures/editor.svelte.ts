@@ -56,6 +56,13 @@ export class ProcedureEditor {
 
 	constructor(catalog: Catalog, definition: Definition, origin: Origin, loadedName: string | null) {
 		this.catalog = catalog;
+		// A procedure is sent as its file has it, which may leave these out.
+		definition = {
+			...definition,
+			description: definition.description ?? '',
+			roles: definition.roles ?? {},
+			params: definition.params ?? {}
+		};
 		this.definition = definition;
 		this.origin = origin;
 		this.loadedName = loadedName;
@@ -92,7 +99,9 @@ export class ProcedureEditor {
 		this.checking = true;
 		try {
 			const result = await unwrap<CheckResult>(
-				api.POST('/api/procedures/check', { body: { definition: $state.snapshot(this.definition) } })
+				api.POST('/api/procedures/check', {
+					body: { definition: $state.snapshot(this.definition) }
+				})
 			);
 			// An answer about an older edit would mark problems that are already fixed.
 			if (generation !== this.#generation) return;

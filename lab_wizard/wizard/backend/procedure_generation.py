@@ -14,7 +14,7 @@ from typing import Any
 
 from ruamel.yaml import YAML
 
-from lab_wizard.lib.procedures.definition import ProcedureDefinition
+from lab_wizard.lib.procedures.definition import ProcedureDefinition, carry_param_values
 from lab_wizard.lib.procedures.storage import load_procedure
 from lab_wizard.lib.project import build_measurement_module
 from lab_wizard.wizard.backend.models import FilledReq
@@ -66,7 +66,8 @@ def update_project_procedure(config_dir: Path, project_dir: Path) -> Path:
     """Replace a project's ``procedure:`` block with its procedure as the workspace has it now.
 
     A project keeps the procedure it was generated with until asked; this is
-    the asking. Everything else in its YAML, and the comments in it, stay; its
+    the asking. Its params keep their values where the new procedure has the
+    same param; everything else in its YAML, and the comments in it, stay. Its
     measurement module is built again from the new block.
     """
     yaml_path = project_dir / f"{project_dir.name}.yaml"
@@ -74,7 +75,9 @@ def update_project_procedure(config_dir: Path, project_dir: Path) -> Path:
     rt.default_flow_style = False
     document = rt.load(yaml_path.read_text(encoding="utf-8"))
     definition = load_procedure(config_dir, document["project"]["measurement_type"])
-    document["procedure"] = definition.model_dump(mode="json", exclude_none=True)
+    procedure = definition.to_yaml()
+    carry_param_values((document.get("procedure") or {}).get("params") or {}, procedure["params"])
+    document["procedure"] = procedure
     with yaml_path.open("w", encoding="utf-8") as handle:
         rt.dump(document, handle)
     build_measurement_module(project_dir, force=True)

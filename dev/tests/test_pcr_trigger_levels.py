@@ -29,6 +29,7 @@ from lab_wizard.lib.procedures.storage import load_procedure, save_procedure
 from lab_wizard.lib.workspace import initialize_workspace
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
+from lab_wizard.lib.procedures.definition import set_param_values
 
 TRIGGERS = [-25.0, -90.0, -110.0, -130.0, -150.0, -170.0]
 BIASES = [round(0.0015 * i, 4) for i in range(20)]  # 0 .. 0.0285 V, below switching
@@ -65,9 +66,7 @@ def _run(workspace: Any, rig, procedure: str) -> None:
     path = Path(out["yaml_file"])
     yaml = YAML(typ="rt")
     data = yaml.load(path.read_text())
-    params = data["measurement"]["params"]
-    params["bias"]["settle_s"] = 0.0
-    params["readout"]["gate_time_s"] = 0.02
+    set_param_values(data["procedure"]["params"], {"bias": {"settle_s": 0.0}, "readout": {"gate_time_s": 0.02}})
     with path.open("w") as f:
         yaml.dump(data, f)
     setup = Path(out["setup_file"])

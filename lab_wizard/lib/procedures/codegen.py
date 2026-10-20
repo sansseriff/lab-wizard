@@ -6,7 +6,7 @@ built again whenever it changes (``lab_wizard.lib.project``), so it is never
 edited by hand and never out of date. It holds:
 
 * the params classes (typed fields, no defaults: the values are the project's,
-  in ``measurement.params`` of the same YAML) and ``<Name>Resources``, a frozen
+  its params' defaults in the same ``procedure:`` block) and ``<Name>Resources``, a frozen
   dataclass with one field per role typed by the behavior it needs;
 * ``build_<name>_procedure(resources)``, the step tree;
 * the hash of the ``procedure:`` block it was built from, to notice a change.
@@ -78,7 +78,7 @@ def params_models_source(
     tree: ParamTree,
     root_class: str,
     imports: set[tuple[str, str]],
-    doc: str = "The params of one run. Their values are the project's, in measurement.params of its YAML.",
+    doc: str = "The params of one run. Their values are the project's, in procedure.params of its YAML.",
 ) -> str:
     """Pydantic classes for a param tree, innermost first, ``root_class`` last.
 

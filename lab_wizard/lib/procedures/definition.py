@@ -11,16 +11,22 @@ adds what its data layer reads:
   of its setup (``dev/plans/setup_plan.md``), and ``setup("name")`` reads it;
 
 and checks roles against the registered instrument behaviors.
+
+In a project's YAML the ``procedure:`` block is also where its params' values
+live: each param's ``default`` is the value the project's runs use
+(:func:`set_param_values`, :func:`carry_param_values`).
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lab_procedure import ProcedureDefinition as BaseProcedureDefinition
 from lab_procedure import ProcedureError
+from lab_procedure.definition import ParamTree
 from lab_procedure.schema import StepPath
 
 from lab_wizard.lib.data.expressions import (
@@ -33,7 +39,7 @@ from lab_wizard.lib.data.expressions import (
 from lab_wizard.lib.data.plot import PlotSpec
 
 
-__all__ = ["NeedDecl", "ProcedureDefinition"]
+__all__ = ["NeedDecl", "ProcedureDefinition", "carry_param_values", "set_param_values"]
 
 # Names a role cannot take, because the generated code already uses them.
 _RESERVED_ROLES = {"resources", "project"}
@@ -80,6 +86,14 @@ class ProcedureDefinition(BaseProcedureDefinition):
             if name in _RESERVED_ROLES:
                 raise ValueError(f"Role {name!r} is reserved by the generated code")
         return roles
+
+    def to_yaml(self) -> dict[str, Any]:
+        """This procedure as a file or a project's ``procedure:`` block holds it.
+
+        What was written, and nothing more: a field left out of the source is
+        left out here, and takes its default from the code wherever it is read.
+        """
+        return self.model_dump(mode="json", exclude_unset=True)
 
     def role_behaviors(self) -> dict[str, type]:
         """``{role: behavior class}``. Raises if a behavior is not registered."""
@@ -165,6 +179,44 @@ class ProcedureDefinition(BaseProcedureDefinition):
             if not problems:
                 problems.append(str(exc))
         return problems
+
+
+def set_param_values(params: MutableMapping[str, Any], values: Mapping[str, Any], path: str = "") -> None:
+    """Write ``values`` into a ``params:`` block, in place, as each param's ``default``.
+
+    ``values`` is nested like the block (``{"bias": {"settle_s": 0.1}}``); a
+    param it leaves out keeps its value. Each value is written as given and
+    checked when the block is. A name the block lacks is a ``ValueError``.
+    """
+    for name, value in values.items():
+        entry = params.get(name)
+        if not isinstance(entry, MutableMapping):
+            raise ValueError(f"no param {path}{name}")
+        if isinstance(entry.get("type"), str):
+            entry["default"] = value
+        elif isinstance(value, Mapping):
+            set_param_values(entry, value, f"{path}{name}.")
+        else:
+            raise ValueError(f"{path}{name} is a group of params, not one")
+
+
+def carry_param_values(old: Mapping[str, Any], new: MutableMapping[str, Any]) -> None:
+    """Keep ``old``'s values in ``new``, a ``params:`` block replacing it, in place.
+
+    Each param in both, of the same type, keeps its old value; the rest take
+    ``new``'s. Every value is written out, so the project states each one. For
+    a project taking a newer version of its procedure.
+    """
+    try:
+        before = ParamTree.parse(dict(old))
+    except ValueError:
+        before = ParamTree({})  # old values that do not parse are not worth keeping
+    for dotted, decl in ParamTree.parse(dict(new)).leaves():
+        kept = before.find(dotted)
+        entry: Any = new
+        for part in dotted.split("."):
+            entry = entry[part]
+        entry["default"] = kept.default if kept is not None and kept.type == decl.type else decl.default
 
 
 def _names(text: str) -> set[str]:

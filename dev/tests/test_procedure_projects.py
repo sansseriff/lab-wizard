@@ -42,6 +42,11 @@ from lab_wizard.wizard.backend.procedure_generation import (
 )
 from lab_wizard.wizard.backend.regenerate import RegenerateError, regenerate_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest, SelectedResource
+from lab_wizard.lib.procedures.definition import set_param_values
+from lab_wizard.lib.project import project_params
+from lab_wizard.lib.utilities.model_tree import ProjectConfig
+from lab_wizard.lib.procedures.storage import BUILTIN_DIR
+from lab_wizard.wizard.backend.project_config import ProjectConfigError, save_project
 
 DEVICE = SnspdParams()
 SWEEP_V = [0.0, 0.012, 0.02, 0.024, 0.028]
@@ -154,7 +159,9 @@ def test_the_generated_project_carries_the_preset_and_the_procedure(tmp_path: Pa
     out = _generate(tmp_path, rig)
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
     assert payload["project"]["measurement_type"] == "composed_pcr"
-    assert payload["measurement"]["params"]["bias"]["sweep"] == {"mode": "explicit", "values": SWEEP_V}
+    # The preset's values are the procedure's params' defaults; there is no other copy.
+    assert "measurement" not in payload
+    assert payload["procedure"]["params"]["bias"]["sweep"]["default"] == {"mode": "explicit", "values": SWEEP_V}
 
     module_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
     assert "def build_composed_pcr_procedure(resources: ComposedPcrResources)" in module_text
@@ -199,7 +206,7 @@ def test_the_generated_setup_runs_as_a_script(tmp_path: Path, rig):
 def test_without_a_preset_the_definitions_defaults_are_used(tmp_path: Path, rig):
     out = _generate(tmp_path, rig, preset=None)
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
-    assert payload["measurement"]["params"]["readout"] == {"gate_time_s": 1.0, "threshold_mV": -50.0}
+    assert project_params(ProjectConfig.model_validate(payload))["readout"] == {"gate_time_s": 1.0, "threshold_mV": -50.0}
 
 
 def test_the_generated_params_model_matches_the_definitions(tmp_path: Path, rig):
@@ -233,9 +240,11 @@ def _edit_yaml(path: Path, edit: Any) -> None:
 def test_the_project_yaml_carries_its_procedure_and_the_module_is_built_from_it(tmp_path: Path, rig):
     out = _generate(tmp_path, rig)
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
-    expected = ProcedureDefinition.model_validate(PCR_DEFINITION).model_dump(mode="json", exclude_none=True)
+    expected = ProcedureDefinition.model_validate(PCR_DEFINITION).to_yaml()
+    # The procedure as written, with the preset's values as its params' defaults.
+    set_param_values(expected["params"], project_params(ProjectConfig.model_validate(payload)))
     assert payload["procedure"] == expected
-    assert list(payload) == ["project", "run", "setup", "roles", "procedure", "measurement", "outputs"]
+    assert list(payload) == ["project", "run", "setup", "roles", "procedure", "outputs"]
 
     module_text = Path(out["measurement_file"]).read_text(encoding="utf-8")
     assert "DEFINITION" not in module_text  # the YAML is the one copy
@@ -300,11 +309,71 @@ def test_updating_from_the_procedure_replaces_only_the_procedure_block(tmp_path:
     after = YAML(typ="safe").load(yaml_path.read_text(encoding="utf-8"))
     assert '"type": "retry"' in json.dumps(after["procedure"])
     assert {k: v for k, v in after.items() if k != "procedure"} == {k: v for k, v in before.items() if k != "procedure"}
+    # The project's values survive the newer procedure, whose own defaults differ.
+    assert project_params(ProjectConfig.model_validate(after)) == project_params(ProjectConfig.model_validate(before))
     assert "Retry(" in Path(out["measurement_file"]).read_text(encoding="utf-8")
 
     setup, measurement = _load_setup(out)
     resources = _resources(setup, out)
     assert ProcedureRunner().run(measurement.build_composed_pcr_procedure(resources)) is Status.SUCCESS
+
+
+def _param_leaves(params: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for name, entry in params.items():
+        if isinstance(entry.get("type"), str):
+            out[name] = entry
+        else:
+            out.update({f"{name}.{k}": v for k, v in _param_leaves(entry).items()})
+    return out
+
+
+def test_the_project_states_every_params_value_even_one_new_to_its_procedure(tmp_path: Path, rig):
+    """The YAML is all the measurement module needs: no value is left to a default elsewhere."""
+    out = _generate(tmp_path, rig)
+    payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
+    assert all("default" in leaf for leaf in _param_leaves(payload["procedure"]["params"]).values())
+
+    newer = deepcopy(PCR_DEFINITION)
+    newer["params"]["readout"]["holdoff_s"] = {"type": "float", "unit": "s"}  # no default written
+    save_procedure(tmp_path / "config", ProcedureDefinition.model_validate(newer))
+    update_project_procedure(tmp_path / "config", Path(out["project_dir"]))
+
+    payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
+    leaves = _param_leaves(payload["procedure"]["params"])
+    assert leaves["readout.holdoff_s"]["default"] == 0.0
+    assert all("default" in leaf for leaf in leaves.values())
+
+
+@pytest.mark.parametrize("name", ["iv_curve", "mcr_curve", "pcr_curve", "pcr_trigger_levels"])
+def test_a_procedure_is_written_back_as_it_was_written(name: str):
+    """Nothing is added on the way through: no default the source left out."""
+    source = YAML(typ="safe").load((BUILTIN_DIR / f"{name}.yml").read_text(encoding="utf-8"))
+    assert ProcedureDefinition.model_validate(source).to_yaml() == source
+
+
+def test_the_run_pages_params_are_saved_into_the_procedure_block(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
+    project_dir = Path(out["project_dir"])
+    projects_dir, config_dir = project_dir.parent, tmp_path / "config"
+
+    saved = save_project(projects_dir, config_dir, project_dir.name, {"params": {"readout": {"gate_time_s": 0.5}}})
+    assert saved["params"]["readout"]["gate_time_s"] == 0.5
+    assert saved["params"]["bias"]["settle_s"] == 0.0  # the preset's, untouched
+    payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
+    assert payload["procedure"]["params"]["readout"]["gate_time_s"]["default"] == 0.5
+    assert "measurement" not in payload
+
+    with pytest.raises(ProjectConfigError) as caught:
+        save_project(projects_dir, config_dir, project_dir.name, {"params": {"readout": {"gate_time_s": "soon"}}})
+    assert caught.value.problems[0]["path"] == ["procedure", "params", "readout", "gate_time_s"]
+
+
+def test_a_procedure_project_refuses_a_second_copy_of_its_params(tmp_path: Path, rig):
+    out = _generate(tmp_path, rig)
+    _edit_yaml(Path(out["yaml_file"]), lambda doc: doc.update(measurement={"params": {}}))
+    with pytest.raises(ValueError, match="procedure.params"):
+        Project.load(out["project_dir"])
 
 
 def test_wizard_regenerate_writes_the_setups_roles_from_the_yaml(tmp_path: Path, rig):
@@ -341,5 +410,6 @@ def test_the_built_in_pcr_curve_takes_a_preset(tmp_path: Path, rig):
         ),
     )
     payload = YAML(typ="safe").load(Path(out["yaml_file"]).read_text(encoding="utf-8"))
-    assert payload["measurement"]["params"]["readout"]["gate_time_s"] == 0.25
-    assert payload["measurement"]["params"]["bias"]["settle_s"] == 0.05  # untouched default
+    params = project_params(ProjectConfig.model_validate(payload))
+    assert params["readout"]["gate_time_s"] == 0.25
+    assert params["bias"]["settle_s"] == 0.05  # untouched default

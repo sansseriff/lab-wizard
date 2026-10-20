@@ -44,6 +44,7 @@ from lab_wizard.lib.utilities.config_io import (
 )
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
+from lab_wizard.lib.procedures.definition import set_param_values
 
 # The bench's standard detector: its turn-on sits well inside its switching
 # current, so the sweep crosses the whole error function before it latches.
@@ -309,11 +310,10 @@ def _set_measurement_params(yaml_path: Path) -> None:
     with yaml_path.open("r", encoding="utf-8") as handle:
         payload = io.load(handle)
 
-    params = payload["measurement"]["params"]
-    params["bias"]["sweep"] = {"mode": "explicit", "values_V": list(SWEEP_V)}
-    params["bias"]["settle_s"] = 0.0
-    params["readout"]["gate_time_s"] = GATE_TIME_S
-    params["readout"]["threshold_mV"] = THRESHOLD_MV
+    set_param_values(payload["procedure"]["params"], {
+        "bias": {"sweep": {"mode": "explicit", "values_V": list(SWEEP_V)}, "settle_s": 0.0},
+        "readout": {"gate_time_s": GATE_TIME_S, "threshold_mV": THRESHOLD_MV},
+    })
 
     with yaml_path.open("w", encoding="utf-8") as handle:
         io.dump(payload, handle)

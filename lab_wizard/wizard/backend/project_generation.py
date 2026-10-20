@@ -18,7 +18,7 @@ from lab_wizard.lib.utilities.config_io import (
 )
 from lab_wizard.lib.custom_measurements import CustomMeasurement
 from lab_wizard.lib.procedures.codegen import measurement_module_source
-from lab_wizard.lib.procedures.definition import ProcedureDefinition
+from lab_wizard.lib.procedures.definition import ProcedureDefinition, set_param_values
 from lab_wizard.lib.project_module import module_path
 from lab_wizard.lib.data.schema import open_database
 from lab_wizard.lib.data.setups import resolve_needs, setup_for_run
@@ -319,7 +319,7 @@ def _default_project_yaml(
     procedure: dict[str, Any] | None = None,
     setup: SetupBinding | None = None,
 ) -> dict[str, Any]:
-    payload = {
+    payload: dict[str, Any] = {
         "project": _project_info(measurement_name, kind),
         # Who ran it, and why; recorded with every run.
         "run": {"operator": None, "notes": None},
@@ -327,26 +327,27 @@ def _default_project_yaml(
         # setup's fields fills each of the procedure's needs. The setup's
         # fields and mounted device are copied into each run when it starts.
         "setup": (setup or SetupBinding()).model_dump(mode="json"),
-        "measurement": {
-            # Written with each param's unit and description as a comment, as
-            # instrument configs are, when the params model is known.
-            "params": commented_params(params, params_model),
-        },
-        # What a run produces besides its database record, read each time it
-        # starts: files (laid out by the workspace's data.yaml), and a live
-        # plot for a run started from a terminal (none | window | web).
-        "outputs": (outputs or OutputsConfig()).model_dump(mode="json"),
         # Which instrument fills each role: its name in this workspace's
         # config/instruments, or {instrument, server} for one on a server. The
         # setup file says what class each is.
         "roles": roles,
     }
-    if procedure is None:
-        return payload
-    # The procedure, in the file that holds its params' values: edit it here, and
-    # <name>_measurement.py is built again from it before the next run.
-    ordered = {key: payload[key] for key in ("project", "run", "setup", "roles")}
-    return {**ordered, "procedure": procedure, **{k: v for k, v in payload.items() if k not in ordered}}
+    if procedure is not None:
+        # The procedure, params and all: each param's default is the value
+        # this project's runs use. Edit it here, and <name>_measurement.py is
+        # built again from it before the next run.
+        payload["procedure"] = procedure
+    else:
+        payload["measurement"] = {
+            # Written with each param's unit and description as a comment, as
+            # instrument configs are, when the params model is known.
+            "params": commented_params(params, params_model),
+        }
+    # What a run produces besides its database record, read each time it
+    # starts: files (laid out by the workspace's data.yaml), and a live plot
+    # for a run started from a terminal (none | window | web).
+    payload["outputs"] = (outputs or OutputsConfig()).model_dump(mode="json")
+    return payload
 
 
 def _refuse_embedded_through_server(style: str, selections: list[Any]) -> None:
@@ -373,7 +374,7 @@ def _refuse_embedded_through_server(style: str, selections: list[Any]) -> None:
 def _params_for(
     config_dir: Path, measurement: str, preset: str | None, model: type | None
 ) -> dict[str, Any] | None:
-    """A project's initial ``measurement.params``: a preset, or ``None`` for defaults."""
+    """A project's initial params' values: a preset, or ``None`` for defaults."""
     if preset is None:
         return None
 
@@ -451,9 +452,11 @@ def generate_project(
     # A procedure's definition, as the project's YAML carries it; the module is
     # built from exactly this, so its recorded hash matches from the start.
     procedure = (
-        measurement.model_dump(mode="json", exclude_none=True) if isinstance(measurement, ProcedureDefinition) else None
+        measurement.to_yaml() if isinstance(measurement, ProcedureDefinition) else None
     )
     if procedure is not None:
+        # Its params' values are its params' defaults: a preset's, if one was picked.
+        set_param_values(procedure["params"], params)
         measurement_source = format_python_code(measurement_module_source(measurement, procedure))
     else:
         # A custom measurement's module is its own file, copied as it is.

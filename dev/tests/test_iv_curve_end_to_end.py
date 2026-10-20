@@ -37,6 +37,7 @@ from lab_wizard.lib.data.setups import save_setup
 from lab_wizard.lib.utilities.config_io import load_instruments
 from lab_wizard.wizard.backend.procedure_generation import generate_procedure_project
 from lab_wizard.wizard.backend.project_generation import GenerateProjectRequest
+from lab_wizard.lib.procedures.definition import set_param_values
 
 # The detector under test, and the sweep that walks across its transition.
 DEVICE = SnspdParams(
@@ -88,9 +89,11 @@ def _set_measurement_params(yaml_path: Path) -> None:
         payload = io.load(handle)
 
     payload["setup"] = {"name": "bench", "needs": {"bias_resistance": "bias_resistor"}}
-    params = payload["measurement"]["params"]
-    params["bias"]["sweep"] = {"mode": "explicit", "values_V": list(SWEEP_V)}
-    params["bias"]["settle_s"] = 0.0
+    set_param_values(
+        payload["procedure"]["params"],
+        # SWEEP_V as one leg: the procedure plots by leg, so its sweep stays waypoints.
+        {"bias": {"sweep": {"mode": "waypoints", "points": [SWEEP_V[0], SWEEP_V[-1]], "step": 0.005}, "settle_s": 0.0}},
+    )
 
     with yaml_path.open("w", encoding="utf-8") as handle:
         io.dump(payload, handle)
@@ -226,7 +229,10 @@ def test_a_there_and_back_sweep_shows_the_hysteresis_leg_by_leg(tmp_path: Path, 
     yaml = YAML(typ="rt")
     yaml_path = Path(out["yaml_file"])
     payload = yaml.load(yaml_path.read_text(encoding="utf-8"))
-    payload["measurement"]["params"]["bias"]["sweep"] = {"mode": "waypoints", "points": [0.0, 0.06, 0.0], "step": 0.005}
+    set_param_values(
+        payload["procedure"]["params"],
+        {"bias": {"sweep": {"mode": "waypoints", "points": [0.0, 0.06, 0.0], "step": 0.005}}},
+    )
     with yaml_path.open("w", encoding="utf-8") as handle:
         yaml.dump(payload, handle)
     # Regenerated code for this definition passes the sweep's legs to Sweep.
