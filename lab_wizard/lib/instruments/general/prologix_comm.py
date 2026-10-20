@@ -53,6 +53,22 @@ class PrologixControllerDep(Dependency):
         self.write_instrument(address, command)
         return self.serial_dep.readline()
 
+    def query_block_instrument(self, address: int, command: str) -> bytes:
+        """Query for an IEEE-488.2 definite-length block (``#<n><len><data>``).
+
+        Reads exactly ``len`` data bytes, so a block whose data holds its own
+        newlines comes back whole, then consumes the terminator that follows.
+        Returns the data alone, or whatever arrived instead of a block header.
+        """
+        self.write_instrument(address, command)
+        header = self.serial_dep.read(2)
+        if len(header) < 2 or header[:1] != b"#" or not header[1:2].isdigit():
+            return header + self.serial_dep.readline()
+        length = int(self.serial_dep.read(int(header[1:2])) or 0)
+        data = self.serial_dep.read(length)
+        self.serial_dep.readline()
+        return data
+
     def addressed(self, address: int) -> "PrologixAddressedInstrumentDep":
         return PrologixAddressedInstrumentDep(self, address)
 
@@ -75,3 +91,6 @@ class PrologixAddressedInstrumentDep(Dependency):
 
     def query(self, command: str) -> bytes:
         return self.controller.query_instrument(self.address, command)
+
+    def query_block(self, command: str) -> bytes:
+        return self.controller.query_block_instrument(self.address, command)

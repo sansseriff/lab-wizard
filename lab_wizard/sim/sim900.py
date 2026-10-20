@@ -42,6 +42,12 @@ logger = logging.getLogger("lab_wizard.sim.sim900")
 # ``CONN <slot>, "<escape>"`` — how a SIM900 is told to route the GPIB
 # connection into one module until the escape string comes back.
 _CONN_RE = re.compile(r'^CONN\s+(\d+)\s*,\s*"([^"]*)"$', re.IGNORECASE)
+# The buffered-port commands: send a line to a slot, ask how many reply bytes
+# it has waiting, fetch them, flush them.
+_SNDT_RE = re.compile(r'^SNDT\s+(\d+)\s*,\s*"([^"]*)"$', re.IGNORECASE)
+_NINP_RE = re.compile(r"^NINP\?\s+(\d+)$", re.IGNORECASE)
+_GETN_RE = re.compile(r"^GETN\?\s+(\d+)\s*,\s*(\d+)$", re.IGNORECASE)
+_FLSH_RE = re.compile(r"^FLSH(?:\s+(\d+))?$", re.IGNORECASE)
 # Prologix controller commands are the ones starting with ``++``.
 _CONTROLLER_RE = re.compile(r"^\+\+(\w+)\s*(.*)$")
 
@@ -176,6 +182,8 @@ class Sim900(LineDevice):
         self.modules = modules
         self._connected_slot: int | None = None
         self._escape = ""
+        # Replies to SNDT, held per slot until GETN? collects them.
+        self._port_output: dict[int, bytes] = {}
 
     def handle(self, line: str) -> Optional[str]:
         if self._connected_slot is not None:
@@ -197,9 +205,38 @@ class Sim900(LineDevice):
             return None
         if line.upper() == "*IDN?":
             return SIM900_IDN
+        port_reply = self._port_command(line)
+        if port_reply is not False:
+            return port_reply
 
         logger.warning("SIM900: unrecognised mainframe command %r", line)
         return None
+
+
+    def _port_command(self, line: str) -> Optional[str] | bool:
+        """SNDT / NINP? / GETN? / FLSH, or ``False`` if ``line`` is none of them."""
+        if match := _SNDT_RE.match(line):
+            slot = int(match.group(1))
+            module = self.modules.get(slot)
+            reply = module.handle(match.group(2)) if module is not None else None
+            if reply is not None:
+                self._port_output[slot] = self._port_output.get(slot, b"") + reply.encode() + b"\r\n"
+            return None
+        if match := _NINP_RE.match(line):
+            return str(len(self._port_output.get(int(match.group(1)), b"")))
+        if match := _GETN_RE.match(line):
+            slot, count = int(match.group(1)), int(match.group(2))
+            waiting = self._port_output.get(slot, b"")
+            data, self._port_output[slot] = waiting[:count], waiting[count:]
+            # A definite-length block, as the real mainframe sends it.
+            return f"#3{len(data):03d}" + data.decode()
+        if match := _FLSH_RE.match(line):
+            if match.group(1) is None:
+                self._port_output.clear()
+            else:
+                self._port_output.pop(int(match.group(1)), None)
+            return None
+        return False
 
 
 class GpibBus:

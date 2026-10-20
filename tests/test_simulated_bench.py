@@ -163,15 +163,13 @@ def test_drivers_speak_the_real_sim900_wire_protocol(rig) -> None:
         "VOLT 0.250",
         "esc",
     ]
-    # Sim970Channel reads twice per measurement (settle, then read) and
-    # addresses hardware channels 1-based.
+    # Sim970Channel reads through the mainframe's port buffer — flush, send,
+    # ask what is waiting, fetch it — and addresses hardware channels 1-based.
     assert sent[6:] == [
-        'CONN 2, "esc"',
-        "VOLT? 1",
-        "esc",
-        'CONN 2, "esc"',
-        "VOLT? 1",
-        "esc",
+        "FLSH 2",
+        'SNDT 2,"VOLT? 1"',
+        "NINP? 2",
+        "GETN? 2,15",
     ]
 
 

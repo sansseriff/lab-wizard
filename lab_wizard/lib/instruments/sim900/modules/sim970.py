@@ -19,8 +19,8 @@ class Sim970ChannelParams(BaseModel):
 
     attribute_name: str = ""
     settling_time: float = Field(
-        default=0.1,
-        description="(seconds)",
+        default=0.6,
+        description="(seconds) wait before each reading; at least two ~0.3 s conversions",
     )
     max_retries: int = 3
 
@@ -68,9 +68,12 @@ class Sim970Channel(VSense):
             return float(np.random.uniform())
         channel_scpi = self.channel_index + 1  # hardware channels are 1-based
         cmd = f"VOLT? {channel_scpi}"
-        volts = self._dep.query(cmd)  # type: ignore[attr-defined]
+        # The SIM970 converts continuously, each conversion averaging ~0.3 s,
+        # and VOLT? answers at once with the last one finished — repeated if
+        # none newer has. A reading taken sooner than two conversions after a
+        # change averages over the change or predates it, so wait first.
         time.sleep(self.settling_time)
-        volts = self._dep.query(cmd)  # type: ignore[attr-defined]
+        volts = self._dep.query_port(cmd)
         try:
             return float(volts)
         except ValueError:

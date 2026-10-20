@@ -368,4 +368,4 @@ def test_pedagogical_embedded_trims_selected_channel_payload(tmp_path: Path) -> 
     ast.parse(setup_text)
     assert ".channels[1]" in setup_text
     # Only the selected channel's params are embedded.
-    assert setup_text.count("'settling_time': 0.1") == 1
+    assert setup_text.count("'settling_time': 0.6") == 1

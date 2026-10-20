@@ -67,7 +67,7 @@ def test_edit_uses_full_path_and_writes_only_selected_file(config):
     assert selection(config)[1]["fields"]["channels"]["0"]["settling_time"] == 0.42
     assert (
         selection(config, "/dev/ttyUSB0")[1]["fields"]["channels"]["0"]["settling_time"]
-        == 0.1
+        == 0.6
     )
     assert "settling_time: 0.42" in result["yaml"]
     assert "# (seconds)" in result["yaml"]
@@ -250,7 +250,7 @@ def test_reset_and_remove_use_selected_path_with_repeated_slot_hashes(config):
         fields["channels"]["0"]["settling_time"] = 0.75
         update_instrument_params(config, path, fields, node["fields"])
     reinitialize_instrument(config, "sim970", second_path[-1]["key"], path=second_path)
-    assert selection(config)[1]["fields"]["channels"]["0"]["settling_time"] == 0.1
+    assert selection(config)[1]["fields"]["channels"]["0"]["settling_time"] == 0.6
     assert (
         selection(config, "/dev/ttyUSB0")[1]["fields"]["channels"]["0"]["settling_time"]
         == 0.75
