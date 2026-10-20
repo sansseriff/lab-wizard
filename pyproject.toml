@@ -6,22 +6,15 @@ requires-python = ">=3.13"
 dependencies = ["lab-wizard", "lab-procedure", "ruamel-yaml>=0.18.16"]
 
 
-[build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "setuptools.build_meta"
-
-[tool.setuptools]
-packages = ["lab_wizard"]
-
 [tool.uv]
-package = true
+# The root is only the workspace that ties lab_wizard and procedure_framework
+# together; lab_wizard installs the `wizard` command. Not building the root
+# keeps setuptools from writing an egg-info folder into it.
+package = false
 # Older Linux (glibc 2.17, e.g. RHEL/CentOS 7) has no prebuilt wheels for these
 # packages' newer releases, so uv would try to compile them from source. These
 # caps keep them at releases that ship manylinux2014 wheels for Python 3.13.
 constraint-dependencies = ["numpy<2.3", "contourpy<1.3.3", "matplotlib<3.12", "pyzmq<27"]
-
-[project.scripts]
-wizard = "lab_wizard.wizard.cli:main"
 
 [tool.uv.workspace]
 members = ["lab_wizard", "procedure_framework"]
@@ -45,6 +38,10 @@ extra-paths = ["procedure_framework"]
 [tool.pytest.ini_options]
 # ref/ holds vendored projects with test suites of their own.
 testpaths = ["tests"]
+cache_dir = ".cache/pytest"
+
+[tool.ruff]
+cache-dir = ".cache/ruff"
 
 [tool.ty.src]
 # ref/ holds vendored and legacy reference code, not this project's source.

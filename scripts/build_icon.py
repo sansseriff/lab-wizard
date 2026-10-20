@@ -1,4 +1,4 @@
-"""Render the app icon from `logo-appicon.svg`.
+"""Render the app icon from the frontend's `src/lib/assets/logo-appicon.svg`.
 
 macOS does not round app icons — the app supplies the shape — so the icon has to
 be drawn as a rounded square with real transparency outside it. A bare
@@ -18,8 +18,8 @@ line up with every other app in the Dock.
 Usage:
     python scripts/build_icon.py
 
-Writes `icon.png` at the repo root and copies it to the frontend's static
-directory, from which the build carries it into `backend/static`.
+Writes `icon.png` to the frontend's static directory, from which the build
+carries it into `backend/static`.
 """
 
 from __future__ import annotations
@@ -34,11 +34,9 @@ from PIL import Image, ImageDraw
 
 
 REPO = Path(__file__).resolve().parent.parent
-SOURCE_SVG = REPO / "logo-appicon.svg"
-TARGETS = [
-    REPO / "icon.png",
-    REPO / "lab_wizard" / "wizard" / "frontend" / "static" / "icon.png",
-]
+FRONTEND = REPO / "lab_wizard" / "wizard" / "frontend"
+SOURCE_SVG = FRONTEND / "src" / "lib" / "assets" / "logo-appicon.svg"
+TARGETS = [FRONTEND / "static" / "icon.png"]
 
 SIZE = 1024
 # Supersample the mask before downscaling; drawing the rounded rect at final

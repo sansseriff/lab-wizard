@@ -1,6 +1,6 @@
 # Lab Wizard
 
-<img src="icon.png" alt="Lab Wizard icon" width="72" />
+<img src="lab_wizard/wizard/frontend/static/icon.png" alt="Lab Wizard icon" width="72" />
 
 Lab Wizard is an experiment setup toolkit for SNSPD measurement workflows.
 It combines:

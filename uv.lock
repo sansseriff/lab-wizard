@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'linux'",
@@ -736,7 +736,7 @@ requires-dist = [
 [[package]]
 name = "lab-wizard-repo"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "lab-procedure" },
     { name = "lab-wizard" },

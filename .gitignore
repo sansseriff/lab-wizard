@@ -3,7 +3,10 @@ pyleco/
 
 # macOS metadata
 .DS_Store
-*/.DS_Store
+
+# Tool caches (zensical, pytest, ruff) and the built docs site
+.cache/
+/dev/site/
 
 ref/
 
@@ -20,8 +23,6 @@ logs/
 # Python bytecode / caches
 **/__pycache__/
 *.py[cod]
-
-
 .pytest_cache/
 
 
