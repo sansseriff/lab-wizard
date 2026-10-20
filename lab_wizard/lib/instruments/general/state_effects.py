@@ -25,7 +25,7 @@ by :func:`collect_query_methods`, so a behavior ABC declares its getters once
 and every driver inherits them. The list is deliberately an allowlist: anything
 undeclared counts as a write. ``_state_methods_`` cannot stand in for it, because
 it lists only *safety-relevant* state changes, and most mutating methods are
-absent from it. See ``plans/server_plan.md`` 9.2.
+absent from it. See ``dev/plans/server_plan.md`` 9.2.
 
 This module is deliberately dependency-free and lives in the instrument layer,
 so instruments never import server code. The server's permission gate imports

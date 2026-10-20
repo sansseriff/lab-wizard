@@ -4,7 +4,7 @@ Each facet is a ``(key, value, num)`` row: ``("device.type", "SNSPD-A", None)``,
 ``("param.readout.gate_time_s", "1.0", 1.0)``. They are generated from the run's
 own record, so a new instrument type or param becomes a filter the first time a
 run uses it, and a facet only ever describes the runs that have it. See
-``plans/semantic_data_plan.md`` §8.
+``dev/plans/semantic_data_plan.md`` §8.
 """
 
 from __future__ import annotations

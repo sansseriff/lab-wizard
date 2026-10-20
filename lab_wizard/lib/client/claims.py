@@ -1,6 +1,6 @@
 """Claim the instruments a run drives through a server.
 
-The client half of ``plans/server_plan.md`` Phase 9. For the length of a run it:
+The client half of ``dev/plans/server_plan.md`` Phase 9. For the length of a run it:
 
 1. asks each server for a claim on the instruments routed to it — all of them,
    or none, across every server;

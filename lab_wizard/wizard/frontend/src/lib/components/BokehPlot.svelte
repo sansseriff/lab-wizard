@@ -2,7 +2,7 @@
 	/** Draws series (as `to_series` gives them) with BokehJS on a WebGL canvas.
 	 *
 	 * The one plot component: the Data page draws recorded runs with it, and a
-	 * live view will draw a run in progress with it (plans/runner_plan.md §5),
+	 * live view will draw a run in progress with it (dev/plans/runner_plan.md §5),
 	 * so a plot looks the same either way. It rebuilds the figure only when the
 	 * plot's shape changes (axes, kind, which lines); new values for the same
 	 * lines replace the data in place, so a zoom survives a running run's

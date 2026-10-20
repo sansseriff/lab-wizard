@@ -1,4 +1,4 @@
-/** A setup's fields, and the needs a procedure binds to them (plans/setup_plan.md). */
+/** A setup's fields, and the needs a procedure binds to them (dev/plans/setup_plan.md). */
 import { isQuantity } from '$lib/data/model';
 import { compatible } from './units';
 

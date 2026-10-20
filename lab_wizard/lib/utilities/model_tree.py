@@ -36,7 +36,7 @@ class SetupBinding(BaseModel):
     The setup is named, not copied: its fields, and the device mounted in it,
     live in the lab database and are copied into each run when it starts. So
     changing the setup never means editing a project, and a run always
-    records what the setup said at the time (``plans/setup_plan.md``).
+    records what the setup said at the time (``dev/plans/setup_plan.md``).
     """
 
     model_config = ConfigDict(json_schema_serialization_defaults_required=True)

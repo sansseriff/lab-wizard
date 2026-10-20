@@ -462,7 +462,7 @@ class InstrumentRegistry:
             inst://sim970/channel/2    -> inst://rack/mainframe/sim970 (SIM970 declares nothing)
 
         See :mod:`lab_wizard.lib.instruments.general.transport` and
-        ``plans/server_plan.md`` 9.1.
+        ``dev/plans/server_plan.md`` 9.1.
         """
         body = path[len(PATH_PREFIX):] if path.startswith(PATH_PREFIX) else path
         segments = [s for s in body.split("/") if s]

@@ -1,7 +1,7 @@
 /** The Data page's model: what the lab database API returns, and the pure
  * functions the page is built from (filters, plot specs, the timeline).
  *
- * See plans/semantic_data_plan.md §8 (filters) and §11 (plot specs), and
+ * See dev/plans/semantic_data_plan.md §8 (filters) and §11 (plot specs), and
  * lab_wizard/wizard/backend/data_api.py for the API itself.
  */
 import type { PlotDecl } from '$lib/procedures/model';

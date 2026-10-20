@@ -3,7 +3,7 @@
     python -m lab_wizard.wizard.backend.openapi > lab_wizard/wizard/frontend/src/lib/api/openapi.json
 
 ``bun run api`` in the frontend does this and regenerates ``schema.d.ts`` from
-it; ``tests/test_api_schema.py`` fails when the committed schema is stale.
+it; ``dev/tests/test_api_schema.py`` fails when the committed schema is stale.
 """
 
 from __future__ import annotations

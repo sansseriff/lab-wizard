@@ -8,7 +8,7 @@ adds what its data layer reads:
 * ``derived`` — columns computed from the recorded ones when read;
 * ``needs`` — facts about the setup its derived columns read, such as the bias
   resistor a current is inferred through. A measurement binds each to a field
-  of its setup (``plans/setup_plan.md``), and ``setup("name")`` reads it;
+  of its setup (``dev/plans/setup_plan.md``), and ``setup("name")`` reads it;
 
 and checks roles against the registered instrument behaviors.
 """

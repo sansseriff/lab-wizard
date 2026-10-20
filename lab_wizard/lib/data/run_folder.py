@@ -12,7 +12,7 @@
       plot.png          optionally, the run's default plot
 
 The folder is a complete copy of the run's rows in the lab database
-(``plans/semantic_data_plan.md`` §7, D15). One writer serves a live run
+(``dev/plans/semantic_data_plan.md`` §7, D15). One writer serves a live run
 (:class:`~lab_wizard.lib.savers.file_saver.FileSaver`) and a recorded one
 (:func:`export_run`), so the two produce the same files.
 

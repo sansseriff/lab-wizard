@@ -30,7 +30,7 @@ class Attenuator(InstrumentBehavior, specificity=TERMINAL):
 
     Wavelength is **not** here. It is a fact about the bench — which laser is
     plugged in — so it belongs in each driver's params, not in a contract a
-    procedure sweeps. See ``plans/procedure_plan.md`` 2.1.
+    procedure sweeps. See ``dev/plans/procedure_plan.md`` 2.1.
 
     **Safe state is declared here**, not in whatever step happens to guard a
     run: shutter closed, attenuation at maximum. :meth:`enter_safe_state` is

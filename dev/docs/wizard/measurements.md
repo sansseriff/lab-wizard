@@ -1,0 +1,377 @@
+---
+icon: lucide/flask-conical
+---
+
+# Measurements
+
+The **Measurements** section is the core wizard workflow. It opens on the
+projects this workspace has generated (`/measurements`). **New measurement**
+picks something to run (`/measurements/new`), binds each role it needs to a
+configured instrument and chooses what its runs produce
+(`/measurements/resources`), and generates a runnable project folder. A
+project's name opens `/measurements/run`, which sets it up, runs it, and shows
+it live ([The Run page](#the-run-page)).
+
+What you pick from is a list of [procedures](procedures.md) — the ones built
+into lab_wizard (`iv_curve`, `pcr_curve`, `mcr_curve`) and this workspace's own
+— and this workspace's [custom measurements](#custom-measurements). Each has
+roles to fill and parameters to set.
+
+This page explains how the matching and code generation work.
+
+![Choosing what to run](../assets/screenshots/measurements-choose.webp)
+
+## How a measurement declares what it needs
+
+A procedure declares its **roles**, each with the behavior it needs
+(`voltage_source: {behavior: VSource}`); every role is an instrument
+requirement.
+
+A custom measurement declares them as the fields of its `Resources`
+dataclass, typed by behavior (`voltage_source: VSource`); `list[T]` fields are
+recognized, and `params` is not a role.
+
+## Custom measurements
+
+For what a composed procedure cannot say — a search that decides where to
+measure next, a loop that stops on a condition — a measurement can be written
+in Python. It is one file in the workspace's `measurements/` folder, and the
+wizard offers it beside the procedures (marked *custom*). A new workspace
+starts with two examples there, which are also the documentation:
+
+- **`bias_sweep.py`** — the smallest complete one, built from existing steps.
+- **`find_switching_voltage.py`** — written as `measure(resources, run)`, a
+  plain Python loop: it raises the bias until the detector switches, then
+  stops.
+
+A file declares:
+
+| Name | Is |
+|---|---|
+| `Params` | a pydantic model of its settings, every field with a default. They become the project's `measurement.params` |
+| `Resources` | a `@dataclass(frozen=True)`: one field per instrument role, typed by the behavior it needs, and a `params` field. Frozen, because a project's setup narrows each role to its instrument's class, which type checkers allow only for a field that cannot be reassigned |
+| `measure(resources, run)` *or* `build_procedure(resources)` | what one run does: plain Python recording rows through `run`, or a step tree |
+| `PLOTS` (optional) | plot specs, as a procedure's `plots:` — what the Data page and the live views draw |
+
+Its first docstring line is its description in the wizard. A file whose name
+starts with `_` is a helper, not a measurement, and a file that does not load
+is listed with the reason.
+
+In `measure`, `run` records the data ([`recording.py`](../../../lab_wizard/lib/recording.py)):
+
+```python
+for bias in biases:
+    source.set_voltage(bias)
+    run.sleep(settle_s)                      # stops promptly when the run is stopped
+    with run.at(bias_voltage=bias):          # the parameters these rows were taken at
+        run.row(sense_voltage=sense.get_voltage())   # one call, one row
+```
+
+The same calls work in a script or a notebook, outside any project, with
+`with record_run("quick_iv", device="A7") as run:`; the run is recorded in the
+workspace's lab database like any other. From there a custom measurement is
+like any other: its project copies the file, and every run is recorded, saved
+and plotted the same way. See
+[`custom_measurements.py`](../../../lab_wizard/lib/custom_measurements.py).
+
+## Matching resources to requirements
+
+![Binding roles to instruments, with one counter marked as in use by a running measurement](../assets/screenshots/measurements-bind.webp)
+
+`GET /api/get-resources/{name}` returns, for each requirement, the candidates the
+user can pick from:
+
+```mermaid
+graph LR
+    REQ["Requirement<br/>e.g. voltage_source: VSource"] --> LOCAL["Local matches<br/>discover_matching_instruments"]
+    REQ --> REMOTE["Remote matches<br/>list_remote_attributes"]
+```
+
+- **Instruments** are matched by **class hierarchy**:
+  [`discover_matching_instruments`](../../../lab_wizard/wizard/backend/get_measurements.py)
+  imports every class under `lib/instruments` and keeps the ones that are a
+  subclass of the required behavior ABC. So a `VSource` requirement offers
+  `Sim928`, `Dac4DChannel`, etc. — and crucially, it offers the **configured
+  instances** of those from your tree.
+- **Remote instruments** matching the requirement's behavior ABC are pulled from
+  registered [remote servers](../remote/operations.md) and offered alongside
+  local ones (matched by `behavior_abc` name).
+
+This is the answer to *"how are instruments chosen for measurements based on
+generic instruments?"*: the measurement asks for a **behavior** (the generic ABC),
+and the wizard offers every configured instrument that **is-a** that behavior.
+
+## Binding a procedure's needs to a setup
+
+A procedure can also need facts about the bench to draw its plots: `iv_curve`
+infers its current through the bias resistor, so it declares a need
+`bias_resistance` in ohms. The same page that binds roles to instruments picks
+the **setup** the measurement runs on, and binds each need to one of that
+setup's fields: a search over the setup's fields lists those that read in the
+need's unit first, with their values, and greys out the rest with why. A field
+the setup does not have yet can be added from there. A need of the same name
+as a field that fits is bound already.
+
+This is the same move as roles: the procedure names what it needs, abstractly,
+and the measurement says which real thing fills it. Two setups that spell the
+field differently (`bias_resistor`, `r_bias`) are each bound once.
+
+## Generating the project
+
+`POST /api/create-measurement-project` (→
+[`generate_measurement_project`](../../../lab_wizard/wizard/backend/project_generation.py))
+does three things:
+
+1. **Writes a project YAML**: which instrument fills each role and where it
+   lives (`roles:`), a `run:` block, the setup and its bindings (`setup:`), the `outputs:` chosen, and the
+   measurement's params. Instrument settings are not copied: a run reads them
+   from the workspace's config, so readdressing a rack there reaches every
+   project.
+2. **Writes the setup file**
+   ([`setup_generation.py`](../../../lab_wizard/wizard/backend/setup_generation.py)):
+   the class behind each role, and the run lifecycle. The embedded style writes
+   a different setup file; see below.
+3. **Copies the measurement source** into the project, as
+   `<name>_measurement.py`. The setup loads it by its path, so edits made
+   inside the project are the code that runs.
+
+The project folder is timestamped, e.g. `projects/iv_curve_20260528_143012/`,
+containing `<folder>.yaml`, `<name>_setup.py`, and `<name>_measurement.py`.
+The module carries the `_measurement` suffix because a script's own folder
+comes first on Python's import path: a measurement saved as plain `queue.py`
+beside the setup would be what every `import queue` in the run found, the
+standard library's included. No standard module ends in `_measurement`.
+See [`project_module.py`](../../../lab_wizard/lib/project_module.py).
+
+### What a project contains
+
+A project names its instruments and copies none of their settings. Its YAML
+says which instrument fills each role, by `attribute_name`, and where it lives:
+
+```yaml
+roles:
+  voltage_source: sim928-brave-otter                              # this workspace's config/instruments
+  counter: {instrument: counter-quiet-lynx, server: cryo-rack}    # a server in config/remote/servers.yaml
+```
+
+The setup file says what **class** each role is, by narrowing the measurement's
+`Resources` — so an editor follows every role to the code that will run, and a
+type checker knows exactly what the measurement is handed:
+
+```python
+@dataclass(frozen=True)
+class Resources(measurement.IvCurveResources):
+    # wizard:roles:start
+    voltage_source: Sim928
+    counter: RemoteCounter  # through cryo-rack, where it is a Keysight53220AChannel
+    # wizard:roles:end
+```
+
+An instrument on this workspace is typed by its driver; one reached through a
+server by the proxy the run is actually handed, with the server's own class
+noted beside it. Its `__main__` is the run lifecycle, one visible call per step
+([`project.py`](../../../lab_wizard/lib/project.py)): claim the racks it opens,
+build each role's instrument, claim the ones on servers, baseline, run, make
+safe on failure, release. Every role is checked against its declared class
+before anything is built: if the YAML and the setup disagree (a role rebound
+by hand to a different kind of instrument), the run refuses to start and says
+which role.
+
+A composed procedure lives in the YAML too, in a `procedure:` block beside
+`measurement.params`: edit either, and `<name>_measurement.py` is built again
+from them before the next run, or with `wizard regenerate`. See
+[Generated code](../concepts/procedures.md#generated-code-and-editing-it).
+
+So a rack readdressed, or a bench setting changed, in Manage Instruments reaches
+every project that uses it without regenerating. The measurement's own params
+(`measurement.params`) stay frozen in the project. A project must run from inside
+its workspace, and says so if it is not. Removing an instrument in Manage
+Instruments lists the projects that use it first.
+
+Each instrument can come from this workspace directly, or **through this
+workspace's server** — the same instruments, used through the process that owns
+them instead of opened by the project. When a local selection conflicts with a
+rack the server holds, the warning offers that switch.
+
+### Generation styles
+
+| Style | What it writes | When to use |
+|---|---|---|
+| `production` (default) | instruments by name, as above | always, unless you need the escape hatch |
+| `pedagogical_embedded` | a setup file that says everything and reads nothing | reading exactly how a run is put together, or running outside any workspace. Does not follow later changes to the workspace's config; cannot use an instrument through a server |
+
+An **embedded** setup file is written to be read. Every instrument on the way to
+the ones a run uses is constructed on the page, parent before child
+(`PrologixGPIB.from_params(...)`, `Sim900.from_parent(...)`, …), from settings
+written out as constructor calls with each field's description as a comment.
+The roles are typed by the classes they are (`voltage_source: Sim928`), and the
+params (`PARAMS`), the run's details (`RUN`), the database (`DATABASE`) and what
+else the run produces (`SINKS`) are values in the file. Nothing is read from the
+workspace or the project's YAML when it runs — the YAML only says what the
+project is — so the Run page shows no settings for it: edit the file. See
+[`embedded_generation.py`](../../../lab_wizard/wizard/backend/embedded_generation.py).
+
+**Custom resources** (Instruments → Custom resources) follow the same two
+styles, for the same reasons: a production file names its instruments and
+resolves them against the tree that owns them, and the embedded one constructs
+them itself.
+
+### Outputs
+
+Every run is recorded in the lab database; that is not a choice. What else a
+run produces is, and it lives in the project YAML so it can be changed without
+regenerating:
+
+```yaml
+outputs:
+  files: true       # also save each run as a folder of files
+  live_plot: web    # web | window | none: how a run started from a terminal is drawn
+  plot: ""          # which of the procedure's plots: to draw; empty for the first
+```
+
+- **`files`** is on by default. Where the folders go and how they are named is
+  the workspace's choice, under Settings → [Saving files](data.md#saving-files).
+- **`live_plot`** only matters for a run started from a terminal; a project
+  created in the wizard starts with `web`. `window`
+  opens a matplotlib window at the lab computer; `web` opens the live plot page
+  in a window, or, over SSH, prints a link and the tunnel command that reaches
+  it. That page shows the plots and the run's timeline, not the wizard. Both
+  run in processes of their own and read the run from the lab database as it
+  records, so closing one never stops the run. A run started from the
+  wizard is drawn on the [Run page](#the-run-page) instead.
+
+### Instruments a run is holding
+
+An instrument a running measurement has claimed is marked **in use** in the
+picker, with who holds it; a claim on part of an instrument — one input of a
+counter — reads *part in use*. Binding one is still allowed, because the run may
+well be over before this project is run; what cannot happen is the two holding
+it at once. See [run claims](../remote/operations.md).
+
+### Procedures and presets
+
+A [procedure](../concepts/procedures.md) can start from a named **params
+preset** from `config/measurements/<name>/`, copied into the project when it is
+generated.
+
+## Running the generated project
+
+```bash
+cd projects/iv_curve_20260528_143012
+uv run iv_curve_setup.py             # local: loads the project YAML
+uv run iv_curve_setup.py --remote tcp://lab-server:12300   # remote
+```
+
+The template's `__main__` block picks local resources, a per-attribute
+`CompositeResources`, or the all-remote override, then hands the run to
+[`RunLifecycle`](../../../lab_wizard/lib/task_adapters/lifecycle.py). The same
+procedure works in each mode because measurements consume behavior ABCs, which
+both local instruments and [remote proxies](../remote/architecture.md) satisfy.
+Rows flow through the procedure data bus to the lab database and to whatever
+the project's [`outputs:`](#outputs) asks for.
+
+### Every run is recorded
+
+A run started from a project is recorded in the workspace's lab database,
+`data/lab.db`: the run itself, one row per point, every step it executed, what
+each instrument was configured with, and the procedure definition it ran. A
+project outside any workspace records into its own `data/lab.db` instead. The
+database does not need to be configured or selected.
+
+What the run is *about* comes from the setup it runs on, named in the project
+YAML's `setup:` block, and who ran it from the `run:` block. Both are read at
+the start of every run:
+
+```yaml
+run:
+  operator: andrew
+  notes: first cooldown after rewiring
+setup:
+  name: mid-ir-bench                # on the Setups page: its fields, pictures, mounted device
+  needs:                            # which of its fields fills each of the procedure's needs
+    bias_resistance: channel2.bias_resistor
+```
+
+The setup itself lives in the lab database and is edited on the **Setups**
+page. Each run copies its fields and records its mounted device as the device
+under test, so editing a setup changes the next run and never a past one, and
+every field is something the Data page can filter runs by. A procedure need
+that is unbound, or bound to a field that is not a number in its unit, stops
+the run before it starts.
+
+Every run goes through the same steps, in this order:
+
+1. **Claim.** Every exclusive transport this process will open is leased for
+   the length of the run, and every instrument server on the machine is asked
+   whether it already holds one. Either refusal stops the run with the holder's
+   name, before any instrument is opened.
+2. **Resolve, then claim what is routed.** The instruments are constructed —
+   only now, because opening a serial-backed rack before claiming it is the race
+   claims exist to close. Instruments that live on a server are then claimed
+   *there*, so two runs cannot drive the same remote instrument at once. Those
+   claims are renewed for the length of the run and released at the end; see
+   [run claims](../remote/operations.md#several-runs-on-one-server-claims).
+3. **Baseline.** `apply_baseline()` writes each bound instrument's configured
+   bench settings (coupling, impedance, wavelength, …), so a setting an earlier
+   experiment changed cannot carry into this one.
+4. **Run** the measurement.
+5. **Safe state, if the run failed.** On a failure, an abort, an exception or
+   Ctrl-C, each instrument that declares a safe state is put in it — a source to
+   0 V and off, an attenuator shutter-closed at maximum attenuation. A run that
+   completes is left where its own procedure ended it, so a choice like the IV
+   curve's `turn_off_at_end: false` is honoured.
+6. **Release** the claims, always.
+
+The script exits non-zero when the run does not succeed.
+
+## The projects list
+
+`/measurements`, the section's first page, lists every project this workspace has generated,
+newest first: what it measures, what it is bound to, what its runs produce, and
+when it was made.
+
+![The projects list, with two generated projects and what each is bound to](../assets/screenshots/projects.webp)
+
+A project's name opens it on the Run page. A project is also a folder you can
+run from a terminal, which is what makes it inspectable and editable.
+
+## The Run page
+
+`/measurements/run?project=<name>` is one page for the loop of running a
+measurement: change something, run, look, change it again.
+
+**Left, what the next run will be**, as fields or as the project's YAML (the
+same file; switching saves). Everything here is read by the run when it
+starts, so nothing is regenerated:
+
+- **Setup** — the setup it runs on, the device mounted in it, and the setup's
+  fields the procedure reads, each bound to its need and editable in place.
+  Changing one changes the setup (the bench changed, not one project) and is
+  saved with the project. The setup's other fields are listed below, and are
+  edited on the Setups page.
+- **This run** — the operator and notes. Operators this lab has used are
+  suggested.
+- **Parameters** — a form built from the measurement's params model: numbers
+  are checked as they are typed, and a sweep's mode switches its fields.
+- **Outputs** — files, and the live plot for runs started from a terminal.
+
+Save checks the whole file against the project's model; a problem is shown at
+the field it is about, and nothing is written until there is none.
+
+**Run** (or *Save and run*) starts the project's setup file as its own process,
+exactly as a terminal would — same claims, same lifecycle, same record — so
+the run survives the wizard closing. **Stop** is a Ctrl-C: the run aborts
+through its own guards and the instruments are put in their safe state.
+
+**Right, the run**: its status, a tab for each of its plots, and its timeline,
+all live. The timeline follows the newest step, and **Now** above it names the
+branch of the procedure the run is in (`source_guard › sweep[0] ›
+sequence#17 › wait[1]`). When nothing is running it shows the project's last
+run. If the run fails before it records anything, the output of its process is
+shown underneath.
+
+The live view reads the run from the lab database as it is recorded — every
+point and every step is committed as it happens — and the wizard pushes the
+changes to the page over a websocket. So the page can be opened, closed and
+reopened mid-run, and the standalone live page a web plotter opens is the same
+view.

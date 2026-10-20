@@ -37,7 +37,7 @@ extra-paths = ["procedure_framework"]
 
 [tool.pytest.ini_options]
 # ref/ holds vendored projects with test suites of their own.
-testpaths = ["tests"]
+testpaths = ["dev/tests"]
 cache_dir = ".cache/pytest"
 
 [tool.ruff]
@@ -45,4 +45,4 @@ cache-dir = ".cache/ruff"
 
 [tool.ty.src]
 # ref/ holds vendored and legacy reference code, not this project's source.
-exclude = ["ref", "site", "projects", "lab_wizard/wizard/frontend"]
+exclude = ["ref", "dev/site", "projects", "lab_wizard/wizard/frontend"]

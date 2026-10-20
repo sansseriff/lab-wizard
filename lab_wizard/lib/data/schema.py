@@ -2,10 +2,10 @@
 
 Only what every run or row has is a typed column; everything a procedure
 records lives in one JSON ``values`` object per row, so no procedure ever
-changes the schema. See ``plans/semantic_data_plan.md`` §3.
+changes the schema. See ``dev/plans/semantic_data_plan.md`` §3.
 
 ``setups`` holds each setup's current facts and the device mounted in it
-(``plans/setup_plan.md``). A run copies its setup's fields when it starts, into
+(``dev/plans/setup_plan.md``). A run copies its setup's fields when it starts, into
 ``runs.setup_fields``, with the measurement's bindings of its procedure's needs
 to those fields in ``runs.setup_needs``; nothing reads a setup again for a past
 run.

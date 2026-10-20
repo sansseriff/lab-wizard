@@ -1,7 +1,7 @@
 /** BokehJS, loaded on demand.
  *
  * BokehJS is a drawing library, not a server: the page hands it series and it
- * draws them on a WebGL canvas (the tag_gui pattern; plans/runner_plan.md §5).
+ * draws them on a WebGL canvas (the tag_gui pattern; dev/plans/runner_plan.md §5).
  * Its prebuilt bundles are pinned through npm and emitted by Vite as files of
  * this app, so nothing is fetched from the internet (the wizard runs on lab
  * computers that may have none) and only a page that draws pays the 1.5 MB.

@@ -6,7 +6,7 @@ For a notebook::
     runs = find(procedure="mcr_curve", **{"device.type": "SNSPD-A"})
     df = runs.points()          # polars: one row per point, with run_id
 
-Filters name facet keys (``plans/semantic_data_plan.md`` §8) and match their
+Filters name facet keys (``dev/plans/semantic_data_plan.md`` §8) and match their
 values exactly: a value, a list of values (any of them), or
 ``{"range": [lo, hi]}`` for a numeric facet, or for ``date`` with two ISO dates
 (``{"range": ["2026-09-01", "2026-09-30"]}``). Different keys must all match.

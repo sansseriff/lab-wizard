@@ -76,7 +76,7 @@ class SetThreshold(Step):
 
     A procedure that counts sets its own threshold rather than inheriting
     whatever the counter holds: on a server-held counter, "whatever it holds" is
-    what the previous client left. See ``plans/procedure_plan.md`` 0.8.
+    what the previous client left. See ``dev/plans/procedure_plan.md`` 0.8.
     """
 
     def __init__(

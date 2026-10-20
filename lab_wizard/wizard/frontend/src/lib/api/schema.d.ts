@@ -377,7 +377,7 @@ export interface paths {
          * @description Run claims held on every instrument server on this machine.
          *
          *     A claim is how a running measurement keeps other runs off the instruments
-         *     it drives (``plans/server_plan.md`` Phase 9), so this answers "why was my
+         *     it drives (``dev/plans/server_plan.md`` Phase 9), so this answers "why was my
          *     run refused" and "is something still holding that counter". A server that
          *     does not answer is reported rather than raised: one stopped daemon must not
          *     blank the page.
@@ -1906,7 +1906,7 @@ export interface components {
          *     The setup is named, not copied: its fields, and the device mounted in it,
          *     live in the lab database and are copied into each run when it starts. So
          *     changing the setup never means editing a project, and a run always
-         *     records what the setup said at the time (``plans/setup_plan.md``).
+         *     records what the setup said at the time (``dev/plans/setup_plan.md``).
          */
         "SetupBinding-Input": {
             /**
@@ -1926,7 +1926,7 @@ export interface components {
          *     The setup is named, not copied: its fields, and the device mounted in it,
          *     live in the lab database and are copied into each run when it starts. So
          *     changing the setup never means editing a project, and a run always
-         *     records what the setup said at the time (``plans/setup_plan.md``).
+         *     records what the setup said at the time (``dev/plans/setup_plan.md``).
          */
         "SetupBinding-Output": {
             /**

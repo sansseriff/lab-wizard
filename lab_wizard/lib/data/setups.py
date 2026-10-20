@@ -1,7 +1,7 @@
 """Setups: what an experiment is, now, and what a run needs from it.
 
 A setup is a named, long-lived description of one experiment
-(``plans/setup_plan.md``): free-form fields, and the device mounted in it.
+(``dev/plans/setup_plan.md``): free-form fields, and the device mounted in it.
 Fields nest in groups; a leaf is text, a number, true/false, a quantity
 (``{value: 100, unit: kΩ}``), or a picture (``{image: "<sha256>.jpg"}``, or a
 list of them), whose file is in ``<data_dir>/setup_images/``.

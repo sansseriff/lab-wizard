@@ -847,7 +847,7 @@
     "type": "object"
    },
    "SetupBinding-Input": {
-    "description": "The setup a measurement runs on, and which of its fields fills each need.\n\nThe setup is named, not copied: its fields, and the device mounted in it,\nlive in the lab database and are copied into each run when it starts. So\nchanging the setup never means editing a project, and a run always\nrecords what the setup said at the time (``plans/setup_plan.md``).",
+    "description": "The setup a measurement runs on, and which of its fields fills each need.\n\nThe setup is named, not copied: its fields, and the device mounted in it,\nlive in the lab database and are copied into each run when it starts. So\nchanging the setup never means editing a project, and a run always\nrecords what the setup said at the time (``dev/plans/setup_plan.md``).",
     "properties": {
      "name": {
       "anyOf": [
@@ -873,7 +873,7 @@
     "type": "object"
    },
    "SetupBinding-Output": {
-    "description": "The setup a measurement runs on, and which of its fields fills each need.\n\nThe setup is named, not copied: its fields, and the device mounted in it,\nlive in the lab database and are copied into each run when it starts. So\nchanging the setup never means editing a project, and a run always\nrecords what the setup said at the time (``plans/setup_plan.md``).",
+    "description": "The setup a measurement runs on, and which of its fields fills each need.\n\nThe setup is named, not copied: its fields, and the device mounted in it,\nlive in the lab database and are copied into each run when it starts. So\nchanging the setup never means editing a project, and a run always\nrecords what the setup said at the time (``dev/plans/setup_plan.md``).",
     "properties": {
      "name": {
       "anyOf": [
@@ -2402,7 +2402,7 @@
   },
   "/api/local-servers/claims": {
    "get": {
-    "description": "Run claims held on every instrument server on this machine.\n\nA claim is how a running measurement keeps other runs off the instruments\nit drives (``plans/server_plan.md`` Phase 9), so this answers \"why was my\nrun refused\" and \"is something still holding that counter\". A server that\ndoes not answer is reported rather than raised: one stopped daemon must not\nblank the page.",
+    "description": "Run claims held on every instrument server on this machine.\n\nA claim is how a running measurement keeps other runs off the instruments\nit drives (``dev/plans/server_plan.md`` Phase 9), so this answers \"why was my\nrun refused\" and \"is something still holding that counter\". A server that\ndoes not answer is reported rather than raised: one stopped daemon must not\nblank the page.",
     "operationId": "api_local_server_claims_api_local_servers_claims_get",
     "responses": {
      "200": {

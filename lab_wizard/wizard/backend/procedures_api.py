@@ -6,7 +6,7 @@ it may contain (the step and behavior catalogs), what is wrong with it (every
 problem, each with the path of the step it is about), and what it becomes (the
 generated Python). Saving goes through :func:`save_procedure`, which refuses a
 definition that does not check, so nothing the composer saves can fail to
-generate. See ``plans/procedure_plan.md`` Phase 4.
+generate. See ``dev/plans/procedure_plan.md`` Phase 4.
 """
 
 from __future__ import annotations

@@ -11,7 +11,7 @@ run to show: it opens its viewer, in a process of its own, when the run
 starts. That keeps drawing out of the process driving the instruments — a slow
 redraw can never delay a measurement, and a closed window never stops one —
 and it means the window, the web page and the wizard's Run page all show the
-same rows, computed the same way (``plans/runner_plan.md`` §7).
+same rows, computed the same way (``dev/plans/runner_plan.md`` §7).
 """
 
 from __future__ import annotations

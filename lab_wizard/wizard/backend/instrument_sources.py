@@ -134,7 +134,7 @@ def _claims_for(session: Session, name: str) -> list[dict[str, Any]]:
     """Run claims a server currently holds, as the picker's "busy" answer.
 
     A claim is a running measurement's exclusive hold on part of the tree
-    (``plans/server_plan.md`` Phase 9). Binding a claimed instrument is allowed
+    (``dev/plans/server_plan.md`` Phase 9). Binding a claimed instrument is allowed
     — the claim may well end before the new project runs — so this is shown as
     a warning, not a block. Never fatal: a server too old to know the RPC still
     lists its instruments.

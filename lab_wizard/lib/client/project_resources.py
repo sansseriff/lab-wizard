@@ -1,6 +1,6 @@
 """Where a generated project's instruments come from when it runs.
 
-A project carries no instrument params (``plans/procedure_plan.md`` 5.4). It
+A project carries no instrument params (``dev/plans/procedure_plan.md`` 5.4). It
 records, in ``roles:`` (a custom resource file: ``resources.instrument_sources``),
 the ``attribute_name`` of each instrument and where it lives — ``local``, or a server named in
 ``config/remote/servers.yaml`` — and resolves each one at run time against a

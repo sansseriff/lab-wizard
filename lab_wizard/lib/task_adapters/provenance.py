@@ -10,7 +10,7 @@ That is right for running, and thin for reading back. The config tree is edited
 between runs, so months later nothing says which calibration wavelength or
 which coupling a curve was taken at. This module takes that snapshot at run
 start, so the answer is stored with the data rather than inferred from a file
-that has since changed. See ``plans/procedure_plan.md`` 5.6.
+that has since changed. See ``dev/plans/procedure_plan.md`` 5.6.
 """
 
 from __future__ import annotations

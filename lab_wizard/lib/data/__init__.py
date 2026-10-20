@@ -6,7 +6,7 @@ Reading, for a notebook::
     runs = find(procedure="mcr_curve")
     df = runs.points()
 
-See ``plans/semantic_data_plan.md``.
+See ``dev/plans/semantic_data_plan.md``.
 """
 
 from lab_wizard.lib.data.expressions import ExpressionError, compile_expression, derive

@@ -2,7 +2,7 @@
 
 ``count_rate - mean(count_rate, phase == "background")`` is a background-
 subtracted rate; ``x / max(x)`` normalizes each run to its own peak. The
-language, completely (``plans/semantic_data_plan.md`` §10):
+language, completely (``dev/plans/semantic_data_plan.md`` §10):
 
 - numbers, strings, and column names (recorded or derived);
 - ``+ - * / **``, unary ``-``, parentheses;
@@ -12,7 +12,7 @@ language, completely (``plans/semantic_data_plan.md`` §10):
   ``and``, ``or``, ``not``;
 - ``param("bias.settle_s")``: the value a run's own params gave;
 - ``setup("bias_resistance")``: one of the procedure's needs, read from the
-  run's own copy of its setup in the need's unit (``plans/setup_plan.md``), so
+  run's own copy of its setup in the need's unit (``dev/plans/setup_plan.md``), so
   ``(bias_voltage - sense_voltage) / setup("bias_resistance")`` is a current in
   every run, whatever resistor each was taken with.
 

@@ -10,7 +10,7 @@ A behavior with no proxy resolves to ``RemoteOpaque``, which still works by
 reflective dispatch but loses the type identity — ``isinstance(p, Counter)``
 fails and an editor cannot autocomplete it. That is a deliberate fallback for
 instruments with no declared behavior, not a substitute for a proxy, so
-``tests/test_behaviors.py`` asserts every registered behavior is either covered
+``dev/tests/test_behaviors.py`` asserts every registered behavior is either covered
 here or listed as a considered exemption.
 """
 

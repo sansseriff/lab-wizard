@@ -1,7 +1,7 @@
 """Everything that consumes a run: the lab database first, then every sink.
 
 A run's messages — ``RunStarted``, each ``Point``, each step's start and end,
-``RunEnded`` (``plans/semantic_data_plan.md`` §4) — go to one
+``RunEnded`` (``dev/plans/semantic_data_plan.md`` §4) — go to one
 :class:`RunOutputs`, which hands each message to the database recorder first
 and then to every :class:`RunSink` in turn, with :class:`RunInfo` saying where
 the run is recorded. So a sink that needs the run's database id has it by the

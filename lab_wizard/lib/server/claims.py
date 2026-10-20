@@ -2,7 +2,7 @@
 
 Everything else on the server decides *which process* owns hardware. This decides
 *which run* may drive an instrument once several clients share one server. See
-``plans/server_plan.md`` Phase 9 for the rules; in short:
+``dev/plans/server_plan.md`` Phase 9 for the rules; in short:
 
 1. A claim on a path covers that path and everything under it.
 2. Claims held by different runs never overlap — an ancestor and a descendant

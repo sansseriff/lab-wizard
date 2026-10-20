@@ -6,7 +6,7 @@
 	 * timeline and its details. Choose several runs and they overlay. Anything
 	 * this page draws can be taken to a notebook, where the analysis this page
 	 * deliberately does not do (fits, arithmetic between runs) belongs.
-	 * See plans/semantic_data_plan.md Phase 7.
+	 * See dev/plans/semantic_data_plan.md Phase 7.
 	 */
 	import ScrollArea from '$lib/components/ScrollArea.svelte';
 	import '$lib/procedures/composer.css';

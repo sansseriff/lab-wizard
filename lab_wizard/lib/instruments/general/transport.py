@@ -41,7 +41,7 @@ without claiming the node itself? Declared on any params node, not only roots.
            call, and trigger and gate are methods on the counter, not on an
            input — so two runs can hold its two inputs at once.
 
-See ``plans/server_plan.md`` Phase 9.
+See ``dev/plans/server_plan.md`` Phase 9.
 
 Defaults are the conservative pair (``exclusive`` / ``inferred``), so a new
 instrument is safe until someone thinks about it.

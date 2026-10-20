@@ -352,7 +352,7 @@ class WireServer:
         """The configured params of the instrument at ``path``.
 
         Provenance, not control: a run records what its instruments were
-        configured with (``plans/procedure_plan.md`` 5.6), and through a server
+        configured with (``dev/plans/procedure_plan.md`` 5.6), and through a server
         the client has no other way to see it — the params live in the server's
         workspace. Read-only and static, so nothing is opened and no claim is
         needed. ``children`` is excluded: each instrument answers for itself.

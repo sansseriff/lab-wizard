@@ -2,7 +2,7 @@
 
 Generated projects call :func:`run_procedure` and nothing else, so what a run
 records and who listens to it can change here without regenerating a project.
-See ``plans/semantic_data_plan.md`` §4.
+See ``dev/plans/semantic_data_plan.md`` §4.
 
 A run started from a project is always recorded in the lab database: the
 workspace's ``<data_dir>/lab.db``, or, for a project outside any workspace, the
@@ -102,7 +102,7 @@ def project_outputs(project_dir: Path) -> list[RunSink]:
         sinks.append(FileSaver(root=root, path=files.path, plot_png=files.plot_png))
 
     if os.environ.get(LAUNCH_FILE_ENV):
-        pass  # the wizard's Run page draws it (plans/runner_plan.md R6)
+        pass  # the wizard's Run page draws it (dev/plans/runner_plan.md R6)
     elif outputs.live_plot == "window":
         sinks.append(MplPlotter(plot=outputs.plot))
     elif outputs.live_plot == "web":

@@ -5,7 +5,7 @@
 	 * resistor, the balun, the QCL power), pictures of it, and the device
 	 * mounted in it. Measurements name a setup; every run copies its fields when
 	 * it starts, so editing a setup here changes what the next run records and
-	 * never a run already taken (plans/setup_plan.md).
+	 * never a run already taken (dev/plans/setup_plan.md).
 	 */
 	import { onMount, untrack } from 'svelte';
 	import { page } from '$app/state';

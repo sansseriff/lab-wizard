@@ -106,7 +106,7 @@ class InstrumentBehavior(ABC):
         another client's — cannot carry into this one. It writes the
         *bench-wiring* params (coupling, impedance, wavelength, ...) and nothing
         else: outputs belong to the safe state, and a procedure's own values are
-        set by the procedure. See ``plans/procedure_plan.md`` 7.1.
+        set by the procedure. See ``dev/plans/procedure_plan.md`` 7.1.
 
         A driver with bench-wiring params overrides this. The default does
         nothing, which is correct for an instrument whose params are all

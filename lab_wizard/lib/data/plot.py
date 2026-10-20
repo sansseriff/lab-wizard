@@ -3,7 +3,7 @@
 The Data page, a live plotter and a notebook all draw through
 :func:`evaluate_plot`, so a plot looks the same while a run is going, after it
 has been recorded, and in the notebook it was exported to
-(``plans/semantic_data_plan.md`` §11).
+(``dev/plans/semantic_data_plan.md`` §11).
 
 A spec::
 
@@ -160,7 +160,7 @@ def default_plot(definition: dict[str, Any] | None, columns: list[str]) -> PlotS
 
     The procedure's first plot, if it declares one: with two sweeps, which one
     goes across and which becomes one line each is a choice the rows cannot
-    make (``plans/semantic_data_plan.md`` §9), so a procedure says it.
+    make (``dev/plans/semantic_data_plan.md`` §9), so a procedure says it.
 
     Otherwise a guess: the first recorded column against the innermost sweep,
     one line for each value of the sweep around it, so nested sweeps never

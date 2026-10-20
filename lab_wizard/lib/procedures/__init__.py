@@ -6,7 +6,7 @@ instrument steps and their schemas are in
 :mod:`lab_wizard.lib.task_adapters.instrument_steps`. Here: plots and derived
 columns on a definition, storage under ``config/procedures/``, and turning a
 definition into the Python a generated project runs — nothing here interprets
-YAML at run time. See ``plans/procedure_plan.md``.
+YAML at run time. See ``dev/plans/procedure_plan.md``.
 """
 
 # A definition can name lab_wizard's instrument steps once their module is imported.

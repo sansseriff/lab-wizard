@@ -74,7 +74,7 @@ class GenerateProjectRequest(BaseModel):
     selected_resources: list[SelectedResource] = Field(default_factory=list)
     project_prefix: str | None = None
     # ``production`` names each instrument; ``pedagogical_embedded`` writes
-    # every instrument's params into the file (plans/procedure_plan.md 5.10).
+    # every instrument's params into the file (dev/plans/procedure_plan.md 5.10).
     generation_style: GenerationStyle = "production"
     # A named preset from config/measurements/<measurement>/, copied into the
     # project's measurement.params. None means the measurement's own defaults.
@@ -281,7 +281,7 @@ def _resolve_instrument_selections(
         local_channels=local_channels,
         attribute_for=attribute_for,
         # Every named instrument, local ones included: a project resolves each
-        # attribute against the tree its source names (plans/procedure_plan.md 5.4).
+        # attribute against the tree its source names (dev/plans/procedure_plan.md 5.4).
         instrument_sources=owner,
         routed=routed,
     )

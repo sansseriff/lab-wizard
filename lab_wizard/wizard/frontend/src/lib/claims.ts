@@ -1,7 +1,7 @@
 /** What a run is holding, for the pickers that let you choose instruments.
  *
  * A **claim** is a running measurement's exclusive hold on part of a server's
- * tree (`plans/server_plan.md` Phase 9). `/api/instrument-sources` reports the
+ * tree (`dev/plans/server_plan.md` Phase 9). `/api/instrument-sources` reports the
  * claims each source's server holds, and tags each named leaf with who holds
  * it; what is left for the client is turning a tree position into the path a
  * claim names, which only the page drawing the tree knows.

@@ -82,7 +82,7 @@ def api_local_server_claims():
     """Run claims held on every instrument server on this machine.
 
     A claim is how a running measurement keeps other runs off the instruments
-    it drives (``plans/server_plan.md`` Phase 9), so this answers "why was my
+    it drives (``dev/plans/server_plan.md`` Phase 9), so this answers "why was my
     run refused" and "is something still holding that counter". A server that
     does not answer is reported rather than raised: one stopped daemon must not
     blank the page.
