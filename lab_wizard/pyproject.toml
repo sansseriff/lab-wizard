@@ -69,6 +69,9 @@ lab_wizard = [
     "lib/examples/measurements/*.py",
 ]
 
+# The only package that installs these commands. The repo root used to install
+# `wizard` too, and uninstalling it deletes the shared script; a change to this
+# file makes uv reinstall lab-wizard in the same sync, which puts it back.
 [project.scripts]
 wizard = "lab_wizard.wizard.cli:main"
 lab_wizard_server = "lab_wizard.lib.server.server:main"
