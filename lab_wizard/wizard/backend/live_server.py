@@ -14,6 +14,8 @@ until stopped, or until ``--linger`` seconds after the run ends.
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -74,7 +76,11 @@ def main(argv: list[str] | None = None) -> None:
         import webview  # type: ignore
 
         webview.create_window(f"Run {args.run}", url, width=1100, height=760)
-        webview.start()  # returns when the window is closed
+        # Linux installs only the Qt backend, as for the wizard's own window
+        # (main.py); pywebview would try GTK first. PYWEBVIEW_GUI still wins.
+        webview.start(  # returns when the window is closed
+            gui="qt" if sys.platform == "linux" and "PYWEBVIEW_GUI" not in os.environ else None
+        )
     else:
         ended_at: float | None = None
         while thread.is_alive():
